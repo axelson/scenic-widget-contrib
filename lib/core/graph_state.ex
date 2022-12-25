@@ -27,6 +27,11 @@ defmodule ScenicContrib.Utils.GraphState do
     Scenic.Scene.assign(scene, :state, state)
   end
 
+  def update_state_and_graph(%Scenic.Scene{} = scene, fun) when is_function(fun, 2) do
+    {state, %Scenic.Graph{} = graph} = fun.(scene.assigns.state, scene.assigns.state.graph)
+    assign_and_push_graph(scene, state, graph)
+  end
+
   def assign_and_push_graph(%Scenic.Scene{} = scene, state, graph) do
     state = %{state | graph: graph}
 
