@@ -1,4 +1,4 @@
-defmodule ScenicWidgets.GraphState do
+defmodule ScenicContrib.Utils.GraphState do
   @moduledoc """
   Facilitates the usage of a `%State{}` struct with a scene
 
