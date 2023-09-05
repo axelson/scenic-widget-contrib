@@ -7,6 +7,33 @@ defmodule ScenicWidgets.GraphTools.Upsertable do
   you would `add_to_graph/3` but it also works if the component is already added
   to the graph (i.e. when you actually have a instance of the component from
   `Scenic.Graph.modify/3`).
+
+  Switch from:
+
+      Dash.CalendarComponent.add_to_graph(
+        graph,
+        %{
+          today: Date.utc_today(),
+        },
+        t: {616, 350}
+      )
+
+  to:
+
+      ScenicWidgets.GraphTools.upsert(graph, :calendar, fn g ->
+        Dash.CalendarComponent.upsert(
+          g,
+          %{
+            today: Date.utc_today(),
+          },
+          id: :calendar,
+          t: {616, 350}
+        )
+      end)
+
+  Note: The params you pass in need to be different for an upsert to have any
+  effect. If the params are the same as the previous render then there will be
+  no change in the graph.
   """
 
   @type graph_or_primitive :: Scenic.Graph.t() | Scenic.Primitive.t()

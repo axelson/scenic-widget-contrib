@@ -612,7 +612,7 @@ defmodule ScenicWidgets.MenuBar do
         # (which lies in whoever set up the menu-map, not in this rendering code) more obvious
         # If we want to change this, uncomment the case above this one
         if new_sub_menu == [] do
-          Logger.warn("#{__MODULE__} menu `#{label}` is an empty sub-menu.")
+          Logger.warning("#{__MODULE__} menu `#{label}` is an empty sub-menu.")
         end
 
         # NOTE: x_offset here tells us how many "menus" to the right to
