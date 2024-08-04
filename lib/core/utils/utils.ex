@@ -35,7 +35,7 @@ defmodule ScenicWidgets.Utils do
         Enum.slice(lines, 0..(num_lines - 2)),
         # Join the last two lines and re-shorten it (the wrapping may have
         # introduced an extra line)
-        Enum.slice(lines, (num_lines - 1)..-1)
+        Enum.slice(lines, (num_lines - 1)..-1//1)
         |> Enum.join(" ")
         |> FontMetrics.shorten(line_width, font_size, font_metrics)
       ])
