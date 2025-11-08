@@ -27,6 +27,17 @@ defmodule ScenicContrib.Utils.GraphState do
     Scenic.Scene.assign(scene, :state, state)
   end
 
+  @doc """
+  Updates the state _and_ the graph
+
+  The function passed will receive the state and graph, and must return the state and graph as a
+  tuple
+
+  Example:
+
+      update_state_and_graph(scene, fn state, graph ->
+      end)
+  """
   def update_state_and_graph(%Scenic.Scene{} = scene, fun) when is_function(fun, 2) do
     {state, %Scenic.Graph{} = graph} = fun.(scene.assigns.state, scene.assigns.state.graph)
     assign_and_push_graph(scene, state, graph)
