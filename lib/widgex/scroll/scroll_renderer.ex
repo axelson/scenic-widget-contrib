@@ -146,7 +146,14 @@ defmodule Widgex.Scroll.ScrollRenderer do
   # Render vertical scrollbar if needed
   defp maybe_render_scrollbar_y(graph, %ScrollState{} = scroll, width, height, color, opacity) do
     if ScrollState.scrollable_y?(scroll) do
-      {thumb_y, thumb_height} = ScrollState.scrollbar_thumb(scroll, :y)
+      # Calculate actual track height (accounting for padding)
+      track_height = height - @scrollbar_padding * 2
+
+      # Get thumb size ratio and scale to actual track
+      {thumb_y_ratio, thumb_height_ratio} = ScrollState.scrollbar_thumb(scroll, :y)
+      scale = track_height / scroll.viewport_height
+      thumb_height = thumb_height_ratio * scale
+      thumb_y = thumb_y_ratio * scale
 
       track_x = width - @scrollbar_width - @scrollbar_padding
       track_opacity = if opacity > 0, do: @scrollbar_track_opacity, else: 0
@@ -158,7 +165,7 @@ defmodule Widgex.Scroll.ScrollRenderer do
           grp
           # Track background
           |> Primitives.rrect(
-            {@scrollbar_width, height - @scrollbar_padding * 2, 4},
+            {@scrollbar_width, track_height, 4},
             id: :scrollbar_y_track,
             fill: {r, g, b, track_opacity}
           )
@@ -181,14 +188,18 @@ defmodule Widgex.Scroll.ScrollRenderer do
   # Render horizontal scrollbar if needed
   defp maybe_render_scrollbar_x(graph, %ScrollState{} = scroll, width, height, color, opacity) do
     if ScrollState.scrollable_x?(scroll) do
-      {thumb_x, thumb_width} = ScrollState.scrollbar_thumb(scroll, :x)
-
       # Account for vertical scrollbar if present
       track_width = if ScrollState.scrollable_y?(scroll) do
         width - @scrollbar_width - @scrollbar_padding * 3
       else
         width - @scrollbar_padding * 2
       end
+
+      # Get thumb size ratio and scale to actual track
+      {thumb_x_ratio, thumb_width_ratio} = ScrollState.scrollbar_thumb(scroll, :x)
+      scale = track_width / scroll.viewport_width
+      thumb_width = thumb_width_ratio * scale
+      thumb_x = thumb_x_ratio * scale
 
       track_y = height - @scrollbar_width - @scrollbar_padding
       track_opacity = if opacity > 0, do: @scrollbar_track_opacity, else: 0
@@ -221,12 +232,18 @@ defmodule Widgex.Scroll.ScrollRenderer do
   end
 
   # Update vertical scrollbar
-  defp update_scrollbar_y(graph, old_scroll, new_scroll, _frame) do
+  defp update_scrollbar_y(graph, old_scroll, new_scroll, frame) do
     if ScrollState.scrollable_y?(new_scroll) do
       {old_thumb_y, _} = ScrollState.scrollbar_thumb(old_scroll, :y)
-      {new_thumb_y, _new_thumb_height} = ScrollState.scrollbar_thumb(new_scroll, :y)
+      {new_thumb_y_ratio, _new_thumb_height} = ScrollState.scrollbar_thumb(new_scroll, :y)
 
-      if old_thumb_y != new_thumb_y || old_scroll.scrollbar_opacity != new_scroll.scrollbar_opacity do
+      # Scale to actual track height
+      {_width, height} = frame.size.box
+      track_height = height - @scrollbar_padding * 2
+      scale = track_height / new_scroll.viewport_height
+      new_thumb_y = new_thumb_y_ratio * scale
+
+      if old_thumb_y != new_thumb_y_ratio || old_scroll.scrollbar_opacity != new_scroll.scrollbar_opacity do
         {r, g, b} = @scrollbar_color
 
         graph
@@ -248,12 +265,22 @@ defmodule Widgex.Scroll.ScrollRenderer do
   end
 
   # Update horizontal scrollbar
-  defp update_scrollbar_x(graph, old_scroll, new_scroll, _frame) do
+  defp update_scrollbar_x(graph, old_scroll, new_scroll, frame) do
     if ScrollState.scrollable_x?(new_scroll) do
       {old_thumb_x, _} = ScrollState.scrollbar_thumb(old_scroll, :x)
-      {new_thumb_x, _new_thumb_width} = ScrollState.scrollbar_thumb(new_scroll, :x)
+      {new_thumb_x_ratio, _new_thumb_width} = ScrollState.scrollbar_thumb(new_scroll, :x)
 
-      if old_thumb_x != new_thumb_x || old_scroll.scrollbar_opacity != new_scroll.scrollbar_opacity do
+      # Scale to actual track width
+      {width, _height} = frame.size.box
+      track_width = if ScrollState.scrollable_y?(new_scroll) do
+        width - @scrollbar_width - @scrollbar_padding * 3
+      else
+        width - @scrollbar_padding * 2
+      end
+      scale = track_width / new_scroll.viewport_width
+      new_thumb_x = new_thumb_x_ratio * scale
+
+      if old_thumb_x != new_thumb_x_ratio || old_scroll.scrollbar_opacity != new_scroll.scrollbar_opacity do
         {r, g, b} = @scrollbar_color
 
         graph
