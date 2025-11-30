@@ -6,6 +6,8 @@ defmodule ScenicWidgets.TextField.State do
   wrapping, scrolling, line numbers, and interaction modes.
   """
 
+  use Widgex.Scrollable
+
   defstruct [
     # Core
     :frame,                    # Widgex.Frame for positioning/sizing
@@ -31,14 +33,17 @@ defmodule ScenicWidgets.TextField.State do
     :editable,                 # Boolean (allow editing)
     :selectable,               # Boolean (allow text selection)
 
-    # Text Wrapping & Scrolling (Phase 5)
+    # Text Wrapping & Scrolling
     :wrap_mode,                # :none | :word | :char
-    :scroll_mode,              # :none | :vertical | :horizontal | :both
-    :vertical_scroll_offset,   # Vertical scroll in pixels
-    :horizontal_scroll_offset, # Horizontal scroll in pixels
+    :scroll,                   # Widgex.Scroll.ScrollState (replaces manual scroll offsets)
     :height_mode,              # :auto | {:fixed_lines, n} | {:fixed_pixels, n}
     :max_visible_lines,        # Calculated from frame height and height_mode
     :viewport_buffer_lines,    # Number of lines to render outside viewport (default 5)
+
+    # Legacy scroll fields (deprecated - use :scroll instead)
+    :scroll_mode,              # :none | :vertical | :horizontal | :both (for backwards compat)
+    :vertical_scroll_offset,   # Vertical scroll in pixels (for backwards compat)
+    :horizontal_scroll_offset, # Horizontal scroll in pixels (for backwards compat)
 
     # Advanced (future)
     :selection,                # {start, end} for text selection
@@ -68,10 +73,35 @@ defmodule ScenicWidgets.TextField.State do
   """
   def new(%{frame: %Widgex.Frame{} = frame} = data) do
     font = Map.get(data, :font) || default_font()
+    lines = parse_initial_text(data)
+    wrap_mode = Map.get(data, :wrap_mode, :word)
+    show_line_numbers = Map.get(data, :show_line_numbers, false)
+    line_number_width = Map.get(data, :line_number_width, 40)
+
+    # Calculate the content frame (excluding line numbers if shown)
+    content_frame = if show_line_numbers do
+      %{frame |
+        size: %{frame.size | width: frame.size.width - line_number_width}
+      }
+    else
+      frame
+    end
+
+    # Determine scroll direction based on wrap mode:
+    # - :word or :char wrap → vertical only (content wraps horizontally)
+    # - :none → both directions (no wrapping)
+    scroll_direction = case wrap_mode do
+      :none -> :both
+      _ -> :vertical  # :word or :char
+    end
+
+    # Calculate initial content size
+    content_height = calculate_content_height(lines, font)
+    content_width = calculate_content_width(lines, font, content_frame, wrap_mode)
 
     %__MODULE__{
       frame: frame,
-      lines: parse_initial_text(data),
+      lines: lines,
       cursor: Map.get(data, :initial_cursor, {1, 1}),
       id: Map.get(data, :id),
 
@@ -93,14 +123,21 @@ defmodule ScenicWidgets.TextField.State do
       editable: Map.get(data, :editable, true),
       selectable: Map.get(data, :selectable, true),
 
-      # Text Wrapping & Scrolling (defaults for Phase 1)
-      wrap_mode: Map.get(data, :wrap_mode, :word),  # DEMO: Enable word wrap by default
-      scroll_mode: Map.get(data, :scroll_mode, :both),
-      vertical_scroll_offset: 0,
-      horizontal_scroll_offset: 0,
+      # Text Wrapping & Scrolling
+      wrap_mode: wrap_mode,
+      scroll: init_scroll(content_frame,
+        direction: scroll_direction,
+        content_height: content_height,
+        content_width: content_width
+      ),
       height_mode: Map.get(data, :height_mode, :auto),
       max_visible_lines: calculate_max_lines(frame, font),
       viewport_buffer_lines: Map.get(data, :viewport_buffer_lines, 5),
+
+      # Legacy fields (for backwards compatibility during transition)
+      scroll_mode: Map.get(data, :scroll_mode, :both),
+      vertical_scroll_offset: 0,
+      horizontal_scroll_offset: 0,
 
       # Advanced
       selection: nil,
@@ -109,6 +146,24 @@ defmodule ScenicWidgets.TextField.State do
       show_scrollbars: Map.get(data, :show_scrollbars, true),
       scrollbar_width: Map.get(data, :scrollbar_width, 12)
     }
+  end
+
+  defp calculate_content_height(lines, font) do
+    line_height = font.size
+    length(lines) * line_height
+  end
+
+  defp calculate_content_width(lines, font, frame, wrap_mode) do
+    case wrap_mode do
+      :none ->
+        # Find the longest line
+        char_width = trunc(font.size * 0.6)  # Monospace approximation
+        max_line_length = lines |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end)
+        max_line_length * char_width
+      _ ->
+        # Wrapped content fits within frame
+        frame.size.width
+    end
   end
 
   defp parse_initial_text(%{initial_text: text}) when is_bitstring(text) do

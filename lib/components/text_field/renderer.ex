@@ -4,11 +4,15 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   Phase 1: Basic rendering - background, lines, cursor
   Phase 2+: Incremental updates, scrolling, wrapping
+
+  Uses Widgex.Scroll.ScrollRenderer for scrollable content with scissor clipping.
   """
 
   alias Scenic.Graph
   alias Scenic.Primitives
   alias ScenicWidgets.TextField.State
+  alias Widgex.Scroll.ScrollRenderer
+  alias Widgex.Scroll.ScrollState
 
   @doc """
   Initial render of the TextField component.
@@ -16,21 +20,53 @@ defmodule ScenicWidgets.TextField.Renderer do
   Creates the complete graph structure:
   - Background (optional - supports :clear for transparent)
   - Border
-  - Line numbers (if enabled)
-  - Semantic accessibility content (hidden)
-  - Text lines
-  - Selection highlighting
-  - Cursor
+  - Line numbers (if enabled, outside scroll area)
+  - Scrollable content area with scissor clipping:
+    - Semantic accessibility content (hidden)
+    - Text lines
+    - Selection highlighting
+    - Cursor
+  - Scrollbars
   """
   def initial_render(graph, %State{} = state) do
     graph
     |> render_background(state)
     |> render_border(state)
     |> render_line_numbers(state)
-    |> render_semantic_content(state)
-    |> render_selection(state)
-    |> render_lines(state)
-    |> render_cursor(state)
+    |> render_scrollable_content(state)
+    |> ScrollRenderer.render_scrollbars(state.scroll, text_content_frame(state))
+  end
+
+  # Helper to make piping work with render_scrollable_content
+  defp render_scrollable_content(graph, state), do: do_render_scrollable_content(state, graph)
+
+  # Create a frame for the text content area (excluding line numbers)
+  defp text_content_frame(%State{frame: frame, show_line_numbers: false}) do
+    frame
+  end
+
+  defp text_content_frame(%State{frame: frame, show_line_numbers: true, line_number_width: ln_width}) do
+    # Adjust frame to exclude line number area
+    %{frame |
+      size: %{frame.size | width: frame.size.width - ln_width},
+      pin: %{frame.pin | x: frame.pin.x + ln_width}
+    }
+  end
+
+  # Render the scrollable text content area
+  defp do_render_scrollable_content(%State{} = state, graph) do
+    content_frame = text_content_frame(state)
+    x_offset = if state.show_line_numbers, do: state.line_number_width, else: 0
+
+    Primitives.group(graph, fn g ->
+      ScrollRenderer.scrollable_group(g, state.scroll, content_frame, fn scroll_g ->
+        scroll_g
+        |> render_semantic_content(state)
+        |> render_selection(state)
+        |> render_lines_content(state)
+        |> render_cursor(state)
+      end, id: :text_content)
+    end, translate: {x_offset, 0})
   end
 
   @doc """
@@ -39,10 +75,19 @@ defmodule ScenicWidgets.TextField.Renderer do
   def update_render(graph, old_state, new_state) do
     graph
     |> update_border_if_changed(old_state, new_state)
+    |> update_scroll_if_changed(old_state, new_state)
     |> update_lines_if_changed(old_state, new_state)
     |> update_line_numbers_if_changed(old_state, new_state)
     |> update_semantic_content_if_changed(old_state, new_state)
     |> update_cursor_position(old_state, new_state)
+  end
+
+  defp update_scroll_if_changed(graph, %State{scroll: old_scroll}, %State{scroll: new_scroll} = new_state) do
+    content_frame = text_content_frame(new_state)
+
+    graph
+    |> ScrollRenderer.update_scroll_transform(:text_content, old_scroll, new_scroll)
+    |> ScrollRenderer.update_scrollbars(old_scroll, new_scroll, content_frame)
   end
 
   defp update_border_if_changed(graph, %State{focused: old_focused}, %State{focused: new_focused, colors: colors})
@@ -59,52 +104,52 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   defp update_lines_if_changed(graph, %State{lines: old_lines}, %State{lines: new_lines} = new_state)
       when old_lines != new_lines do
-    # Lines changed - use optimized viewport rendering
-    x_offset = State.text_x_offset(new_state)
+    # Lines changed - re-render all text lines inside the scrollable group
+    # This handles word wrapping correctly by regenerating wrapped lines
     font = new_state.font
     colors = new_state.colors
     line_height = State.line_height(new_state)
+    scroll = new_state.scroll
+    wrap_mode = new_state.wrap_mode
+    x_offset = 10  # Padding inside scroll area
 
-    # Calculate which lines need to be rendered
-    {render_start, render_end} = State.visible_line_range(new_state)
-    max_lines = max(length(old_lines), length(new_lines))
+    # Calculate text width for wrapping
+    text_width = scroll.viewport_width - 20
 
-    # Process all potentially affected lines
-    graph = Enum.reduce(1..max_lines, graph, fn line_num, g ->
-      old_line = Enum.at(old_lines, line_num - 1, nil)
-      new_line = Enum.at(new_lines, line_num - 1, nil)
+    # Wrap lines
+    display_lines = case wrap_mode do
+      :word -> new_state.lines |> Enum.flat_map(&wrap_line(&1, text_width, font))
+      :char -> new_state.lines |> Enum.flat_map(&wrap_line_by_chars(&1, text_width, font))
+      :none -> new_state.lines
+    end
 
-      cond do
-        # Line is outside render range - clean it up
-        line_num < render_start or line_num > render_end ->
-          Graph.delete(g, {:text_line, line_num})
+    # Calculate max display lines we might have had before
+    old_display_lines = case wrap_mode do
+      :word -> old_lines |> Enum.flat_map(&wrap_line(&1, text_width, font))
+      :char -> old_lines |> Enum.flat_map(&wrap_line_by_chars(&1, text_width, font))
+      :none -> old_lines
+    end
+    max_display_lines = max(length(old_display_lines), length(display_lines))
 
-        # Line was removed
-        old_line != nil and new_line == nil ->
-          Graph.delete(g, {:text_line, line_num})
-
-        # Line unchanged - skip
-        old_line == new_line ->
-          g
-
-        # Line added or changed - render it
-        true ->
-          y_pos = (line_num - 1) * line_height + line_height + new_state.vertical_scroll_offset
-
-          g
-          |> Graph.delete({:text_line, line_num})
-          |> Primitives.text(
-            new_line || "",
-            translate: {x_offset, y_pos},
-            fill: colors.text,
-            font_size: font.size,
-            font: font.name,
-            id: {:text_line, line_num}
-          )
-      end
+    # Delete all old text lines and re-render
+    graph = Enum.reduce(1..max(1, max_display_lines), graph, fn line_num, g ->
+      Graph.delete(g, {:text_line, line_num})
     end)
 
-    graph
+    # Render all wrapped lines
+    Enum.reduce(Enum.with_index(display_lines, 1), graph, fn {line_text, line_num}, g ->
+      y_pos = (line_num - 1) * line_height + line_height
+
+      g
+      |> Primitives.text(
+        line_text,
+        translate: {x_offset, y_pos},
+        fill: colors.text,
+        font_size: font.size,
+        font: font.name,
+        id: {:text_line, line_num}
+      )
+    end)
   end
 
   defp update_lines_if_changed(graph, _old_state, _new_state), do: graph
@@ -338,6 +383,7 @@ defmodule ScenicWidgets.TextField.Renderer do
     end)
   end
 
+  # Legacy render_lines - kept for backwards compatibility
   defp render_lines(graph, %State{
     lines: lines,
     font: font,
@@ -389,13 +435,72 @@ defmodule ScenicWidgets.TextField.Renderer do
     end)
   end
 
+  # Render lines inside scrollable group (scroll transform handled by group)
+  defp render_lines_content(graph, %State{
+    lines: lines,
+    font: font,
+    colors: colors,
+    wrap_mode: wrap_mode,
+    scroll: scroll
+  } = state) do
+    line_height = State.line_height(state)
+    # Use small left padding within the scroll area
+    x_offset = 10
+
+    # Use the scroll viewport width for text wrapping (already excludes line numbers)
+    text_width = scroll.viewport_width - 20  # 10px padding on each side
+    IO.puts("[TextField] wrap_mode=#{wrap_mode}, viewport_width=#{scroll.viewport_width}, text_width=#{text_width}")
+
+    # Wrap lines if needed
+    display_lines = case wrap_mode do
+      :word ->
+        wrapped = lines |> Enum.flat_map(&wrap_line(&1, text_width, font))
+        IO.puts("[TextField] Wrapped #{length(lines)} lines into #{length(wrapped)} display lines")
+        wrapped
+      :char ->
+        lines |> Enum.flat_map(&wrap_line_by_chars(&1, text_width, font))
+      :none ->
+        lines
+    end
+
+    # Render all lines (scissor handles clipping)
+    Enum.reduce(Enum.with_index(display_lines, 1), graph, fn {line_text, line_num}, g ->
+      # Position from top of content, baseline at line_height
+      y_pos = (line_num - 1) * line_height + line_height
+
+      g
+      |> Primitives.text(
+        line_text,
+        translate: {x_offset, y_pos},
+        fill: colors.text,
+        font_size: font.size,
+        font: font.name,
+        id: {:text_line, line_num}
+      )
+    end)
+  end
+
+  # Character-based wrapping for :char wrap_mode
+  defp wrap_line_by_chars(line, max_width, font) do
+    char_width = trunc(font.size * 0.6)  # Monospace approximation
+    max_chars = max(1, trunc(max_width / char_width))
+
+    if String.length(line) <= max_chars do
+      [line]
+    else
+      line
+      |> String.graphemes()
+      |> Enum.chunk_every(max_chars)
+      |> Enum.map(&Enum.join/1)
+    end
+  end
+
   # Wrap a single line into multiple lines based on available width
-  defp wrap_line(line, max_width, _font) do
-    # Simple character-count based wrapping
-    # TODO: Use actual string width measurements for proportional fonts
-    # For now, approximate using average character width
-    avg_char_width = 10  # Rough estimate
-    max_chars = trunc(max_width / avg_char_width)
+  defp wrap_line(line, max_width, font) do
+    # Use font size to estimate character width (monospace approximation)
+    char_width = trunc(font.size * 0.6)
+    max_chars = max(1, trunc(max_width / char_width))
+    IO.puts("[wrap_line] max_width=#{max_width}, font_size=#{font.size}, char_width=#{char_width}, max_chars=#{max_chars}, line_len=#{String.length(line)}")
 
     if String.length(line) <= max_chars do
       [line]

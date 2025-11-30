@@ -14,6 +14,7 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   alias ScenicWidgets.TextField.State
   use ScenicWidgets.ScenicEventsDefinitions
+  use Widgex.Scrollable
 
   # ===== DIRECT INPUT PROCESSING =====
 
@@ -199,6 +200,17 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   def process_input(%State{focused: false} = state, {:key, _}) do
     {:noop, state}
+  end
+
+  # ===== SCROLL INPUT =====
+
+  # Handle both scroll input formats from different Scenic drivers
+  def process_input(%State{} = state, {:cursor_scroll, {{_dx, dy}, {_x, _y}}}) do
+    handle_scroll_input(state, dy)
+  end
+
+  def process_input(%State{} = state, {:cursor_scroll, {_dx, dy, _x, _y}}) do
+    handle_scroll_input(state, dy)
   end
 
   # ===== CLICK TO FOCUS =====
@@ -622,6 +634,22 @@ defmodule ScenicWidgets.TextField.Reducer do
 
         new_state = %{state | lines: new_lines, cursor: {final_line, final_col}}
         State.ensure_cursor_visible(new_state)
+    end
+  end
+
+  # ===== SCROLL HELPERS =====
+
+  @doc """
+  Handle scroll input using the Scrollable macro functions.
+  """
+  defp handle_scroll_input(%State{scroll: scroll} = state, delta_y) do
+    # Negate delta for natural scrolling (scroll down = content moves up)
+    new_scroll = handle_scroll(scroll, -delta_y)
+
+    if scroll_changed?(scroll, new_scroll) do
+      {:noop, %{state | scroll: new_scroll}}
+    else
+      {:noop, state}
     end
   end
 end

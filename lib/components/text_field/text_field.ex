@@ -103,8 +103,8 @@ defmodule ScenicWidgets.TextField do
 
     # Phase 2: Request input if in direct mode
     if state.input_mode == :direct do
-      # IO.puts("🔍 TextField requesting input: [:cursor_button, :key, :codepoint]")
-      request_input(scene, [:cursor_button, :key, :codepoint])
+      # IO.puts("🔍 TextField requesting input: [:cursor_button, :key, :codepoint, :cursor_scroll]")
+      request_input(scene, [:cursor_button, :key, :codepoint, :cursor_scroll])
     end
 
     scene =
