@@ -157,7 +157,7 @@ defmodule Widgex.Scrollable do
       # ============================================================
 
       @doc """
-      Handle scroll wheel input and update scroll state.
+      Handle scroll wheel input and update scroll state (vertical only).
 
       Returns updated scroll state with scrollbars shown.
 
@@ -177,6 +177,63 @@ defmodule Widgex.Scrollable do
       """
       def handle_scroll_x(%ScrollState{} = scroll, delta_x) do
         ScrollReducer.handle_wheel_x(scroll, delta_x)
+      end
+
+      @doc """
+      Handle 2D scroll input (both horizontal and vertical).
+
+      For trackpads or when direction is :both, use this to handle both axes.
+
+      ## Example
+
+          def process_input(state, {:cursor_scroll, {{dx, dy}, _coords}}) do
+            new_scroll = handle_scroll_2d(state.scroll, dx, dy)
+            {:noop, %{state | scroll: new_scroll}}
+          end
+      """
+      def handle_scroll_2d(%ScrollState{} = scroll, delta_x, delta_y) do
+        ScrollReducer.handle_wheel_2d(scroll, delta_x, delta_y)
+      end
+
+      @doc """
+      Smart scroll handling that respects Shift key state.
+
+      When Shift is held and direction supports horizontal scrolling,
+      vertical scroll input is converted to horizontal scrolling.
+      This enables Shift+scroll for horizontal scrolling.
+
+      ## Example
+
+          def process_input(state, {:cursor_scroll, {{dx, dy}, _coords}}) do
+            new_scroll = handle_scroll_smart(state.scroll, dx, dy)
+            {:noop, %{state | scroll: new_scroll}}
+          end
+      """
+      def handle_scroll_smart(%ScrollState{} = scroll, delta_x, delta_y) do
+        ScrollReducer.handle_wheel_smart(scroll, delta_x, delta_y)
+      end
+
+      @doc """
+      Set the Shift key held state for scroll behavior.
+
+      Call this when handling Shift key press/release events.
+
+      ## Example
+
+          # On Shift press
+          def process_input(state, {:key, {:key_leftshift, 1, _}}) do
+            new_scroll = set_scroll_shift(state.scroll, true)
+            {:noop, %{state | scroll: new_scroll}}
+          end
+
+          # On Shift release
+          def process_input(state, {:key, {:key_leftshift, 0, _}}) do
+            new_scroll = set_scroll_shift(state.scroll, false)
+            {:noop, %{state | scroll: new_scroll}}
+          end
+      """
+      def set_scroll_shift(%ScrollState{} = scroll, held) do
+        ScrollReducer.set_shift_held(scroll, held)
       end
 
       @doc """

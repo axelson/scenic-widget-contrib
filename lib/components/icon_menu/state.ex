@@ -32,7 +32,16 @@ defmodule ScenicWidgets.IconMenu.State do
       ]
   """
 
-  @type menu_item :: {String.t(), String.t()} | {String.t(), String.t(), function()}
+  @type menu_item_opts :: %{
+    optional(:type) => :toggle | :normal,
+    optional(:checked) => boolean(),
+    optional(:enabled) => boolean()
+  }
+
+  @type menu_item ::
+    {String.t(), String.t()}
+    | {String.t(), String.t(), function()}
+    | {String.t(), String.t(), menu_item_opts()}
 
   @type menu :: %{
     id: atom(),
@@ -177,7 +186,8 @@ defmodule ScenicWidgets.IconMenu.State do
       # Calculate item bounds within dropdown (relative to dropdown origin)
       item_bounds = menu.items
         |> Enum.with_index()
-        |> Enum.map(fn {{item_id, _label}, item_index} ->
+        |> Enum.map(fn {item, item_index} ->
+          item_id = get_item_id(item)
           {item_id, %{
             x: dropdown_x + padding,
             y: y + padding + (item_index * item_height),
@@ -296,13 +306,49 @@ defmodule ScenicWidgets.IconMenu.State do
     case Enum.find(menus, &(&1.id == active_menu)) do
       nil -> nil
       menu ->
-        case Enum.find(menu.items, fn
-          {id, _label} -> id == item_id
-          {id, _label, _action} -> id == item_id
-        end) do
+        case Enum.find(menu.items, fn item -> get_item_id(item) == item_id end) do
           {_id, _label, action} when is_function(action, 0) -> action
           _ -> nil
         end
     end
+  end
+
+  # ===========================================================================
+  # Menu Item Helpers
+  # ===========================================================================
+
+  @doc """
+  Extract the ID from a menu item tuple (supports all formats).
+  """
+  def get_item_id({id, _label}), do: id
+  def get_item_id({id, _label, _opts_or_action}), do: id
+
+  @doc """
+  Extract the label from a menu item tuple.
+  """
+  def get_item_label({_id, label}), do: label
+  def get_item_label({_id, label, _opts_or_action}), do: label
+
+  @doc """
+  Extract options from a menu item. Returns empty map for simple items.
+  """
+  def get_item_opts({_id, _label}), do: %{}
+  def get_item_opts({_id, _label, opts}) when is_map(opts), do: opts
+  def get_item_opts({_id, _label, _action}), do: %{}
+
+  @doc """
+  Check if a menu item is a toggle type.
+  """
+  def is_toggle_item?(item) do
+    opts = get_item_opts(item)
+    Map.get(opts, :type) == :toggle
+  end
+
+  @doc """
+  Check if a toggle item is checked.
+  """
+  def is_item_checked?(item) do
+    opts = get_item_opts(item)
+    Map.get(opts, :checked, false)
   end
 end

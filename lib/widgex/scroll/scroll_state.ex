@@ -45,7 +45,9 @@ defmodule Widgex.Scroll.ScrollState do
     # Scrollbar visibility
     scrollbar_visible: false,
     scrollbar_opacity: 0,
-    scrollbar_fade_timer: nil
+    scrollbar_fade_timer: nil,
+    # Modifier key tracking for Shift+scroll horizontal scrolling
+    shift_held: false
   ]
 
   @type direction :: :vertical | :horizontal | :both

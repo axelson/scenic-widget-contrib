@@ -189,14 +189,39 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:event, {:save_requested, state.id, State.get_text(state)}, state}
   end
 
-  # ===== KEY RELEASE EVENTS - Ignore =====
+  # ===== SHIFT KEY TRACKING (for Shift+scroll horizontal scrolling) =====
+  # NOTE: These MUST come BEFORE the key release catch-all so shift release is tracked
 
-  # Ignore key release events (state: 0)
+  # Track Shift key press - both left and right shift
+  def process_input(%State{scroll: scroll} = state, {:key, {:key_leftshift, 1, _}}) do
+    IO.puts("🔑 SHIFT PRESSED (left)")
+    {:noop, %{state | scroll: set_scroll_shift(scroll, true)}}
+  end
+
+  def process_input(%State{scroll: scroll} = state, {:key, {:key_rightshift, 1, _}}) do
+    IO.puts("🔑 SHIFT PRESSED (right)")
+    {:noop, %{state | scroll: set_scroll_shift(scroll, true)}}
+  end
+
+  # Track Shift key release
+  def process_input(%State{scroll: scroll} = state, {:key, {:key_leftshift, 0, _}}) do
+    IO.puts("🔑 SHIFT RELEASED (left)")
+    {:noop, %{state | scroll: set_scroll_shift(scroll, false)}}
+  end
+
+  def process_input(%State{scroll: scroll} = state, {:key, {:key_rightshift, 0, _}}) do
+    IO.puts("🔑 SHIFT RELEASED (right)")
+    {:noop, %{state | scroll: set_scroll_shift(scroll, false)}}
+  end
+
+  # ===== KEY RELEASE EVENTS - Ignore all others =====
+
+  # Ignore other key release events (state: 0)
   def process_input(state, {:key, {_key, @key_released, _mods}}) do
     {:noop, state}
   end
 
-  # ===== UNFOCUSED - Ignore all keyboard input =====
+  # ===== UNFOCUSED - Ignore all other keyboard input =====
 
   def process_input(%State{focused: false} = state, {:key, _}) do
     {:noop, state}
@@ -204,13 +229,13 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # ===== SCROLL INPUT =====
 
-  # Handle both scroll input formats from different Scenic drivers
-  def process_input(%State{} = state, {:cursor_scroll, {{_dx, dy}, {_x, _y}}}) do
-    handle_scroll_input(state, dy)
+  # Handle scroll input with smart Shift+scroll support
+  def process_input(%State{} = state, {:cursor_scroll, {{dx, dy}, {_x, _y}}}) do
+    handle_scroll_input_smart(state, dx, dy)
   end
 
-  def process_input(%State{} = state, {:cursor_scroll, {_dx, dy, _x, _y}}) do
-    handle_scroll_input(state, dy)
+  def process_input(%State{} = state, {:cursor_scroll, {dx, dy, _x, _y}}) do
+    handle_scroll_input_smart(state, dx, dy)
   end
 
   # ===== CLICK TO FOCUS =====
@@ -241,13 +266,8 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # ===== FALLBACK - Unhandled input =====
 
-  def process_input(state, {:key, {:key_v, 1, [:ctrl]}} = input) do
-    # IO.puts("🔍 FALLBACK caught Ctrl+V! Input: #{inspect(input)}")
-    # IO.puts("🔍 State focused: #{state.focused}")
-    {:noop, state}
-  end
-
-  def process_input(state, _input) do
+  def process_input(state, {:key, {:key_v, 1, [:ctrl]}} = _input) do
+    # Fallback for Ctrl+V if not caught above
     {:noop, state}
   end
 
@@ -291,7 +311,9 @@ defmodule ScenicWidgets.TextField.Reducer do
       |> List.insert_at(line_num, after_cursor)
 
     new_state = %{state | lines: new_lines, cursor: {line_num + 1, 1}}
-    State.ensure_cursor_visible(new_state)
+    new_state
+    |> update_scroll_content_size()
+    |> State.ensure_cursor_visible()
   end
 
   defp insert_char(%State{lines: lines, cursor: {line_num, col}} = state, char) when is_binary(char) do
@@ -302,7 +324,9 @@ defmodule ScenicWidgets.TextField.Reducer do
     new_lines = List.replace_at(lines, line_num - 1, new_line)
 
     new_state = %{state | lines: new_lines, cursor: {line_num, col + 1}}
-    State.ensure_cursor_visible(new_state)
+    new_state
+    |> update_scroll_content_size()
+    |> State.ensure_cursor_visible()
   end
 
   @doc """
@@ -327,6 +351,7 @@ defmodule ScenicWidgets.TextField.Reducer do
 
       new_col = String.length(prev_line) + 1
       %{state | lines: new_lines, cursor: {line_num - 1, new_col}}
+      |> update_scroll_content_size()
     else
       state
     end
@@ -342,6 +367,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     new_lines = List.replace_at(lines, line_num - 1, new_line)
 
     %{state | lines: new_lines, cursor: {line_num, max(1, col - 1)}}
+    |> update_scroll_content_size()
   end
 
   @doc """
@@ -362,6 +388,7 @@ defmodule ScenicWidgets.TextField.Reducer do
           |> List.delete_at(line_num)
 
         %{state | lines: new_lines}
+        |> update_scroll_content_size()
       else
         state
       end
@@ -373,6 +400,7 @@ defmodule ScenicWidgets.TextField.Reducer do
 
       new_lines = List.replace_at(lines, line_num - 1, new_line)
       %{state | lines: new_lines}
+      |> update_scroll_content_size()
     end
   end
 
@@ -640,16 +668,63 @@ defmodule ScenicWidgets.TextField.Reducer do
   # ===== SCROLL HELPERS =====
 
   @doc """
-  Handle scroll input using the Scrollable macro functions.
+  Handle scroll input with smart Shift+scroll support using the Scrollable macro functions.
+  When Shift is held, vertical scrolling is converted to horizontal scrolling.
   """
-  defp handle_scroll_input(%State{scroll: scroll} = state, delta_y) do
-    # Negate delta for natural scrolling (scroll down = content moves up)
-    new_scroll = handle_scroll(scroll, -delta_y)
+  defp handle_scroll_input_smart(%State{scroll: scroll} = state, delta_x, delta_y) do
+    IO.puts("🖱️ Scroll: dx=#{delta_x}, dy=#{delta_y}, shift_held=#{scroll.shift_held}, direction=#{scroll.direction}")
+    # Negate deltas for natural scrolling (scroll down = content moves up)
+    new_scroll = handle_scroll_smart(scroll, -delta_x, -delta_y)
 
     if scroll_changed?(scroll, new_scroll) do
       {:noop, %{state | scroll: new_scroll}}
     else
       {:noop, state}
     end
+  end
+
+  @doc """
+  Handle 2D scroll input using the Scrollable macro functions.
+  Supports both vertical and horizontal scrolling based on scroll direction setting.
+  """
+  defp handle_scroll_input_2d(%State{scroll: scroll} = state, delta_x, delta_y) do
+    # Negate deltas for natural scrolling (scroll down = content moves up)
+    new_scroll = handle_scroll_2d(scroll, -delta_x, -delta_y)
+
+    if scroll_changed?(scroll, new_scroll) do
+      {:noop, %{state | scroll: new_scroll}}
+    else
+      {:noop, state}
+    end
+  end
+
+  @doc """
+  Update scroll content size based on current wrapped line count.
+  Should be called after text changes that affect line count.
+  """
+  def update_scroll_content_size(%State{lines: lines, scroll: scroll, wrap_mode: wrap_mode, font: font} = state) do
+    line_height = font.size
+
+    # Calculate wrapped display line count
+    display_line_count = case wrap_mode do
+      :none ->
+        length(lines)
+      _wrap ->
+        # Approximate wrapped line count using viewport width
+        text_width = scroll.viewport_width - 20  # padding
+        char_width = trunc(font.size * 0.6)
+        max_chars = max(1, trunc(text_width / char_width))
+
+        lines
+        |> Enum.map(fn line ->
+          line_len = String.length(line)
+          if line_len <= max_chars, do: 1, else: ceil(line_len / max_chars)
+        end)
+        |> Enum.sum()
+    end
+
+    content_height = display_line_count * line_height
+    new_scroll = Widgex.Scroll.ScrollState.update_content_size(scroll, scroll.content_width, content_height)
+    %{state | scroll: new_scroll}
   end
 end

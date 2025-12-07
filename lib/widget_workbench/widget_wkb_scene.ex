@@ -448,11 +448,11 @@ defmodule WidgetWorkbench.Scene do
           size: component_frame.size
         })
 
-        # For demo: Add long text to show word wrap
+        # For demo: Add long text to test scrolling
         %{
           frame: text_field_frame,
-          initial_text: "This is a very long line of text that definitely exceeds the width and should wrap to multiple lines when line_wrap is enabled",
-          wrap_mode: :word  # Can be :word or :none
+          initial_text: "This is a very long line of text that definitely exceeds the width and should scroll horizontally when wrap_mode is :none\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10",
+          wrap_mode: :none  # :none for horizontal scroll, :word for wrapping
         }
 
       _ ->

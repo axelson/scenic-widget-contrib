@@ -132,6 +132,20 @@ defmodule ScenicWidgets.IconMenu do
     update_scene_tuple(scene, state, new_state)
   end
 
+  # Update menus (e.g., to change toggle states)
+  def handle_put({:update_menus, menus}, scene) do
+    state = scene.assigns.state
+    new_state = %{state | menus: menus}
+    new_state = %{new_state | dropdown_bounds: State.calculate_dropdown_bounds(new_state)}
+
+    # Re-render from scratch to reflect menu changes
+    graph = Renderer.initial_render(Graph.build(), new_state)
+    scene = scene
+      |> assign(state: new_state, graph: graph)
+      |> push_graph(graph)
+    {:noreply, scene}
+  end
+
   def handle_put(_msg, scene) do
     {:noreply, scene}
   end

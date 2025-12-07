@@ -51,6 +51,35 @@ defmodule Widgex.Scroll.ScrollReducer do
   end
 
   @doc """
+  Smart scroll handling that respects shift_held state.
+
+  When shift is held and direction supports horizontal scrolling,
+  vertical scroll input is converted to horizontal scrolling.
+  """
+  @spec handle_wheel_smart(ScrollState.t(), number(), number()) :: ScrollState.t()
+  def handle_wheel_smart(%ScrollState{shift_held: true, direction: dir} = scroll, delta_x, delta_y)
+      when dir in [:horizontal, :both] do
+    # Shift held - swap axes (vertical becomes horizontal)
+    scroll
+    |> scroll_by((delta_y + delta_x) * scroll.scroll_speed, 0)
+    |> show_scrollbars()
+  end
+
+  def handle_wheel_smart(%ScrollState{} = scroll, delta_x, delta_y) do
+    # Normal scrolling
+    handle_wheel_2d(scroll, delta_x, delta_y)
+  end
+
+  @doc """
+  Set the shift key held state.
+  Call this when shift key is pressed/released.
+  """
+  @spec set_shift_held(ScrollState.t(), boolean()) :: ScrollState.t()
+  def set_shift_held(%ScrollState{} = scroll, held) do
+    %{scroll | shift_held: held}
+  end
+
+  @doc """
   Scroll by a specific pixel amount.
 
   Respects the scroll direction setting - if direction is `:vertical`,

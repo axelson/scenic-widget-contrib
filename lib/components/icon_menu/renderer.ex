@@ -134,9 +134,17 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     dropdown = Map.get(bounds, menu_id)
     padding = theme.dropdown_padding
 
+    # Space reserved for checkmark on the left
+    checkmark_width = 20
+
     items
     |> Enum.with_index()
-    |> Enum.reduce(graph, fn {{item_id, label}, index}, acc ->
+    |> Enum.reduce(graph, fn {item, index}, acc ->
+      item_id = State.get_item_id(item)
+      label = State.get_item_label(item)
+      is_toggle = State.is_toggle_item?(item)
+      is_checked = State.is_item_checked?(item)
+
       item_bounds = Map.get(dropdown.items, item_id)
       is_hovered = hovered_item == item_id
 
@@ -150,27 +158,51 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       acc
       |> Primitives.group(
         fn g ->
-          g
+          g = g
           # Item background (for hover)
           |> Primitives.rrect(
             {dropdown.width - (2 * padding), theme.dropdown_item_height, 3},
             id: {:item_bg, item_id},
             fill: bg_color
           )
-          # Item text
+
+          # Checkmark for toggle items (only if checked)
+          g = if is_toggle and is_checked do
+            g
+            |> Primitives.text(
+              "✓",
+              id: {:item_check, item_id},
+              fill: text_color,
+              font: theme.font,
+              font_size: theme.dropdown_font_size,
+              translate: {6, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
+            )
+          else
+            g
+          end
+
+          # Item text (offset if toggle items exist to align all labels)
+          text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
+
+          g
           |> Primitives.text(
             label,
             id: {:item_text, item_id},
             fill: text_color,
             font: theme.font,
             font_size: theme.dropdown_font_size,
-            translate: {8, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
+            translate: {text_x, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
           )
         end,
         id: {:dropdown_item, item_id},
         translate: {item_x, item_y}
       )
     end)
+  end
+
+  # Check if any item in the list is a toggle type (to align text consistently)
+  defp has_any_toggle_items?(items) do
+    Enum.any?(items, &State.is_toggle_item?/1)
   end
 
   # ===========================================================================
