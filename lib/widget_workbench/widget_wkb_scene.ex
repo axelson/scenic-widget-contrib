@@ -339,7 +339,7 @@ defmodule WidgetWorkbench.Scene do
           padding: 8,
 
           # Typography
-          font: :roboto_mono,
+          font: :ibm_plex_mono,
           # Larger font for better readability
           font_size: 18,
 
@@ -1416,7 +1416,7 @@ defmodule WidgetWorkbench.Scene do
       |> Primitives.text(
         "#{click_label}: (#{trunc(x)}, #{trunc(y)})",
         font_size: 16,
-        font: :roboto_mono,
+        font: :ibm_plex_mono,
         fill: {:color, {255, 0, 0, 255}},
         translate: {x + 35, y + 5},
         id: String.to_atom("#{click_id}_text")
@@ -1606,7 +1606,7 @@ defmodule WidgetWorkbench.Scene do
       |> Primitives.text(
         "#{label}: (#{trunc(x)}, #{trunc(y)})",
         font_size: 16,
-        font: :roboto_mono,
+        font: :ibm_plex_mono,
         fill: {:color, {255, 0, 0, text_alpha}},
         translate: {x + 35, y + 5},
         id: String.to_atom("#{click_id}_text")

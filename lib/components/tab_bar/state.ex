@@ -67,7 +67,7 @@ defmodule ScenicWidgets.TabBar.State do
     selection_indicator_height: 3,
 
     # Typography
-    font: :roboto,
+    font: :ibm_plex_mono,
     font_size: 13
   }
 

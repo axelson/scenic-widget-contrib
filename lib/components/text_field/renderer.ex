@@ -34,27 +34,43 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   @doc """
   Initial render of the TextField component.
+  Scrollbars are rendered inside content_group to ensure proper z-order.
   """
   def initial_render(graph, %State{} = state) do
     graph
     |> render_background(state)
     |> render_border(state)
     |> render_gutter_and_content(state)
-    |> render_scrollbars(state)
   end
 
   @doc """
   Update render - intelligently updates only what changed.
   """
   def update_render(graph, old_state, new_state) do
+    # If gutter width changed, need full rebuild of gutter and content areas
+    if old_state.line_number_width != new_state.line_number_width do
+      rebuild_gutter_and_content(graph, new_state)
+    else
+      graph
+      |> update_border_if_changed(old_state, new_state)
+      |> update_gutter_scroll(old_state, new_state)
+      |> update_content_scroll(old_state, new_state)
+      |> update_lines_if_changed(old_state, new_state)
+      |> update_line_numbers_if_changed(old_state, new_state)
+      |> update_cursor_if_changed(old_state, new_state)
+      |> update_scrollbars_if_changed(old_state, new_state)
+    end
+  end
+
+  # Rebuild both gutter and content when gutter width changes
+  defp rebuild_gutter_and_content(graph, %State{show_line_numbers: true} = state) do
     graph
-    |> update_border_if_changed(old_state, new_state)
-    |> update_gutter_scroll(old_state, new_state)
-    |> update_content_scroll(old_state, new_state)
-    |> update_lines_if_changed(old_state, new_state)
-    |> update_line_numbers_if_changed(old_state, new_state)
-    |> update_cursor_if_changed(old_state, new_state)
-    |> update_scrollbars_if_changed(old_state, new_state)
+    |> rebuild_gutter(state)
+    |> rebuild_content_area(state)
+  end
+
+  defp rebuild_gutter_and_content(graph, %State{show_line_numbers: false} = state) do
+    rebuild_content_area(graph, state)
   end
 
   @doc """
@@ -99,8 +115,9 @@ defmodule ScenicWidgets.TextField.Renderer do
     render_text_content_area(graph, state, 0, state.frame.size.width)
   end
 
-  defp render_gutter_and_content(graph, %State{show_line_numbers: true, line_number_width: gutter_width} = state) do
+  defp render_gutter_and_content(graph, %State{show_line_numbers: true, line_number_width: gutter_width, lines: lines} = state) do
     content_width = state.frame.size.width - gutter_width
+    IO.puts("🎨 Rendering gutter: width=#{gutter_width}, lines=#{length(lines)}, content_width=#{content_width}")
 
     graph
     |> render_line_number_gutter(state, gutter_width)
@@ -160,8 +177,9 @@ defmodule ScenicWidgets.TextField.Renderer do
     display_lines = wrap_lines(state)
 
     Primitives.group(graph, fn outer_g ->
+      outer_g
       # Inner group that scrolls both directions
-      Primitives.group(outer_g, fn inner_g ->
+      |> Primitives.group(fn inner_g ->
         inner_g
         |> render_semantic_content(state, display_lines)
         |> render_selection(state)
@@ -171,11 +189,96 @@ defmodule ScenicWidgets.TextField.Renderer do
         id: :text_content,
         translate: {-scroll.offset_x, -scroll.offset_y}
       )
+      # Render scrollbars INSIDE content_group, after text, so they're on top
+      |> render_scrollbars_in_content(state, content_width, frame_height)
     end,
       id: :content_group,
       translate: {x_offset, 0},
       scissor: {content_width, frame_height}
     )
+  end
+
+  # Render scrollbars inside content_group (positioned relative to content area)
+  defp render_scrollbars_in_content(graph, %State{scroll: scroll}, content_width, frame_height) do
+    scrollbar_width = 10
+    scrollbar_padding = 2
+
+    graph
+    |> render_v_scrollbar_in_content(scroll, content_width, frame_height, scrollbar_width, scrollbar_padding)
+    |> render_h_scrollbar_in_content(scroll, content_width, frame_height, scrollbar_width, scrollbar_padding)
+  end
+
+  defp render_v_scrollbar_in_content(graph, scroll, content_width, frame_height, scrollbar_width, scrollbar_padding) do
+    if Widgex.Scroll.ScrollState.scrollable_y?(scroll) do
+      # Position at right edge of content area
+      track_x = content_width - scrollbar_width - scrollbar_padding
+      track_height = frame_height - scrollbar_padding * 2
+
+      # Reduce height if horizontal scrollbar exists
+      track_height = if Widgex.Scroll.ScrollState.scrollable_x?(scroll) do
+        track_height - scrollbar_width - scrollbar_padding
+      else
+        track_height
+      end
+
+      {thumb_y_ratio, thumb_height_ratio} = Widgex.Scroll.ScrollState.scrollbar_thumb(scroll, :y)
+      scale = track_height / scroll.viewport_height
+      thumb_height = max(thumb_height_ratio * scale, 20)
+      thumb_y = thumb_y_ratio * scale
+
+      # IO.puts("📜 V-scrollbar: track_x=#{track_x}, track_height=#{track_height}, frame_height=#{frame_height}")
+
+      graph
+      |> Primitives.rrect({scrollbar_width, track_height, 4},
+        id: :scrollbar_y_track,
+        fill: {80, 80, 80, 200},
+        translate: {track_x, scrollbar_padding}
+      )
+      |> Primitives.rrect({scrollbar_width, thumb_height, 4},
+        id: :scrollbar_y_thumb,
+        fill: {160, 160, 160, 255},
+        translate: {track_x, scrollbar_padding + thumb_y}
+      )
+    else
+      graph
+    end
+  end
+
+  defp render_h_scrollbar_in_content(graph, scroll, content_width, frame_height, scrollbar_width, scrollbar_padding) do
+    if Widgex.Scroll.ScrollState.scrollable_x?(scroll) do
+      # Position at bottom of content area
+      track_x = scrollbar_padding
+      track_y = frame_height - scrollbar_width - scrollbar_padding
+      track_width = content_width - scrollbar_padding * 2
+
+      # Reduce width if vertical scrollbar exists
+      track_width = if Widgex.Scroll.ScrollState.scrollable_y?(scroll) do
+        track_width - scrollbar_width - scrollbar_padding
+      else
+        track_width
+      end
+
+      {thumb_x_ratio, thumb_width_ratio} = Widgex.Scroll.ScrollState.scrollbar_thumb(scroll, :x)
+      scale = track_width / scroll.viewport_width
+      thumb_width = max(thumb_width_ratio * scale, 20)
+      thumb_x = thumb_x_ratio * scale
+
+      # IO.puts("📜 H-scrollbar: track_y=#{track_y} (frame_height=#{frame_height}), track_width=#{track_width}")
+
+      graph
+      |> Primitives.rrect({track_width, scrollbar_width, 4},
+        id: :scrollbar_x_track,
+        fill: {80, 80, 80, 200},
+        translate: {track_x, track_y}
+      )
+      |> Primitives.rrect({thumb_width, scrollbar_width, 4},
+        id: :scrollbar_x_thumb,
+        fill: {160, 160, 160, 255},
+        translate: {track_x + thumb_x, track_y}
+      )
+    else
+      graph
+    end
   end
 
   # Render all text lines
@@ -309,10 +412,123 @@ defmodule ScenicWidgets.TextField.Renderer do
     end)
   end
 
-  # Render scrollbars using ScrollRenderer
-  defp render_scrollbars(graph, %State{scroll: scroll, frame: frame} = _state) do
+  # Render scrollbars inside the main group (for z-order)
+  defp render_scrollbars_inner(graph, %State{scroll: scroll, frame: frame, show_line_numbers: show_ln, line_number_width: ln_width} = _state) do
+    alias Widgex.Structs.Dimensions
+
+    gutter_offset = if show_ln, do: ln_width, else: 0
+    content_width = frame.size.width - gutter_offset
+    {frame_height} = {frame.size.height}
+
+    {frame_width, _} = frame.size.box
+    IO.puts("📜 TextField.render_scrollbars_inner: gutter=#{gutter_offset}, content_width=#{content_width}, frame_width=#{frame_width}, frame_height=#{frame_height}")
+
+    # Render scrollbars directly (not via ScrollRenderer) for debugging
+    # Vertical scrollbar on the right edge of content area
+    if Widgex.Scroll.ScrollState.scrollable_y?(scroll) do
+      scrollbar_width = 12
+      scrollbar_padding = 4
+
+      # Position at right edge of FULL frame (not content area)
+      track_x = frame_width - scrollbar_width - scrollbar_padding
+      track_height = frame_height - scrollbar_padding * 2
+
+      # Calculate thumb position and size
+      {thumb_y_ratio, thumb_height_ratio} = Widgex.Scroll.ScrollState.scrollbar_thumb(scroll, :y)
+      scale = track_height / scroll.viewport_height
+      thumb_height = max(thumb_height_ratio * scale, 20)  # Minimum thumb size
+      thumb_y = thumb_y_ratio * scale
+
+      IO.puts("📜 Vertical scrollbar: track_x=#{track_x}, track_height=#{track_height}, thumb_height=#{thumb_height}")
+
+      # DEBUG: Try hardcoded position at bottom-right corner
+      # If this appears at top-left, there's a coordinate transform issue
+      test_x = 500  # Should be 500px from left
+      test_y = 500  # Should be 500px from top
+
+      graph
+      # Track - put at hardcoded position to debug
+      |> Primitives.rrect({scrollbar_width, 200, 4},
+        id: :scrollbar_y_track,
+        fill: {255, 0, 0, 128},
+        translate: {test_x, test_y}
+      )
+      # Thumb
+      |> Primitives.rrect({scrollbar_width, thumb_height, 4},
+        id: :scrollbar_y_thumb,
+        fill: {255, 0, 0, 255},
+        translate: {test_x, test_y + 10}
+      )
+      # Add horizontal scrollbar if needed
+      |> maybe_render_horizontal_scrollbar(scroll, frame_width, frame_height, gutter_offset, scrollbar_width, scrollbar_padding)
+    else
+      graph
+      |> maybe_render_horizontal_scrollbar(scroll, frame_width, frame_height, gutter_offset, 12, 4)
+    end
+  end
+
+  defp maybe_render_horizontal_scrollbar(graph, scroll, frame_width, frame_height, gutter_offset, scrollbar_width, scrollbar_padding) do
+    if Widgex.Scroll.ScrollState.scrollable_x?(scroll) do
+      # Horizontal scrollbar at bottom, starting after gutter
+      track_width = frame_width - gutter_offset - scrollbar_padding * 2
+      # If vertical scrollbar exists, reduce width
+      track_width = if Widgex.Scroll.ScrollState.scrollable_y?(scroll) do
+        track_width - scrollbar_width - scrollbar_padding
+      else
+        track_width
+      end
+      track_y = frame_height - scrollbar_width - scrollbar_padding
+      track_x = gutter_offset + scrollbar_padding
+
+      # Calculate thumb
+      {thumb_x_ratio, thumb_width_ratio} = Widgex.Scroll.ScrollState.scrollbar_thumb(scroll, :x)
+      scale = track_width / scroll.viewport_width
+      thumb_width = max(thumb_width_ratio * scale, 20)
+      thumb_x = thumb_x_ratio * scale
+
+      IO.puts("📜 Horizontal scrollbar: track_x=#{track_x}, track_y=#{track_y}, track_width=#{track_width}, thumb_width=#{thumb_width}")
+
+      graph
+      # Track
+      |> Primitives.rrect({track_width, scrollbar_width, 4},
+        id: :scrollbar_x_track,
+        fill: {0, 0, 255, 128},  # Blue for horizontal
+        translate: {track_x, track_y}
+      )
+      # Thumb
+      |> Primitives.rrect({thumb_width, scrollbar_width, 4},
+        id: :scrollbar_x_thumb,
+        fill: {0, 0, 255, 255},
+        translate: {track_x + thumb_x, track_y}
+      )
+    else
+      graph
+    end
+  end
+
+  # Render scrollbars using ScrollRenderer (original, kept for reference)
+  defp render_scrollbars(graph, %State{scroll: scroll, frame: frame, show_line_numbers: show_ln, line_number_width: ln_width} = _state) do
     alias Widgex.Scroll.ScrollRenderer
-    ScrollRenderer.render_scrollbars(graph, scroll, frame)
+    alias Widgex.Structs.Dimensions
+
+    # Calculate content frame (text area only, excluding gutter)
+    # IMPORTANT: Must create a proper Dimensions struct so .box is correct
+    gutter_offset = if show_ln, do: ln_width, else: 0
+    content_width = frame.size.width - gutter_offset
+    content_frame = %{frame |
+      size: Dimensions.new({content_width, frame.size.height})
+    }
+
+    IO.puts("📜 TextField.render_scrollbars: gutter_offset=#{gutter_offset}, content_width=#{content_width}, frame=#{frame.size.width}x#{frame.size.height}")
+
+    # Render scrollbars in a group translated by gutter offset
+    graph
+    |> Scenic.Primitives.group(fn g ->
+      ScrollRenderer.render_scrollbars(g, scroll, content_frame)
+    end,
+      id: :scrollbars_group,
+      translate: {gutter_offset, 0}
+    )
   end
 
   # ===== UPDATE HELPERS =====
@@ -465,9 +681,103 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   defp update_cursor_if_changed(graph, _old_state, _new_state), do: graph
 
-  defp update_scrollbars_if_changed(graph, %State{scroll: old_scroll}, %State{scroll: new_scroll, frame: frame}) do
-    alias Widgex.Scroll.ScrollRenderer
-    ScrollRenderer.update_scrollbars(graph, old_scroll, new_scroll, frame)
+  defp update_scrollbars_if_changed(graph, %State{scroll: old_scroll} = old_state, %State{scroll: new_scroll} = new_state) do
+    alias Widgex.Scroll.ScrollState
+
+    # Check if scrollability changed (primitives may not exist)
+    old_scrollable_x = ScrollState.scrollable_x?(old_scroll)
+    new_scrollable_x = ScrollState.scrollable_x?(new_scroll)
+    old_scrollable_y = ScrollState.scrollable_y?(old_scroll)
+    new_scrollable_y = ScrollState.scrollable_y?(new_scroll)
+
+    scrollability_changed = old_scrollable_x != new_scrollable_x or
+                            old_scrollable_y != new_scrollable_y
+
+    if scrollability_changed do
+      # Scrollability changed - need to rebuild content area to create/remove scrollbar primitives
+      rebuild_content_area(graph, new_state)
+    else
+      # Update existing scrollbar thumb positions (keeping them at correct Y position)
+      update_scrollbar_thumbs(graph, old_scroll, new_scroll, new_state)
+    end
+  end
+
+  # Update scrollbar thumb positions without moving them to wrong Y coordinate
+  defp update_scrollbar_thumbs(graph, old_scroll, new_scroll, state) do
+    alias Widgex.Scroll.ScrollState
+
+    frame = state.frame
+    show_ln = state.show_line_numbers
+    ln_width = state.line_number_width
+    scrollbar_width = 10
+    scrollbar_padding = 2
+
+    gutter_offset = if show_ln, do: ln_width, else: 0
+    content_width = frame.size.width - gutter_offset
+    frame_height = frame.size.height
+
+    graph
+    |> update_h_scrollbar_thumb(old_scroll, new_scroll, content_width, frame_height, scrollbar_width, scrollbar_padding)
+    |> update_v_scrollbar_thumb(old_scroll, new_scroll, content_width, frame_height, scrollbar_width, scrollbar_padding)
+  end
+
+  defp update_h_scrollbar_thumb(graph, old_scroll, new_scroll, content_width, frame_height, scrollbar_width, scrollbar_padding) do
+    alias Widgex.Scroll.ScrollState
+
+    if ScrollState.scrollable_x?(new_scroll) do
+      track_x = scrollbar_padding
+      track_y = frame_height - scrollbar_width - scrollbar_padding
+      track_width = content_width - scrollbar_padding * 2
+
+      track_width = if ScrollState.scrollable_y?(new_scroll) do
+        track_width - scrollbar_width - scrollbar_padding
+      else
+        track_width
+      end
+
+      {new_thumb_x_ratio, _} = ScrollState.scrollbar_thumb(new_scroll, :x)
+      scale = track_width / new_scroll.viewport_width
+      new_thumb_x = new_thumb_x_ratio * scale
+
+      try do
+        Graph.modify(graph, :scrollbar_x_thumb, fn primitive ->
+          Scenic.Primitive.put_style(primitive, :translate, {track_x + new_thumb_x, track_y})
+        end)
+      rescue
+        _ -> graph
+      end
+    else
+      graph
+    end
+  end
+
+  defp update_v_scrollbar_thumb(graph, old_scroll, new_scroll, content_width, frame_height, scrollbar_width, scrollbar_padding) do
+    alias Widgex.Scroll.ScrollState
+
+    if ScrollState.scrollable_y?(new_scroll) do
+      track_x = content_width - scrollbar_width - scrollbar_padding
+      track_height = frame_height - scrollbar_padding * 2
+
+      track_height = if ScrollState.scrollable_x?(new_scroll) do
+        track_height - scrollbar_width - scrollbar_padding
+      else
+        track_height
+      end
+
+      {new_thumb_y_ratio, _} = ScrollState.scrollbar_thumb(new_scroll, :y)
+      scale = track_height / new_scroll.viewport_height
+      new_thumb_y = new_thumb_y_ratio * scale
+
+      try do
+        Graph.modify(graph, :scrollbar_y_thumb, fn primitive ->
+          Scenic.Primitive.put_style(primitive, :translate, {track_x, scrollbar_padding + new_thumb_y})
+        end)
+      rescue
+        _ -> graph
+      end
+    else
+      graph
+    end
   end
 
   # ===== LINE WRAPPING HELPERS =====

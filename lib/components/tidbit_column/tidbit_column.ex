@@ -125,7 +125,7 @@ defmodule ScenicWidgets.TidbitColumn do
   # ============================================================
 
   defp render_graph(%State{} = state) do
-    Graph.build(font: :roboto)
+    Graph.build(font: :ibm_plex_mono)
     |> Renderer.initial_render(state)
   end
 

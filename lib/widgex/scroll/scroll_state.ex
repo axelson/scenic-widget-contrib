@@ -90,17 +90,38 @@ defmodule Widgex.Scroll.ScrollState do
   def new(%Frame{} = frame, opts \\ []) do
     {viewport_width, viewport_height} = frame.size.box
 
+    content_width = Keyword.get(opts, :content_width, viewport_width)
+    content_height = Keyword.get(opts, :content_height, viewport_height)
+    direction = Keyword.get(opts, :direction, :vertical)
+
+    # Check if content is scrollable and if we should show scrollbars immediately
+    initially_visible = Keyword.get(opts, :initially_visible, false)
+    is_scrollable = case direction do
+      :vertical -> content_height > viewport_height
+      :horizontal -> content_width > viewport_width
+      :both -> content_height > viewport_height or content_width > viewport_width
+    end
+
+    # IO.puts("📜 ScrollState.new: content=#{content_width}x#{content_height}, viewport=#{viewport_width}x#{viewport_height}, direction=#{direction}, initially_visible=#{initially_visible}, is_scrollable=#{is_scrollable}")
+
+    {visible, opacity} = if initially_visible and is_scrollable do
+      {true, 255}
+    else
+      {false, 0}
+    end
+    # IO.puts("📜 ScrollState.new: visible=#{visible}, opacity=#{opacity}")
+
     %__MODULE__{
       offset_x: 0,
       offset_y: 0,
-      content_width: Keyword.get(opts, :content_width, viewport_width),
-      content_height: Keyword.get(opts, :content_height, viewport_height),
+      content_width: content_width,
+      content_height: content_height,
       viewport_width: viewport_width,
       viewport_height: viewport_height,
-      direction: Keyword.get(opts, :direction, :vertical),
+      direction: direction,
       scroll_speed: Keyword.get(opts, :scroll_speed, @default_scroll_speed),
-      scrollbar_visible: false,
-      scrollbar_opacity: 0,
+      scrollbar_visible: visible,
+      scrollbar_opacity: opacity,
       scrollbar_fade_timer: nil
     }
   end

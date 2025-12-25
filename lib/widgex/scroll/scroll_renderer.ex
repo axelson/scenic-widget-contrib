@@ -28,11 +28,11 @@ defmodule Widgex.Scroll.ScrollRenderer do
   alias Widgex.Scroll.ScrollState
 
   # Scrollbar styling
-  @scrollbar_width 8
+  @scrollbar_width 12
   @scrollbar_padding 2
-  @scrollbar_track_opacity 0x20
+  @scrollbar_track_opacity 0x80
   # @scrollbar_thumb_opacity 0x80  # Currently using scroll state opacity
-  @scrollbar_color {128, 128, 128}
+  @scrollbar_color {160, 160, 160}  # Gray scrollbar color
 
   @doc """
   Create a scrollable group with scissor clipping.
@@ -109,6 +109,8 @@ defmodule Widgex.Scroll.ScrollRenderer do
     {r, g, b} = Keyword.get(opts, :color, @scrollbar_color)
     opacity = scroll.scrollbar_opacity
 
+    # IO.puts("📜 render_scrollbars: frame=#{width}x#{height}, opacity=#{opacity}, scrollable_y=#{ScrollState.scrollable_y?(scroll)}, scrollable_x=#{ScrollState.scrollable_x?(scroll)}")
+
     graph
     |> maybe_render_scrollbar_y(scroll, width, height, {r, g, b}, opacity)
     |> maybe_render_scrollbar_x(scroll, width, height, {r, g, b}, opacity)
@@ -158,6 +160,8 @@ defmodule Widgex.Scroll.ScrollRenderer do
       track_x = width - @scrollbar_width - @scrollbar_padding
       track_opacity = if opacity > 0, do: @scrollbar_track_opacity, else: 0
       {r, g, b} = color
+
+      # IO.puts("📜 RENDERING scrollbar_y: track_x=#{track_x}, track_height=#{track_height}, thumb_height=#{thumb_height}, thumb_y=#{thumb_y}, color={#{r},#{g},#{b},#{opacity}}")
 
       graph
       |> Primitives.group(

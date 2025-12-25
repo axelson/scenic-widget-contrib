@@ -50,7 +50,12 @@ defmodule ScenicWidgets.TextField.State do
     :max_lines,                # Limit lines (nil = unlimited)
     :cursor_blink_rate,        # Milliseconds
     :show_scrollbars,          # Boolean
-    :scrollbar_width           # Pixels
+    :scrollbar_width,          # Pixels
+
+    # Scrollbar drag state
+    :scrollbar_drag,           # Which scrollbar is being dragged: :x | :y | nil
+    :scrollbar_drag_start,     # {x, y} mouse position when drag started
+    :scrollbar_drag_offset     # Starting scroll offset when drag started
   ]
 
   @type t :: %__MODULE__{}
@@ -72,16 +77,33 @@ defmodule ScenicWidgets.TextField.State do
       })
   """
   def new(%{frame: %Widgex.Frame{} = frame} = data) do
+    alias Widgex.Structs.Dimensions
+
     font = Map.get(data, :font) || default_font()
     lines = parse_initial_text(data)
     wrap_mode = Map.get(data, :wrap_mode, :word)
     show_line_numbers = Map.get(data, :show_line_numbers, false)
-    line_number_width = Map.get(data, :line_number_width, 40)
+
+    # Calculate dynamic gutter width based on line count
+    line_number_width = if show_line_numbers do
+      line_count = length(lines)
+      digit_count = if line_count == 0, do: 1, else: trunc(:math.log10(max(1, line_count))) + 1
+      digits_to_show = max(2, digit_count)
+      # Use font size approximation since we don't have full state yet
+      digit_width = trunc(font.size * 0.6)
+      width = trunc(digits_to_show * digit_width) + 20
+      IO.puts("📐 Gutter: #{line_count} lines, #{digit_count} digits, digit_width=#{digit_width}, total_width=#{width}")
+      width
+    else
+      0
+    end
 
     # Calculate the content frame (excluding line numbers if shown)
+    # IMPORTANT: Must create a proper Dimensions struct so .box is correct
     content_frame = if show_line_numbers do
+      content_width = frame.size.width - line_number_width
       %{frame |
-        size: %{frame.size | width: frame.size.width - line_number_width}
+        size: Dimensions.new({content_width, frame.size.height})
       }
     else
       frame
@@ -99,6 +121,12 @@ defmodule ScenicWidgets.TextField.State do
     content_height = calculate_content_height(lines, font)
     content_width = calculate_content_width(lines, font, content_frame, wrap_mode)
 
+    # Debug: show scroll initialization values
+    viewport_w = content_frame.size.width
+    viewport_h = content_frame.size.height
+    max_scroll_x = max(0, content_width - viewport_w)
+    IO.puts("🔧 ScrollInit: viewport=#{viewport_w}x#{viewport_h}, content=#{content_width}x#{content_height}, max_scroll_x=#{max_scroll_x}")
+
     %__MODULE__{
       frame: frame,
       lines: lines,
@@ -114,8 +142,8 @@ defmodule ScenicWidgets.TextField.State do
       # Configuration
       mode: Map.get(data, :mode, :multi_line),
       input_mode: Map.get(data, :input_mode, :direct),
-      show_line_numbers: Map.get(data, :show_line_numbers, false),
-      line_number_width: Map.get(data, :line_number_width, 40),
+      show_line_numbers: show_line_numbers,
+      line_number_width: line_number_width,
       font: font,
       colors: Map.get(data, :colors) || default_colors(),
 
@@ -128,7 +156,8 @@ defmodule ScenicWidgets.TextField.State do
       scroll: init_scroll(content_frame,
         direction: scroll_direction,
         content_height: content_height,
-        content_width: content_width
+        content_width: content_width,
+        initially_visible: Map.get(data, :show_scrollbars, true)
       ),
       height_mode: Map.get(data, :height_mode, :auto),
       max_visible_lines: calculate_max_lines(frame, font),
@@ -144,22 +173,48 @@ defmodule ScenicWidgets.TextField.State do
       max_lines: Map.get(data, :max_lines),
       cursor_blink_rate: Map.get(data, :cursor_blink_rate, 500),
       show_scrollbars: Map.get(data, :show_scrollbars, true),
-      scrollbar_width: Map.get(data, :scrollbar_width, 12)
+      scrollbar_width: Map.get(data, :scrollbar_width, 12),
+
+      # Scrollbar drag state
+      scrollbar_drag: nil,
+      scrollbar_drag_start: nil,
+      scrollbar_drag_offset: nil
     }
   end
 
   defp calculate_content_height(lines, font) do
     line_height = font.size
-    length(lines) * line_height
+    # Add half line height of bottom padding so last line isn't jammed against frame edge
+    bottom_padding = div(line_height, 2)
+    length(lines) * line_height + bottom_padding
   end
 
   defp calculate_content_width(lines, font, frame, wrap_mode) do
     case wrap_mode do
       :none ->
-        # Find the longest line
-        char_width = trunc(font.size * 0.6)  # Monospace approximation
-        max_line_length = lines |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end)
-        max_line_length * char_width
+        # Measure actual longest line using FontMetrics if available
+        {max_line_width, longest_line_num, longest_line_chars} = lines
+          |> Enum.with_index(1)
+          |> Enum.map(fn {line, idx} ->
+            width = case font do
+              %{metrics: %FontMetrics{} = metrics, size: size} ->
+                FontMetrics.width(line, size, metrics)
+              %{size: size} ->
+                # Fallback to monospace approximation
+                String.length(line) * trunc(size * 0.6)
+            end
+            {width, idx, String.length(line)}
+          end)
+          |> Enum.max_by(fn {w, _, _} -> w end, fn -> {0, 0, 0} end)
+
+        content_w = max(frame.size.width, max_line_width + 40)
+
+        # Get the actual line content for debug
+        longest_line_text = Enum.at(lines, longest_line_num - 1, "") |> String.slice(0, 60)
+        IO.puts("📏 Initial content_width: line #{longest_line_num} (#{longest_line_chars} chars)=#{max_line_width}px, frame=#{frame.size.width}, content_w=#{content_w}")
+        IO.puts("   └─ \"#{longest_line_text}...\" ")
+
+        content_w
       _ ->
         # Wrapped content fits within frame
         frame.size.width
@@ -175,7 +230,7 @@ defmodule ScenicWidgets.TextField.State do
   end
 
   defp default_font do
-    %{name: :roboto_mono, size: 20, metrics: nil}
+    %{name: :ibm_plex_mono, size: 20, metrics: nil}
   end
 
   defp default_colors do
@@ -236,6 +291,35 @@ defmodule ScenicWidgets.TextField.State do
   """
   def text_x_offset(%__MODULE__{show_line_numbers: false}), do: 10
   def text_x_offset(%__MODULE__{show_line_numbers: true, line_number_width: width}), do: width + 10
+
+  @doc """
+  Calculate the required gutter width for the current number of lines.
+  Returns width in pixels that fits the largest line number plus padding.
+  """
+  def calculate_gutter_width(%__MODULE__{show_line_numbers: false}), do: 0
+  def calculate_gutter_width(%__MODULE__{show_line_numbers: true, lines: lines} = state) do
+    line_count = length(lines)
+    digit_count = if line_count == 0, do: 1, else: trunc(:math.log10(max(1, line_count))) + 1
+    # Minimum 2 digits, plus padding on each side
+    digits_to_show = max(2, digit_count)
+    digit_width = char_width(state, "0")
+    # Width = digits + padding (10px on left, 10px on right)
+    trunc(digits_to_show * digit_width) + 20
+  end
+
+  @doc """
+  Update the gutter width if needed based on line count.
+  Returns updated state if width changed, original state otherwise.
+  """
+  def maybe_update_gutter_width(%__MODULE__{show_line_numbers: false} = state), do: state
+  def maybe_update_gutter_width(%__MODULE__{show_line_numbers: true} = state) do
+    required_width = calculate_gutter_width(state)
+    if required_width != state.line_number_width do
+      %{state | line_number_width: required_width}
+    else
+      state
+    end
+  end
 
   @doc """
   Calculate character width using FontMetrics if available, otherwise use approximation.
@@ -401,5 +485,133 @@ defmodule ScenicWidgets.TextField.State do
     char_width = char_width(state)
     delta_x = char_count * char_width
     scroll(state, {delta_x, 0})
+  end
+
+  # ===== SCROLLBAR HIT TESTING =====
+
+  @scrollbar_width 10
+  @scrollbar_padding 2
+
+  @doc """
+  Check if a point is on a scrollbar thumb.
+  Returns :x, :y, or nil.
+  Coordinates are in component-local space.
+  """
+  def scrollbar_hit_test(%__MODULE__{} = state, {x, y}) do
+    alias Widgex.Scroll.ScrollState
+
+    scroll = state.scroll
+    frame = state.frame
+    gutter_offset = if state.show_line_numbers, do: state.line_number_width, else: 0
+    content_width = frame.size.width - gutter_offset
+    frame_height = frame.size.height
+
+    # Check horizontal scrollbar first (it's at the bottom)
+    if ScrollState.scrollable_x?(scroll) do
+      h_hit = check_h_scrollbar_hit(state, {x, y}, gutter_offset, content_width, frame_height)
+      if h_hit, do: h_hit, else: check_v_scrollbar_hit(state, {x, y}, gutter_offset, content_width, frame_height)
+    else
+      check_v_scrollbar_hit(state, {x, y}, gutter_offset, content_width, frame_height)
+    end
+  end
+
+  defp check_h_scrollbar_hit(state, {x, y}, gutter_offset, content_width, frame_height) do
+    alias Widgex.Scroll.ScrollState
+
+    scroll = state.scroll
+    track_x = gutter_offset + @scrollbar_padding
+    track_y = frame_height - @scrollbar_width - @scrollbar_padding
+    track_width = content_width - @scrollbar_padding * 2
+
+    # Account for vertical scrollbar
+    track_width = if ScrollState.scrollable_y?(scroll) do
+      track_width - @scrollbar_width - @scrollbar_padding
+    else
+      track_width
+    end
+
+    {thumb_x_ratio, thumb_width_ratio} = ScrollState.scrollbar_thumb(scroll, :x)
+    scale = track_width / scroll.viewport_width
+    thumb_width = max(thumb_width_ratio * scale, 20)
+    thumb_x = track_x + thumb_x_ratio * scale
+
+    # Check if click is on thumb
+    if x >= thumb_x and x <= thumb_x + thumb_width and
+       y >= track_y and y <= track_y + @scrollbar_width do
+      :x
+    else
+      nil
+    end
+  end
+
+  defp check_v_scrollbar_hit(state, {x, y}, gutter_offset, content_width, frame_height) do
+    alias Widgex.Scroll.ScrollState
+
+    scroll = state.scroll
+
+    if ScrollState.scrollable_y?(scroll) do
+      track_x = gutter_offset + content_width - @scrollbar_width - @scrollbar_padding
+      track_y = @scrollbar_padding
+      track_height = frame_height - @scrollbar_padding * 2
+
+      # Account for horizontal scrollbar
+      track_height = if ScrollState.scrollable_x?(scroll) do
+        track_height - @scrollbar_width - @scrollbar_padding
+      else
+        track_height
+      end
+
+      {thumb_y_ratio, thumb_height_ratio} = ScrollState.scrollbar_thumb(scroll, :y)
+      scale = track_height / scroll.viewport_height
+      thumb_height = max(thumb_height_ratio * scale, 20)
+      thumb_y = track_y + thumb_y_ratio * scale
+
+      # Check if click is on thumb
+      if x >= track_x and x <= track_x + @scrollbar_width and
+         y >= thumb_y and y <= thumb_y + thumb_height do
+        :y
+      else
+        nil
+      end
+    else
+      nil
+    end
+  end
+
+  @doc """
+  Get scrollbar track dimensions for drag calculations.
+  Returns {track_start, track_length, content_size, viewport_size}.
+  """
+  def scrollbar_track_info(%__MODULE__{} = state, :x) do
+    alias Widgex.Scroll.ScrollState
+
+    scroll = state.scroll
+    gutter_offset = if state.show_line_numbers, do: state.line_number_width, else: 0
+    content_width = state.frame.size.width - gutter_offset
+    track_width = content_width - @scrollbar_padding * 2
+
+    track_width = if ScrollState.scrollable_y?(scroll) do
+      track_width - @scrollbar_width - @scrollbar_padding
+    else
+      track_width
+    end
+
+    {gutter_offset + @scrollbar_padding, track_width, scroll.content_width, scroll.viewport_width}
+  end
+
+  def scrollbar_track_info(%__MODULE__{} = state, :y) do
+    alias Widgex.Scroll.ScrollState
+
+    scroll = state.scroll
+    frame_height = state.frame.size.height
+    track_height = frame_height - @scrollbar_padding * 2
+
+    track_height = if ScrollState.scrollable_x?(scroll) do
+      track_height - @scrollbar_width - @scrollbar_padding
+    else
+      track_height
+    end
+
+    {@scrollbar_padding, track_height, scroll.content_height, scroll.viewport_height}
   end
 end

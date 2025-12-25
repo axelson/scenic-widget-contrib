@@ -194,23 +194,19 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # Track Shift key press - both left and right shift
   def process_input(%State{scroll: scroll} = state, {:key, {:key_leftshift, 1, _}}) do
-    IO.puts("🔑 SHIFT PRESSED (left)")
     {:noop, %{state | scroll: set_scroll_shift(scroll, true)}}
   end
 
   def process_input(%State{scroll: scroll} = state, {:key, {:key_rightshift, 1, _}}) do
-    IO.puts("🔑 SHIFT PRESSED (right)")
     {:noop, %{state | scroll: set_scroll_shift(scroll, true)}}
   end
 
   # Track Shift key release
   def process_input(%State{scroll: scroll} = state, {:key, {:key_leftshift, 0, _}}) do
-    IO.puts("🔑 SHIFT RELEASED (left)")
     {:noop, %{state | scroll: set_scroll_shift(scroll, false)}}
   end
 
   def process_input(%State{scroll: scroll} = state, {:key, {:key_rightshift, 0, _}}) do
-    IO.puts("🔑 SHIFT RELEASED (right)")
     {:noop, %{state | scroll: set_scroll_shift(scroll, false)}}
   end
 
@@ -238,28 +234,87 @@ defmodule ScenicWidgets.TextField.Reducer do
     handle_scroll_input_smart(state, dx, dy)
   end
 
+  # ===== SCROLLBAR DRAG =====
+
+  # Mouse button release - end scrollbar drag
+  def process_input(%State{scrollbar_drag: drag} = state, {:cursor_button, {:btn_left, 0, _, _pos}}) when drag != nil do
+    {:noop, %{state | scrollbar_drag: nil, scrollbar_drag_start: nil, scrollbar_drag_offset: nil}}
+  end
+
+  # Mouse move during scrollbar drag
+  def process_input(%State{scrollbar_drag: :x, scrollbar_drag_start: {start_x, _}, scrollbar_drag_offset: start_offset, scroll: scroll} = state, {:cursor_pos, {x, _y}}) do
+    # Calculate how far we've dragged in pixels
+    drag_delta = x - start_x
+
+    # Convert to scroll offset based on track/content ratio
+    {_track_start, track_length, content_size, viewport_size} = State.scrollbar_track_info(state, :x)
+    max_offset = content_size - viewport_size
+
+    # The ratio of track movement to content movement
+    # When thumb moves full track length, content scrolls full max_offset
+    scroll_delta = (drag_delta / track_length) * max_offset
+
+    new_offset_x = max(0, min(max_offset, start_offset + scroll_delta))
+    new_scroll = %{scroll | offset_x: new_offset_x}
+
+    {:noop, %{state | scroll: new_scroll}}
+  end
+
+  def process_input(%State{scrollbar_drag: :y, scrollbar_drag_start: {_, start_y}, scrollbar_drag_offset: start_offset, scroll: scroll} = state, {:cursor_pos, {_x, y}}) do
+    drag_delta = y - start_y
+
+    {_track_start, track_length, content_size, viewport_size} = State.scrollbar_track_info(state, :y)
+    max_offset = content_size - viewport_size
+
+    scroll_delta = (drag_delta / track_length) * max_offset
+
+    new_offset_y = max(0, min(max_offset, start_offset + scroll_delta))
+    new_scroll = %{scroll | offset_y: new_offset_y}
+
+    {:noop, %{state | scroll: new_scroll}}
+  end
+
   # ===== CLICK TO FOCUS =====
 
-  # Click inside -> gain focus
-  def process_input(%State{focused: false} = state, {:cursor_button, {:btn_left, 1, _, pos}}) do
+  # Click on scrollbar - start drag (check before focus handling)
+  def process_input(%State{} = state, {:cursor_button, {:btn_left, 1, _, pos}}) do
+    case State.scrollbar_hit_test(state, pos) do
+      :x ->
+        # Start horizontal scrollbar drag
+        {:noop, %{state |
+          scrollbar_drag: :x,
+          scrollbar_drag_start: pos,
+          scrollbar_drag_offset: state.scroll.offset_x
+        }}
+
+      :y ->
+        # Start vertical scrollbar drag
+        {:noop, %{state |
+          scrollbar_drag: :y,
+          scrollbar_drag_start: pos,
+          scrollbar_drag_offset: state.scroll.offset_y
+        }}
+
+      nil ->
+        # Not on scrollbar - handle focus
+        handle_click_focus(state, pos)
+    end
+  end
+
+  defp handle_click_focus(%State{focused: false} = state, pos) do
     inside = State.point_inside?(state, pos)
-    # IO.puts("🔍 Click at #{inspect(pos)}, inside=#{inside}, frame=#{inspect(state.frame)}")
     if inside do
-      # IO.puts("🔍 Focus gained: Click inside at #{inspect(pos)}")
       {:event, {:focus_gained, state.id}, %{state | focused: true}}
     else
-      # IO.puts("🔍 Click missed TextField at #{inspect(pos)}")
       {:noop, state}
     end
   end
 
-  # Click outside -> lose focus
-  def process_input(%State{focused: true} = state, {:cursor_button, {:btn_left, 1, _, pos}}) do
+  defp handle_click_focus(%State{focused: true} = state, pos) do
     if State.point_inside?(state, pos) do
       # Click inside while focused - move cursor to click position (Phase 3)
       {:noop, state}
     else
-      # IO.puts("🔍 Focus lost: Click outside at #{inspect(pos)}")
       {:event, {:focus_lost, state.id}, %{state | focused: false}}
     end
   end
@@ -672,7 +727,6 @@ defmodule ScenicWidgets.TextField.Reducer do
   When Shift is held, vertical scrolling is converted to horizontal scrolling.
   """
   defp handle_scroll_input_smart(%State{scroll: scroll} = state, delta_x, delta_y) do
-    IO.puts("🖱️ Scroll: dx=#{delta_x}, dy=#{delta_y}, shift_held=#{scroll.shift_held}, direction=#{scroll.direction}")
     # Negate deltas for natural scrolling (scroll down = content moves up)
     new_scroll = handle_scroll_smart(scroll, -delta_x, -delta_y)
 
@@ -699,32 +753,72 @@ defmodule ScenicWidgets.TextField.Reducer do
   end
 
   @doc """
-  Update scroll content size based on current wrapped line count.
-  Should be called after text changes that affect line count.
+  Update scroll content size based on current wrapped line count and max line width.
+  Should be called after text changes that affect line count or line length.
   """
-  def update_scroll_content_size(%State{lines: lines, scroll: scroll, wrap_mode: wrap_mode, font: font} = state) do
-    line_height = font.size
+  def update_scroll_content_size(%State{lines: lines, scroll: scroll, wrap_mode: wrap_mode} = state) do
+    line_height = State.line_height(state)
 
-    # Calculate wrapped display line count
-    display_line_count = case wrap_mode do
+    # Calculate content dimensions based on wrap mode
+    {content_width, display_line_count} = case wrap_mode do
       :none ->
-        length(lines)
-      _wrap ->
-        # Approximate wrapped line count using viewport width
-        text_width = scroll.viewport_width - 20  # padding
-        char_width = trunc(font.size * 0.6)
-        max_chars = max(1, trunc(text_width / char_width))
+        # No wrapping: content width is the widest line, height is line count
+        {max_line_width, longest_line, longest_line_chars} = lines
+          |> Enum.with_index()
+          |> Enum.map(fn {line, idx} -> {State.string_width(state, line), idx + 1, String.length(line)} end)
+          |> Enum.max_by(fn {w, _, _} -> w end, fn -> {0, 0, 0} end)
+        # Add padding for cursor at end of line
+        content_w = max(scroll.viewport_width, max_line_width + 40)
+        max_scroll = content_w - scroll.viewport_width
+        longest_line_text = Enum.at(lines, longest_line - 1, "") |> String.slice(0, 60)
+        IO.puts("📏 Content (update): line #{longest_line} (#{longest_line_chars} chars)=#{max_line_width}px, viewport=#{scroll.viewport_width}, content_w=#{content_w}, max_scroll=#{max_scroll}")
+        IO.puts("   └─ \"#{longest_line_text}...\" ")
+        {content_w, length(lines)}
 
-        lines
-        |> Enum.map(fn line ->
-          line_len = String.length(line)
-          if line_len <= max_chars, do: 1, else: ceil(line_len / max_chars)
-        end)
-        |> Enum.sum()
+      _wrap ->
+        # Word/char wrapping: content fits viewport width, but height depends on wrapped lines
+        # Use the same wrapping logic as the renderer for accurate line count
+        max_width = scroll.viewport_width - 40  # Account for padding and scrollbar
+        wrapped_count = lines
+          |> Enum.map(fn line -> count_wrapped_lines(state, line, max_width) end)
+          |> Enum.sum()
+        {scroll.viewport_width, wrapped_count}
     end
 
-    content_height = display_line_count * line_height
-    new_scroll = Widgex.Scroll.ScrollState.update_content_size(scroll, scroll.content_width, content_height)
+    # Add half line height of bottom padding so last line isn't jammed against frame edge
+    bottom_padding = div(line_height, 2)
+    content_height = display_line_count * line_height + bottom_padding
+
+    new_scroll = Widgex.Scroll.ScrollState.update_content_size(scroll, content_width, content_height)
+
+    # Update gutter width if line count changed significantly (different number of digits)
     %{state | scroll: new_scroll}
+    |> State.maybe_update_gutter_width()
+  end
+
+  # Count how many display lines a single source line will wrap into
+  defp count_wrapped_lines(state, line, max_width) do
+    line_width = State.string_width(state, line)
+
+    if line_width <= max_width do
+      1
+    else
+      # Word wrap: split by words and count lines
+      words = String.split(line, " ")
+      {line_count, _current_width} = Enum.reduce(words, {1, 0}, fn word, {lines, current_w} ->
+        word_width = State.string_width(state, word)
+        space_width = State.string_width(state, " ")
+
+        test_width = if current_w == 0, do: word_width, else: current_w + space_width + word_width
+
+        if test_width <= max_width do
+          {lines, test_width}
+        else
+          # Word doesn't fit, start new line
+          {lines + 1, word_width}
+        end
+      end)
+      line_count
+    end
   end
 end

@@ -136,7 +136,7 @@ defmodule Widgex.Component do
       # end
 
       defp render_group(state, %Frame{} = frame, opts) do
-        Scenic.Graph.build(font: :roboto_mono)
+        Scenic.Graph.build(font: :ibm_plex_mono)
         |> Scenic.Primitives.group(
           fn graph ->
             graph

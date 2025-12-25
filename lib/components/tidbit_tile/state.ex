@@ -56,7 +56,7 @@ defmodule ScenicWidgets.TidbitTile.State do
     min_height: 40,
 
     # Typography
-    font: :roboto,
+    font: :ibm_plex_mono,
     title_font_size: 14
   }
 
