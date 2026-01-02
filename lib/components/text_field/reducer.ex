@@ -16,6 +16,10 @@ defmodule ScenicWidgets.TextField.Reducer do
   use ScenicWidgets.ScenicEventsDefinitions
   use Widgex.Scrollable
 
+  # Debounce period (ms) to ignore keypresses right after gaining focus.
+  # This prevents the key that triggered focus (e.g., "k" from space+k) from being inserted.
+  @focus_debounce_ms 50
+
   # ===== DIRECT INPUT PROCESSING =====
 
   @doc """
@@ -30,9 +34,30 @@ defmodule ScenicWidgets.TextField.Reducer do
   # NOTE: We ONLY handle codepoint events for text input to avoid duplicate insertions.
   # When a user presses a letter key, Scenic sends BOTH :codepoint and :key events.
   # We use :codepoint for text input and :key only for non-character keys (arrows, backspace, etc.)
-  def process_input(%State{focused: true} = state, {:codepoint, {char, _mods}}) when is_bitstring(char) do
+
+  # Debounce: Ignore codepoints that arrive immediately after focus (e.g., "k" from space+k shortcut)
+  def process_input(%State{focused: true, focus_time: focus_time} = state, {:codepoint, _} = _input)
+      when is_integer(focus_time) do
+    now = System.monotonic_time(:millisecond)
+    if now - focus_time < @focus_debounce_ms do
+      # Input arrived too soon after focus - ignore it (likely the focus-triggering key)
+      IO.puts("🔇 TextField: Ignoring codepoint within #{@focus_debounce_ms}ms of focus (focus_debounce)")
+      {:noop, state}
+    else
+      # Past debounce window - process normally
+      process_input_codepoint(state, _input)
+    end
+  end
+
+  def process_input(%State{focused: true} = state, {:codepoint, {char, _mods}} = input) when is_bitstring(char) do
+    process_input_codepoint(state, input)
+  end
+
+  defp process_input_codepoint(state, {:codepoint, {char, _mods}}) when is_bitstring(char) do
+    # Push undo before making changes
+    state_with_undo = State.push_undo(state)
     # Delete selection first if any, then insert
-    state_after_delete = delete_selection(state)
+    state_after_delete = delete_selection(state_with_undo)
     new_state = insert_char(state_after_delete, char)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
@@ -54,36 +79,53 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # ===== SPECIAL KEYS =====
 
-  # Enter key - insert newline (doesn't send codepoint event, only key event)
+  # Enter key - insert newline in multi_line mode (doesn't send codepoint event, only key event)
   def process_input(%State{focused: true, mode: :multi_line} = state, {:key, {:key_enter, key_state, _mods}}) when key_state > 0 do
     # key_state > 0 matches both press (1) and repeat (2) events
-    state_after_delete = delete_selection(state)
+    state_with_undo = State.push_undo(state)
+    state_after_delete = delete_selection(state_with_undo)
     new_state = insert_char(state_after_delete, "\n")
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+  end
+
+  # Enter key - emit :enter_pressed event in single_line mode (for command bars, search fields, etc.)
+  def process_input(%State{focused: true, mode: :single_line} = state, {:key, {:key_enter, key_state, _mods}}) when key_state > 0 do
+    # Don't insert newline - emit event for parent to handle
+    {:event, {:enter_pressed, state.id, State.get_text(state)}, state}
+  end
+
+  # Escape key - emit :escape_pressed event for parent to handle (close dialogs, etc.)
+  # Note: Scenic uses :key_esc not :key_escape
+  def process_input(%State{focused: true} = state, {:key, {:key_esc, key_state, _mods}}) when key_state > 0 do
+    IO.puts("🔑 TextField.Reducer: Escape key pressed! id=#{inspect(state.id)}")
+    {:event, {:escape_pressed, state.id}, state}
   end
 
   # Backspace - delete selection or character before cursor
   # key_state > 0 matches both press (1) and repeat (2) for key-hold functionality
   def process_input(%State{focused: true, selection: selection} = state, {:key, {:key_backspace, key_state, _mods}}) when selection != nil and key_state > 0 do
-    new_state = delete_selection(state)
-    # IO.puts("🔍 Backspace with selection: focused before=#{state.focused}, after=#{new_state.focused}")
+    state_with_undo = State.push_undo(state)
+    new_state = delete_selection(state_with_undo)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
 
   def process_input(%State{focused: true} = state, {:key, {:key_backspace, key_state, _mods}}) when key_state > 0 do
-    new_state = delete_before_cursor(state)
+    state_with_undo = State.push_undo(state)
+    new_state = delete_before_cursor(state_with_undo)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
 
   # Delete - delete selection or character at cursor
   # key_state > 0 matches both press (1) and repeat (2) for key-hold functionality
   def process_input(%State{focused: true, selection: selection} = state, {:key, {:key_delete, key_state, _mods}}) when selection != nil and key_state > 0 do
-    new_state = delete_selection(state)
+    state_with_undo = State.push_undo(state)
+    new_state = delete_selection(state_with_undo)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
 
   def process_input(%State{focused: true} = state, {:key, {:key_delete, key_state, _mods}}) when key_state > 0 do
-    new_state = delete_at_cursor(state)
+    state_with_undo = State.push_undo(state)
+    new_state = delete_at_cursor(state_with_undo)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
 
@@ -140,6 +182,13 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:event, {:focus_lost, state.id}, %{state | focused: false}}
   end
 
+  # Tab - insert a tab character
+  def process_input(%State{focused: true} = state, @tab_key) do
+    state_with_undo = State.push_undo(state)
+    new_state = delete_selection(state_with_undo) |> insert_text_at_cursor("\t")
+    {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+  end
+
   # ===== KEYBOARD SHORTCUTS =====
 
   # Ctrl+A - Select all
@@ -187,6 +236,43 @@ defmodule ScenicWidgets.TextField.Reducer do
   # Ctrl+S - Save (emit event for parent to handle)
   def process_input(%State{focused: true} = state, @ctrl_s) do
     {:event, {:save_requested, state.id, State.get_text(state)}, state}
+  end
+
+  # Ctrl+F - Find (emit event to open search dialog)
+  def process_input(%State{focused: true} = state, @ctrl_f) do
+    IO.puts("🔍 Ctrl+F pressed! Emitting find_requested")
+    {:event, {:find_requested, state.id}, state}
+  end
+
+  # Ctrl+G - Go to next match (if searching)
+  def process_input(%State{focused: true, search_matches: matches, search_current_index: idx} = state, @ctrl_g)
+      when length(matches) > 0 do
+    # Cycle to next match
+    next_idx = rem(idx + 1, length(matches))
+    {line, col, _text} = Enum.at(matches, next_idx)
+    new_state = %{state | search_current_index: next_idx, cursor: {line, col}}
+      |> State.ensure_cursor_visible()
+    {:event, {:search_navigated, state.id, next_idx, length(matches)}, new_state}
+  end
+
+  # Ctrl+U - Undo
+  def process_input(%State{focused: true} = state, @ctrl_u) do
+    case State.undo(state) do
+      {:ok, new_state} ->
+        {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+      {:noop, state} ->
+        {:noop, state}
+    end
+  end
+
+  # Ctrl+R - Redo
+  def process_input(%State{focused: true} = state, @ctrl_r) do
+    case State.redo(state) do
+      {:ok, new_state} ->
+        {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+      {:noop, state} ->
+        {:noop, state}
+    end
   end
 
   # ===== SHIFT KEY TRACKING (for Shift+scroll horizontal scrolling) =====
@@ -304,7 +390,15 @@ defmodule ScenicWidgets.TextField.Reducer do
   defp handle_click_focus(%State{focused: false} = state, pos) do
     inside = State.point_inside?(state, pos)
     if inside do
-      {:event, {:focus_gained, state.id}, %{state | focused: true}}
+      # Click to focus AND position cursor at click location
+      {line, col} = State.click_to_cursor(state, pos)
+      new_state = %{state |
+        focused: true,
+        focus_time: System.monotonic_time(:millisecond),
+        cursor: {line, col},
+        selection: nil
+      }
+      {:event, {:focus_gained, state.id}, new_state}
     else
       {:noop, state}
     end
@@ -312,8 +406,10 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   defp handle_click_focus(%State{focused: true} = state, pos) do
     if State.point_inside?(state, pos) do
-      # Click inside while focused - move cursor to click position (Phase 3)
-      {:noop, state}
+      # Click inside while focused - move cursor to click position
+      {line, col} = State.click_to_cursor(state, pos)
+      new_state = %{state | cursor: {line, col}, selection: nil}
+      {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
     else
       {:event, {:focus_lost, state.id}, %{state | focused: false}}
     end
@@ -338,14 +434,298 @@ defmodule ScenicWidgets.TextField.Reducer do
   Phase 3 implementation.
   """
   def process_action(state, {:insert_text, text}) do
+    # Push undo before making changes
+    state_with_undo = State.push_undo(state)
     # Delete selection if any, then insert text
-    state_after_delete = delete_selection(state)
+    state_after_delete = delete_selection(state_with_undo)
     new_state = insert_text_at_cursor(state_after_delete, text)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
 
+  # Undo action (from menu)
+  def process_action(state, :undo) do
+    case State.undo(state) do
+      {:ok, new_state} ->
+        {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+      {:noop, state} ->
+        {:noop, state}
+    end
+  end
+
+  # Redo action (from menu)
+  def process_action(state, :redo) do
+    case State.redo(state) do
+      {:ok, new_state} ->
+        {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+      {:noop, state} ->
+        {:noop, state}
+    end
+  end
+
+  # Perform search across all lines
+  def process_action(%State{lines: lines} = state, {:search, query}) when is_binary(query) and query != "" do
+    # Simple search - find all occurrences of query in lines
+    matches = find_all_matches(lines, query)
+    match_count = length(matches)
+
+    new_state = %{state |
+      search_query: query,
+      search_matches: matches,
+      search_current_index: 0
+    }
+
+    # Jump to first match if any
+    new_state = if match_count > 0 do
+      {line, col, _text} = hd(matches)
+      %{new_state | cursor: {line, col}}
+      |> State.ensure_cursor_visible()
+    else
+      new_state
+    end
+
+    {:event, {:search_complete, state.id, query, match_count}, new_state}
+  end
+
+  # Clear search state
+  def process_action(state, :clear_search) do
+    new_state = %{state |
+      search_query: nil,
+      search_matches: [],
+      search_current_index: 0
+    }
+    {:event, {:search_cleared, state.id}, new_state}
+  end
+
+  # Navigate to next search match
+  def process_action(%State{search_matches: matches, search_current_index: idx} = state, :find_next)
+      when length(matches) > 0 do
+    next_idx = rem(idx + 1, length(matches))
+    {line, col, _text} = Enum.at(matches, next_idx)
+    new_state = %{state | search_current_index: next_idx, cursor: {line, col}}
+      |> State.ensure_cursor_visible()
+    {:event, {:search_navigated, state.id, next_idx, length(matches)}, new_state}
+  end
+
+  def process_action(state, :find_next) do
+    # No matches to navigate
+    {:noop, state}
+  end
+
+  # Navigate to previous search match
+  def process_action(%State{search_matches: matches, search_current_index: idx} = state, :find_prev)
+      when length(matches) > 0 do
+    prev_idx = if idx == 0, do: length(matches) - 1, else: idx - 1
+    {line, col, _text} = Enum.at(matches, prev_idx)
+    new_state = %{state | search_current_index: prev_idx, cursor: {line, col}}
+      |> State.ensure_cursor_visible()
+    {:event, {:search_navigated, state.id, prev_idx, length(matches)}, new_state}
+  end
+
+  def process_action(state, :find_prev) do
+    # No matches to navigate
+    {:noop, state}
+  end
+
   def process_action(state, _action) do
     {:noop, state}
+  end
+
+  # ===========================================================================
+  # BUFFER-BACKED MODE: Input to Buffer Action Conversion
+  # ===========================================================================
+
+  @doc """
+  Convert raw Scenic input events to buffer actions for buffer_backed mode.
+
+  Returns:
+  - nil - No action (unhandled input)
+  - {:clipboard_copy, text} - Copy selected text (handled locally)
+  - {:clipboard_cut, text} - Cut selected text (handled locally + buffer action)
+  - {:clipboard_paste} - Paste from clipboard (fetches clipboard then sends to buffer)
+  - {:local_update, new_state} - Local-only update (focus, scrollbar drag)
+  - action - Buffer action tuple/atom to send to Buffer.Process
+  """
+  def input_to_buffer_action(%State{focused: true} = state, {:codepoint, {char, _mods}}) when is_bitstring(char) do
+    # Insert character at cursor
+    {:insert, char, :at_cursor}
+  end
+
+  # Enter key - insert newline
+  def input_to_buffer_action(%State{focused: true, mode: :multi_line}, {:key, {:key_enter, key_state, _mods}}) when key_state > 0 do
+    {:newline, :at_cursor}
+  end
+
+  # Tab key - insert tab character
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_tab, key_state, _mods}}) when key_state > 0 do
+    {:insert, "\t", :at_cursor}
+  end
+
+  # Backspace
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_backspace, key_state, _mods}}) when key_state > 0 do
+    {:delete, :before_cursor}
+  end
+
+  # Delete
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_delete, key_state, _mods}}) when key_state > 0 do
+    {:delete, :at_cursor}
+  end
+
+  # Arrow keys - cursor movement
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_left, key_state, mods}}) when key_state > 0 do
+    if :shift in mods do
+      {:select_text, :left, 1}
+    else
+      {:move_cursor, :left, 1}
+    end
+  end
+
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_right, key_state, mods}}) when key_state > 0 do
+    if :shift in mods do
+      {:select_text, :right, 1}
+    else
+      {:move_cursor, :right, 1}
+    end
+  end
+
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_up, key_state, mods}}) when key_state > 0 do
+    if :shift in mods do
+      {:select_text, :up, 1}
+    else
+      {:move_cursor, :up, 1}
+    end
+  end
+
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_down, key_state, mods}}) when key_state > 0 do
+    if :shift in mods do
+      {:select_text, :down, 1}
+    else
+      {:move_cursor, :down, 1}
+    end
+  end
+
+  # Home/End keys
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_home, key_state, _mods}}) when key_state > 0 do
+    {:move_cursor, :line_start}
+  end
+
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_end, key_state, _mods}}) when key_state > 0 do
+    {:move_cursor, :line_end}
+  end
+
+  # Ctrl+A - Select all
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_a, 1, [:ctrl]}}) do
+    :select_all
+  end
+
+  # Ctrl+C - Copy
+  def input_to_buffer_action(%State{focused: true, selection: selection} = state, {:key, {:key_c, 1, [:ctrl]}}) when selection != nil do
+    text = get_selected_text(state)
+    {:clipboard_copy, text}
+  end
+
+  # Ctrl+X - Cut
+  def input_to_buffer_action(%State{focused: true, selection: selection} = state, {:key, {:key_x, 1, [:ctrl]}}) when selection != nil do
+    text = get_selected_text(state)
+    {:clipboard_cut, text}
+  end
+
+  # Ctrl+V - Paste
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_v, 1, [:ctrl]}}) do
+    {:clipboard_paste}
+  end
+
+  # Ctrl+U - Undo
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_u, 1, [:ctrl]}}) do
+    :undo
+  end
+
+  # Ctrl+R - Redo
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_r, 1, [:ctrl]}}) do
+    :redo
+  end
+
+  # Ctrl+S - Save (pass through to parent)
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_s, 1, [:ctrl]}}) do
+    :save
+  end
+
+  # Ctrl+F - Find (emit event to parent)
+  def input_to_buffer_action(%State{focused: true} = state, {:key, {:key_f, 1, [:ctrl]}}) do
+    IO.puts("🔍 Ctrl+F pressed in buffer_backed mode! Emitting find_requested")
+    {:find_requested, state.id}
+  end
+
+  # Mouse click for focus
+  def input_to_buffer_action(%State{} = state, {:cursor_button, {:btn_left, 1, _mods, coords}}) do
+    if State.point_inside?(state, coords) do
+      new_state = %{state | focused: true}
+      {:local_update, new_state}
+    else
+      nil
+    end
+  end
+
+  # Scroll handling - local update
+  # Format: {{dx, dy}, {x, y}} - delta tuple and position tuple
+  def input_to_buffer_action(%State{} = state, {:cursor_scroll, {{dx, dy}, {_x, _y}}}) do
+    case handle_scroll_input_smart(state, dx, dy) do
+      {:noop, new_state} -> {:local_update, new_state}
+      _ -> nil
+    end
+  end
+
+  # Format: {dx, dy, x, y} - 4-element tuple
+  def input_to_buffer_action(%State{} = state, {:cursor_scroll, {dx, dy, _x, _y}}) do
+    case handle_scroll_input_smart(state, dx, dy) do
+      {:noop, new_state} -> {:local_update, new_state}
+      _ -> nil
+    end
+  end
+
+  # Fallback - unhandled input
+  def input_to_buffer_action(_state, _input) do
+    nil
+  end
+
+  # ===== SEARCH HELPER =====
+
+  @doc """
+  Finds all occurrences of a query string in the lines.
+  Returns list of {line_num, col_num, matched_text} tuples.
+  Line and column numbers are 1-based.
+  """
+  defp find_all_matches(lines, query) when is_list(lines) and is_binary(query) do
+    query_len = String.length(query)
+
+    lines
+    |> Enum.with_index(1)  # 1-based line numbers
+    |> Enum.flat_map(fn {line, line_num} ->
+      find_matches_in_line(line, query, query_len, line_num, 1, [])
+    end)
+  end
+
+  # Recursively find all matches in a single line
+  defp find_matches_in_line(line, query, query_len, line_num, col, acc) do
+    case :binary.match(line, query) do
+      :nomatch ->
+        Enum.reverse(acc)
+
+      {start, _len} ->
+        # Convert byte offset to grapheme column (1-based)
+        prefix = binary_part(line, 0, start)
+        grapheme_col = col + String.length(prefix)
+
+        # Get matched text
+        matched_text = String.slice(line, String.length(prefix), query_len)
+
+        # Continue searching in remainder
+        remainder_start = start + byte_size(query)
+        remainder = binary_part(line, remainder_start, byte_size(line) - remainder_start)
+        new_col = grapheme_col + query_len
+
+        find_matches_in_line(remainder, query, query_len, line_num, new_col,
+          [{line_num, grapheme_col, matched_text} | acc])
+    end
   end
 
   # ===== HELPER FUNCTIONS =====

@@ -17,17 +17,33 @@ defmodule ScenicWidgets.TextField.State do
 
     # Display
     :focused,                  # Boolean, whether component has focus
+    :focus_time,               # System.monotonic_time when focus was gained (for debouncing)
     :cursor_visible,           # Boolean, for blink animation
     :cursor_timer,             # Erlang timer reference
     :cursor_mode,              # :cursor (thin line) | :block (full char) | :hidden
 
     # Configuration
     :mode,                     # :single_line | :multi_line
-    :input_mode,               # :direct | :external
+
+    # Input Mode - CRITICAL for correct input routing!
+    # :direct        - TextField requests and handles all keyboard input directly.
+    #                  ⚠️ Will intercept global shortcuts! Use only when TextField
+    #                  is the sole input handler (forms, simple editors).
+    # :external      - TextField does NOT handle input. Parent app routes input
+    #                  through its own system (Fluxus/Redux) and updates buffer.
+    #                  Use for apps with global shortcuts (Flamelex, Vim-mode).
+    # :buffer_backed - TextField handles input but syncs state with Buffer.Process.
+    #                  Use when you want direct input but external state management.
+    :input_mode,
     :show_line_numbers,        # Boolean
     :line_number_width,        # Pixels (default 40)
+    :tab_width,                # Number of spaces per tab (default 4)
     :font,                     # %{name: atom, size: int, metrics: FontMetrics | nil}
     :colors,                   # %{text:, background:, cursor:, line_numbers:, border:, focused_border:}
+
+    # Buffer-backed mode (when input_mode == :buffer_backed)
+    :buffer_controller,        # PID of Buffer.Process (for buffer_backed mode)
+    :buffer_topic,             # PubSub topic for buffer updates (e.g., {:buffers, uuid})
 
     # Interaction
     :editable,                 # Boolean (allow editing)
@@ -55,7 +71,17 @@ defmodule ScenicWidgets.TextField.State do
     # Scrollbar drag state
     :scrollbar_drag,           # Which scrollbar is being dragged: :x | :y | nil
     :scrollbar_drag_start,     # {x, y} mouse position when drag started
-    :scrollbar_drag_offset     # Starting scroll offset when drag started
+    :scrollbar_drag_offset,    # Starting scroll offset when drag started
+
+    # Search state
+    :search_query,             # Current search string (nil = not searching)
+    :search_matches,           # List of {line, col, match_text} tuples
+    :search_current_index,     # Index into search_matches (0-based)
+
+    # Undo/Redo state
+    :undo_stack,               # List of {lines, cursor} snapshots (most recent first)
+    :redo_stack,               # List of {lines, cursor} snapshots (most recent first)
+    :undo_max_size             # Maximum undo stack size (default 100)
   ]
 
   @type t :: %__MODULE__{}
@@ -135,6 +161,7 @@ defmodule ScenicWidgets.TextField.State do
 
       # Display
       focused: Map.get(data, :focused, false),
+      focus_time: if(Map.get(data, :focused, false), do: System.monotonic_time(:millisecond), else: nil),
       cursor_visible: true,
       cursor_timer: nil,
       cursor_mode: Map.get(data, :cursor_mode, :cursor),
@@ -144,8 +171,13 @@ defmodule ScenicWidgets.TextField.State do
       input_mode: Map.get(data, :input_mode, :direct),
       show_line_numbers: show_line_numbers,
       line_number_width: line_number_width,
+      tab_width: Map.get(data, :tab_width, 4),
       font: font,
       colors: Map.get(data, :colors) || default_colors(),
+
+      # Buffer-backed mode
+      buffer_controller: Map.get(data, :buffer_controller),
+      buffer_topic: Map.get(data, :buffer_topic),
 
       # Interaction
       editable: Map.get(data, :editable, true),
@@ -178,7 +210,17 @@ defmodule ScenicWidgets.TextField.State do
       # Scrollbar drag state
       scrollbar_drag: nil,
       scrollbar_drag_start: nil,
-      scrollbar_drag_offset: nil
+      scrollbar_drag_offset: nil,
+
+      # Search state
+      search_query: nil,
+      search_matches: [],
+      search_current_index: 0,
+
+      # Undo/Redo state
+      undo_stack: [],
+      redo_stack: [],
+      undo_max_size: Map.get(data, :undo_max_size, 100)
     }
   end
 
@@ -334,13 +376,67 @@ defmodule ScenicWidgets.TextField.State do
 
   @doc """
   Calculate the width of a string using FontMetrics if available.
+  Handles tab characters by expanding them based on tab_width.
   """
-  def string_width(%__MODULE__{font: %{metrics: %FontMetrics{} = metrics, size: size}}, string) do
+  def string_width(%__MODULE__{} = state, string) do
+    # First expand tabs, then measure
+    expanded = expand_tabs(state, string)
+    string_width_raw(state, expanded)
+  end
+
+  # Raw string width without tab expansion (for internal use after tabs are expanded)
+  defp string_width_raw(%__MODULE__{font: %{metrics: %FontMetrics{} = metrics, size: size}}, string) do
     FontMetrics.width(string, size, metrics)
   end
-  def string_width(%__MODULE__{font: %{size: size}}, string) do
+  defp string_width_raw(%__MODULE__{font: %{size: size}}, string) do
     # Fallback to monospace approximation
     String.length(string) * trunc(size * 0.6)
+  end
+
+  @doc """
+  Expand tab characters to spaces based on tab_width setting.
+  Uses proper tab stops (columns that are multiples of tab_width).
+  """
+  def expand_tabs(%__MODULE__{tab_width: tab_width}, string) when is_integer(tab_width) and tab_width > 0 do
+    expand_tabs_at_column(string, 0, tab_width, [])
+  end
+  # Fallback if tab_width is nil or invalid - use default of 4
+  def expand_tabs(%__MODULE__{}, string) do
+    expand_tabs_at_column(string, 0, 4, [])
+  end
+
+  defp expand_tabs_at_column("", _col, _tab_width, acc) do
+    acc |> Enum.reverse() |> IO.iodata_to_binary()
+  end
+  defp expand_tabs_at_column(<<"\t", rest::binary>>, col, tab_width, acc) do
+    # Calculate spaces to next tab stop
+    spaces_needed = tab_width - rem(col, tab_width)
+    # Use regular spaces - the renderer will handle positioning
+    spaces = String.duplicate(" ", spaces_needed)
+    expand_tabs_at_column(rest, col + spaces_needed, tab_width, [spaces | acc])
+  end
+  defp expand_tabs_at_column(<<char::utf8, rest::binary>>, col, tab_width, acc) do
+    expand_tabs_at_column(rest, col + 1, tab_width, [<<char::utf8>> | acc])
+  end
+
+  @doc """
+  Expand tabs and return {leading_space_count, content} tuple.
+  This is used by the renderer to position text with explicit x-offset
+  since Scenic renders leading spaces as zero-width.
+  """
+  def expand_tabs_with_indent(%__MODULE__{} = state, string) do
+    expanded = expand_tabs(state, string)
+    # Count leading spaces and split
+    {leading, content} = split_leading_spaces(expanded)
+    indent_width = String.length(leading) * char_width(state)
+    {indent_width, content}
+  end
+
+  defp split_leading_spaces(string) do
+    case Regex.run(~r/^(\s*)(.*)$/s, string) do
+      [_, leading, content] -> {leading, content}
+      _ -> {"", string}
+    end
   end
 
   @doc """
@@ -351,6 +447,103 @@ defmodule ScenicWidgets.TextField.State do
     # Could be enhanced with FontMetrics.ascent + descent if needed
     size
   end
+
+  @doc """
+  Convert a click position (x, y) relative to the component frame to cursor position (line, col).
+  Accounts for scroll offset, gutter, and text padding.
+  Returns {line, col} tuple (1-indexed).
+  """
+  def click_to_cursor(%__MODULE__{scroll: scroll, lines: lines} = state, {click_x, click_y}) do
+    line_height = line_height(state)
+    text_padding = 10  # Same as in renderer
+    gutter_width = if state.show_line_numbers, do: state.line_number_width, else: 0
+
+    # Convert click to content coordinates (accounting for scroll and gutter)
+    content_x = click_x - gutter_width - text_padding + scroll.offset_x
+    content_y = click_y + scroll.offset_y
+
+    # Calculate line number from Y coordinate
+    line = max(1, min(length(lines), div(trunc(content_y), line_height) + 1))
+
+    # Get the text of the clicked line
+    line_text = Enum.at(lines, line - 1, "")
+
+    # Calculate column from X coordinate using FontMetrics
+    col = x_to_column(state, line_text, content_x)
+
+    {line, col}
+  end
+
+  # Convert an X coordinate to a column position within a line of text
+  # Uses binary search-like approach for efficiency with FontMetrics
+  defp x_to_column(state, line_text, x) when x <= 0, do: 1
+  defp x_to_column(state, "", _x), do: 1
+  defp x_to_column(state, line_text, x) do
+    # Walk through characters and find where the click falls
+    chars = String.graphemes(line_text)
+    find_column(state, chars, x, 0, 1)
+  end
+
+  defp find_column(_state, [], _x, _current_x, col), do: col
+  defp find_column(state, [char | rest], x, current_x, col) do
+    char_w = string_width(state, char)
+    next_x = current_x + char_w
+
+    # Click is within this character - check if closer to left or right edge
+    if x < next_x do
+      mid = current_x + char_w / 2
+      if x < mid, do: col, else: col + 1
+    else
+      find_column(state, rest, x, next_x, col + 1)
+    end
+  end
+
+  @doc """
+  Get the word at or near the cursor position.
+  Returns the word as a string, or nil if cursor is not on a word.
+  """
+  def word_at_cursor(%__MODULE__{lines: lines, cursor: {line_num, col}}) do
+    line = Enum.at(lines, line_num - 1, "")
+    extract_word_at(line, col - 1)  # Convert to 0-indexed
+  end
+
+  # Extract word at a given 0-indexed position in a string
+  defp extract_word_at("", _pos), do: nil
+  defp extract_word_at(line, pos) do
+    graphemes = String.graphemes(line)
+    pos = max(0, min(pos, length(graphemes) - 1))
+
+    # Check if position is on a word character
+    char_at_pos = Enum.at(graphemes, pos, "")
+    unless word_char?(char_at_pos) do
+      # Try one position to the left (cursor might be after word)
+      if pos > 0 do
+        char_before = Enum.at(graphemes, pos - 1, "")
+        if word_char?(char_before), do: extract_word_at(line, pos - 1), else: nil
+      else
+        nil
+      end
+    else
+      # Find word boundaries
+      start_pos = find_word_start(graphemes, pos)
+      end_pos = find_word_end(graphemes, pos)
+      graphemes |> Enum.slice(start_pos..end_pos) |> Enum.join()
+    end
+  end
+
+  defp find_word_start(graphemes, pos) when pos <= 0, do: 0
+  defp find_word_start(graphemes, pos) do
+    char = Enum.at(graphemes, pos - 1, "")
+    if word_char?(char), do: find_word_start(graphemes, pos - 1), else: pos
+  end
+
+  defp find_word_end(graphemes, pos) when pos >= length(graphemes) - 1, do: length(graphemes) - 1
+  defp find_word_end(graphemes, pos) do
+    char = Enum.at(graphemes, pos + 1, "")
+    if word_char?(char), do: find_word_end(graphemes, pos + 1), else: pos
+  end
+
+  defp word_char?(char), do: Regex.match?(~r/[\w]/, char)
 
   @doc """
   Get font ascent using FontMetrics if available.
@@ -614,4 +807,61 @@ defmodule ScenicWidgets.TextField.State do
 
     {@scrollbar_padding, track_height, scroll.content_height, scroll.viewport_height}
   end
+
+  # ===========================================================================
+  # Undo/Redo Operations
+  # ===========================================================================
+
+  @doc """
+  Push current state onto undo stack before making a change.
+  Call this BEFORE modifying lines/cursor, not after.
+  Clears the redo stack (new changes invalidate redo history).
+  """
+  def push_undo(%__MODULE__{lines: lines, cursor: cursor, undo_stack: stack, undo_max_size: max_size} = state) do
+    snapshot = {lines, cursor}
+    new_stack = [snapshot | stack] |> Enum.take(max_size)
+    %{state | undo_stack: new_stack, redo_stack: []}
+  end
+
+  @doc """
+  Undo the last change. Returns {:ok, new_state} or {:noop, state} if nothing to undo.
+  """
+  def undo(%__MODULE__{undo_stack: []} = state), do: {:noop, state}
+  def undo(%__MODULE__{undo_stack: [{prev_lines, prev_cursor} | rest], lines: curr_lines, cursor: curr_cursor, redo_stack: redo} = state) do
+    # Push current state onto redo stack before restoring
+    redo_snapshot = {curr_lines, curr_cursor}
+    new_state = %{state |
+      lines: prev_lines,
+      cursor: prev_cursor,
+      undo_stack: rest,
+      redo_stack: [redo_snapshot | redo]
+    }
+    {:ok, ensure_cursor_visible(new_state)}
+  end
+
+  @doc """
+  Redo the last undone change. Returns {:ok, new_state} or {:noop, state} if nothing to redo.
+  """
+  def redo(%__MODULE__{redo_stack: []} = state), do: {:noop, state}
+  def redo(%__MODULE__{redo_stack: [{next_lines, next_cursor} | rest], lines: curr_lines, cursor: curr_cursor, undo_stack: undo} = state) do
+    # Push current state onto undo stack before restoring
+    undo_snapshot = {curr_lines, curr_cursor}
+    new_state = %{state |
+      lines: next_lines,
+      cursor: next_cursor,
+      redo_stack: rest,
+      undo_stack: [undo_snapshot | undo]
+    }
+    {:ok, ensure_cursor_visible(new_state)}
+  end
+
+  @doc """
+  Check if undo is available.
+  """
+  def can_undo?(%__MODULE__{undo_stack: stack}), do: stack != []
+
+  @doc """
+  Check if redo is available.
+  """
+  def can_redo?(%__MODULE__{redo_stack: stack}), do: stack != []
 end

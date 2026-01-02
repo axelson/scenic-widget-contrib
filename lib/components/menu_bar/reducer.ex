@@ -197,34 +197,47 @@ defmodule ScenicWidgets.MenuBar.Reducer do
             end
         end
       
-      # Click in dropdown
+      # Click in dropdown or sub-menu
       state.active_menu != nil ->
-        case State.point_in_dropdown?(state, coords) do
-          {true, {item_id, :sub_menu}} ->
-            # Clicked on sub-menu - don't close, just activate it
-            # Logger.debug("Clicked on sub-menu: #{inspect(item_id)}")
-            new_state = %{state | active_sub_menus: Map.put(state.active_sub_menus, state.active_menu, item_id)}
-            {:noop, new_state}
-          {true, {item_id, :item}} ->
-            # Regular menu item clicked
-            # Logger.debug("Clicked on menu item: #{inspect(item_id)}")
-
-            # Check if this item has an action callback
-            action = get_item_action(state, item_id)
-
-            # Execute the action if it exists
-            if is_function(action, 0) do
-              # Logger.debug("Executing action callback for #{inspect(item_id)}")
-              action.()
-            end
+        # First check if click is in a sub-menu
+        case State.point_in_sub_menu?(state, coords) do
+          {:ok, {_parent_id, _sub_menu_id, item_id}} when not is_nil(item_id) ->
+            # Clicked on an item inside a sub-menu
+            # Logger.debug("Clicked on sub-menu item: #{inspect(item_id)}")
 
             # Close menu and notify parent
             new_state = %{state | active_menu: nil, hovered_item: nil, hovered_dropdown: nil, active_sub_menus: %{}}
             {:menu_item_clicked, item_id, new_state}
+
           _ ->
-            # Click outside - close menu
-            new_state = %{state | active_menu: nil, hovered_item: nil, hovered_dropdown: nil, active_sub_menus: %{}}
-            {:noop, new_state}
+            # Not in sub-menu, check main dropdown
+            case State.point_in_dropdown?(state, coords) do
+              {true, {item_id, :sub_menu}} ->
+                # Clicked on sub-menu trigger - don't close, just activate it
+                # Logger.debug("Clicked on sub-menu: #{inspect(item_id)}")
+                new_state = %{state | active_sub_menus: Map.put(state.active_sub_menus, state.active_menu, item_id)}
+                {:noop, new_state}
+              {true, {item_id, :item}} ->
+                # Regular menu item clicked
+                # Logger.debug("Clicked on menu item: #{inspect(item_id)}")
+
+                # Check if this item has an action callback
+                action = get_item_action(state, item_id)
+
+                # Execute the action if it exists
+                if is_function(action, 0) do
+                  # Logger.debug("Executing action callback for #{inspect(item_id)}")
+                  action.()
+                end
+
+                # Close menu and notify parent
+                new_state = %{state | active_menu: nil, hovered_item: nil, hovered_dropdown: nil, active_sub_menus: %{}}
+                {:menu_item_clicked, item_id, new_state}
+              _ ->
+                # Click outside - close menu
+                new_state = %{state | active_menu: nil, hovered_item: nil, hovered_dropdown: nil, active_sub_menus: %{}}
+                {:noop, new_state}
+            end
         end
       
       # Click outside menu entirely

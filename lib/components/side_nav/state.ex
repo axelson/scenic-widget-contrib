@@ -38,7 +38,7 @@ defmodule ScenicWidgets.SideNav.State do
     # Dimensions
     item_height: 28,                        # Slightly smaller item height
     indent: 16,                            # Indentation per level
-    font: :roboto,                         # Use roboto
+    font: :ibm_plex_mono,                  # Use IBM Plex Mono
     font_size: 14,                         # Font size
     line_height: 20,
 

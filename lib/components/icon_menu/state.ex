@@ -94,7 +94,7 @@ defmodule ScenicWidgets.IconMenu.State do
     dropdown_padding: 4,
 
     # Typography
-    font: :roboto,
+    font: :ibm_plex_mono,
     dropdown_font_size: 13
   }
 

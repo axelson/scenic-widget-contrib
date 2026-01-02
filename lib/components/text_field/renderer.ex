@@ -56,7 +56,9 @@ defmodule ScenicWidgets.TextField.Renderer do
       |> update_gutter_scroll(old_state, new_state)
       |> update_content_scroll(old_state, new_state)
       |> update_lines_if_changed(old_state, new_state)
+      |> update_semantic_if_changed(old_state, new_state)
       |> update_line_numbers_if_changed(old_state, new_state)
+      |> update_selection_if_changed(old_state, new_state)
       |> update_cursor_if_changed(old_state, new_state)
       |> update_scrollbars_if_changed(old_state, new_state)
     end
@@ -181,7 +183,7 @@ defmodule ScenicWidgets.TextField.Renderer do
       # Inner group that scrolls both directions
       |> Primitives.group(fn inner_g ->
         inner_g
-        |> render_semantic_content(state, display_lines)
+        |> render_semantic_content(state)
         |> render_selection(state)
         |> render_text_lines(state, display_lines, text_padding, line_height)
         |> render_cursor(state, text_padding, line_height)
@@ -282,14 +284,21 @@ defmodule ScenicWidgets.TextField.Renderer do
   end
 
   # Render all text lines
+  # Uses explicit x-positioning for indentation because Scenic renders
+  # leading spaces as zero-width
   defp render_text_lines(graph, %State{} = state, display_lines, x_offset, line_height) do
     Enum.reduce(Enum.with_index(display_lines, 1), graph, fn {line_text, line_num}, g ->
       y_pos = (line_num - 1) * line_height + line_height
 
+      # Expand tabs and get indent width + trimmed content
+      # Scenic renders leading spaces as zero-width, so we position explicitly
+      {indent_width, content} = State.expand_tabs_with_indent(state, line_text)
+      line_x = x_offset + indent_width
+
       g
       |> Primitives.text(
-        line_text,
-        translate: {x_offset, y_pos},
+        content,
+        translate: {line_x, y_pos},
         fill: state.colors.text,
         font_size: state.font.size,
         font: state.font.name,
@@ -341,21 +350,13 @@ defmodule ScenicWidgets.TextField.Renderer do
   end
 
   # Render hidden semantic content for accessibility
-  defp render_semantic_content(graph, %State{id: id, editable: editable, mode: mode}, display_lines) do
-    full_content = Enum.join(display_lines, "\n")
-
+  defp render_semantic_content(graph, %State{} = state) do
     graph
     |> Primitives.text(
-      full_content,
+      State.get_text(state),
       id: :semantic_content,
       hidden: true,
-      semantic: %{
-        type: :text_field,
-        field_id: id,
-        editable: editable,
-        multiline: mode == :multi_line,
-        role: if(mode == :multi_line, do: :textbox, else: :textfield)
-      }
+      semantic: semantic_metadata(state)
     )
   end
 
@@ -378,7 +379,8 @@ defmodule ScenicWidgets.TextField.Renderer do
     x_offset = 10
     line_height = State.line_height(state)
     display_lines = wrap_lines(state)
-    selection_color = {:color_rgba, {100, 150, 200, 100}}
+    # Selection highlight - steel blue with higher opacity for visibility on dark backgrounds
+    selection_color = {:color_rgba, {70, 130, 180, 180}}
 
     Enum.reduce(sel_start_line..sel_end_line, graph, fn line_num, acc_graph ->
       y_position = (line_num - 1) * line_height
@@ -600,6 +602,7 @@ defmodule ScenicWidgets.TextField.Renderer do
   defp rebuild_gutter(graph, %State{show_line_numbers: false}), do: graph
 
   # Update text lines when content changes
+  # Must update both text content AND x-position due to explicit indent positioning
   defp update_lines_if_changed(graph, %State{lines: old_lines}, %State{lines: new_lines} = new_state)
       when old_lines != new_lines do
     old_display_lines = wrap_lines_from(old_lines, new_state)
@@ -608,27 +611,40 @@ defmodule ScenicWidgets.TextField.Renderer do
     old_count = length(old_display_lines)
     new_count = length(new_display_lines)
 
+    x_offset = 10  # text_padding
+    line_height = State.line_height(new_state)
+
     # If line count increased, we need to rebuild the content area
     if new_count > old_count do
       rebuild_content_area(graph, new_state)
     else
-      # Update existing lines
+      # Update existing lines - both content AND position for indentation
       graph = Enum.reduce(Enum.with_index(new_display_lines, 1), graph, fn {line_text, line_num}, g ->
+        # Get indent width and trimmed content
+        {indent_width, content} = State.expand_tabs_with_indent(new_state, line_text)
+        line_x = x_offset + indent_width
+        y_pos = (line_num - 1) * line_height + line_height
+
         try do
           Graph.modify(g, {:text_line, line_num}, fn primitive ->
-            Scenic.Primitive.put(primitive, line_text)
+            primitive
+            |> Scenic.Primitive.put(content)
+            |> Scenic.Primitive.put_style(:translate, {line_x, y_pos})
           end)
         rescue
           _ -> g
         end
       end)
 
-      # Clear any extra old lines
+      # Clear any extra old lines (reset position to base x_offset)
       if old_count > new_count do
         Enum.reduce((new_count + 1)..old_count, graph, fn line_num, g ->
+          y_pos = (line_num - 1) * line_height + line_height
           try do
             Graph.modify(g, {:text_line, line_num}, fn primitive ->
-              Scenic.Primitive.put(primitive, "")
+              primitive
+              |> Scenic.Primitive.put("")
+              |> Scenic.Primitive.put_style(:translate, {x_offset, y_pos})
             end)
           rescue
             _ -> g
@@ -641,6 +657,29 @@ defmodule ScenicWidgets.TextField.Renderer do
   end
 
   defp update_lines_if_changed(graph, _old_state, _new_state), do: graph
+
+  defp update_semantic_if_changed(
+         graph,
+         %State{lines: old_lines, cursor: old_cursor, selection: old_selection, editable: old_editable, mode: old_mode},
+         %State{lines: new_lines, cursor: new_cursor, selection: new_selection, editable: new_editable, mode: new_mode} = new_state
+       )
+       when old_lines != new_lines or old_cursor != new_cursor or old_selection != new_selection or
+              old_editable != new_editable or old_mode != new_mode do
+    semantic = semantic_metadata(new_state)
+    text = State.get_text(new_state)
+
+    try do
+      Graph.modify(graph, :semantic_content, fn primitive ->
+        primitive
+        |> Scenic.Primitive.put(text)
+        |> Scenic.Primitive.put_style(:semantic, semantic)
+      end)
+    rescue
+      _ -> graph
+    end
+  end
+
+  defp update_semantic_if_changed(graph, _old_state, _new_state), do: graph
 
   # Update line numbers when source line count changes
   # Always rebuild gutter to ensure correct line number display, especially for wrapped lines
@@ -655,6 +694,40 @@ defmodule ScenicWidgets.TextField.Renderer do
   defp update_line_numbers_if_changed(graph, _old_state, _new_state), do: graph
 
   # Update cursor position
+  # Update selection highlight when selection changes
+  defp update_selection_if_changed(graph, %State{selection: old_sel}, %State{selection: new_sel} = new_state)
+      when old_sel != new_sel do
+    # Selection primitives live inside :text_content group
+    # We need to modify that group to update selection
+    Graph.modify(graph, :text_content, fn text_content_primitive ->
+      # Get the inner graph from the group primitive
+      inner_graph = Scenic.Primitive.get(text_content_primitive)
+
+      # Delete old selection primitives and render new ones
+      updated_inner = inner_graph
+        |> delete_selection_primitives()
+        |> render_selection(new_state)
+
+      # Put the updated inner graph back
+      Scenic.Primitive.put(text_content_primitive, updated_inner)
+    end)
+  end
+
+  defp update_selection_if_changed(graph, _old_state, _new_state), do: graph
+
+  # Delete all selection highlight primitives from the graph
+  defp delete_selection_primitives(graph) do
+    # Selection primitives are created with IDs like {:selection_highlight, 1}, {:selection_highlight, 2}, etc.
+    # We need to delete them all - try deleting for a reasonable range of lines
+    Enum.reduce(1..1000, graph, fn line_num, g ->
+      try do
+        Graph.delete(g, {:selection_highlight, line_num})
+      rescue
+        _ -> g
+      end
+    end)
+  end
+
   defp update_cursor_if_changed(graph, %State{cursor: old_cursor}, %State{cursor: new_cursor} = new_state)
       when old_cursor != new_cursor do
     x_offset = 10
@@ -701,6 +774,24 @@ defmodule ScenicWidgets.TextField.Renderer do
       update_scrollbar_thumbs(graph, old_scroll, new_scroll, new_state)
     end
   end
+
+  defp semantic_metadata(%State{id: id, editable: editable, mode: mode, cursor: cursor, selection: selection}) do
+    %{
+      type: if(mode == :multi_line, do: :text_buffer, else: :text_field),
+      field_id: id,
+      editable: editable,
+      multiline: mode == :multi_line,
+      role: if(mode == :multi_line, do: :textbox, else: :textfield)
+    }
+    |> maybe_put(:cursor_position, cursor)
+    |> maybe_put(:selection, selection_to_map(selection))
+  end
+
+  defp selection_to_map(nil), do: nil
+  defp selection_to_map({start_pos, end_pos}), do: %{start: start_pos, end: end_pos}
+
+  defp maybe_put(metadata, _key, nil), do: metadata
+  defp maybe_put(metadata, key, value), do: Map.put(metadata, key, value)
 
   # Update scrollbar thumb positions without moving them to wrong Y coordinate
   defp update_scrollbar_thumbs(graph, old_scroll, new_scroll, state) do
