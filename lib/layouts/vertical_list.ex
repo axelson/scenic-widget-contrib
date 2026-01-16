@@ -25,7 +25,8 @@ defmodule ScenicWidgets.VerticalList do
     # TODO here we break the frame down into sub-frames and pass those
     # to the list of component/args, and just add those components with each frame
 
-    init_graph = init_render(args)
+    # Batch render all items at once instead of one-at-a-time via GenServer.cast
+    init_graph = init_render_with_items(args)
 
     init_scene =
       scene
@@ -33,13 +34,10 @@ defmodule ScenicWidgets.VerticalList do
       |> assign(id: args.id)
       |> assign(graph: init_graph)
       |> assign(frame: args.frame)
-      # |> assign(theme: theme)
-      # nothing in items yet cause we haven't rendered anything yet! They go in the render_queue
-      |> assign(items: [])
-      |> assign(render_queue: args.items)
+      # Items are now rendered immediately, no queue needed
+      |> assign(items: args.items)
+      |> assign(render_queue: [])
       |> push_graph(init_graph)
-
-    GenServer.cast(self(), :render_next_component)
 
     request_input(init_scene, [:cursor_scroll])
 
@@ -79,6 +77,45 @@ defmodule ScenicWidgets.VerticalList do
       # this scissor is _essential_ it's the only one that works lol
       scissor: f.size.box
     )
+  end
+
+  @doc """
+  Batch render all items at once during init.
+  This avoids the performance issue of sequential GenServer.cast rendering.
+  """
+  def init_render_with_items(%{frame: f, scroll: scroll, items: items}) do
+    Scenic.Graph.build()
+    |> Scenic.Primitives.group(
+      fn graph ->
+        graph
+        # add rect so v list has bounds
+        |> Scenic.Primitives.rect(f.size.box)
+        # Render all items in a single pass
+        |> Scenic.Primitives.group(
+          fn graph ->
+            Enum.reduce(items, graph, fn item, acc_graph ->
+              render_item(acc_graph, item)
+            end)
+          end,
+          id: :v_list_window,
+          translate: scroll
+        )
+      end,
+      scissor: f.size.box
+    )
+  end
+
+  # Render a single item (component or draw function)
+  defp render_item(graph, {draw_fn, %{frame: %Widgex.Frame{}} = args}) when is_function(draw_fn) do
+    draw_fn.(graph, args)
+  end
+
+  defp render_item(graph, {component_module, %{frame: %Widgex.Frame{}} = args}) when is_atom(component_module) do
+    if Kernel.function_exported?(component_module, :draw, 2) do
+      component_module.draw(graph, args)
+    else
+      component_module.add_to_graph(graph, args)
+    end
   end
 
   # def bounds(%{frame: %{pin: {top_left_x, top_left_y}, size: {width, height}}}, _opts) do

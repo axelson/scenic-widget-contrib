@@ -401,6 +401,11 @@ defmodule ScenicWidgets.TextField.Renderer do
     end
   end
 
+  # Handle selection in map format (from buffer state)
+  defp render_selection(graph, %State{selection: %{start: start_pos, end: end_pos}} = state) do
+    render_selection(graph, %{state | selection: {start_pos, end_pos}})
+  end
+
   defp render_selection_rectangles(graph, state, {sel_start_line, sel_start_col}, {sel_end_line, sel_end_col}) do
     x_offset = 10
     line_height = State.line_height(state)
@@ -971,7 +976,10 @@ defmodule ScenicWidgets.TextField.Renderer do
   defp scroll_to_map(_), do: nil
 
   defp selection_to_map(nil), do: nil
+  defp selection_to_map({{sl, sc}, {el, ec}}), do: %{start: {sl, sc}, end: {el, ec}}
   defp selection_to_map({start_pos, end_pos}), do: %{start: start_pos, end: end_pos}
+  # Handle case where selection is already a map (from buffer state)
+  defp selection_to_map(%{start: start_pos, end: end_pos}), do: %{start: start_pos, end: end_pos}
 
   defp maybe_put(metadata, _key, nil), do: metadata
   defp maybe_put(metadata, key, value), do: Map.put(metadata, key, value)
