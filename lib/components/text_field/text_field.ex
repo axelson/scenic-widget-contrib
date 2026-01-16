@@ -201,9 +201,16 @@ defmodule ScenicWidgets.TextField do
     state = %{state | cursor_timer: timer}
 
     # Request input for direct mode or buffer_backed mode
+    # Only request keyboard input if editable - otherwise just register for mouse/scroll
+    # This prevents read-only TextFields from stealing keyboard input
     if state.input_mode in [:direct, :buffer_backed] do
-      # Include :cursor_pos for scrollbar drag support
-      request_input(scene, [:cursor_button, :cursor_pos, :key, :codepoint, :cursor_scroll])
+      if state.editable do
+        # Full input for editable fields
+        request_input(scene, [:cursor_button, :cursor_pos, :key, :codepoint, :cursor_scroll])
+      else
+        # Only mouse/scroll for read-only fields (allows clicking, scrolling, but no typing)
+        request_input(scene, [:cursor_button, :cursor_pos, :cursor_scroll])
+      end
     end
 
     scene =
@@ -223,9 +230,27 @@ defmodule ScenicWidgets.TextField do
   def handle_input(input, _context, scene) do
     state = scene.assigns.state
 
-    # Debug ALL input
-    IO.puts("🎹 TextField.handle_input: #{inspect(input)} focused=#{state.focused}")
+    # CRITICAL: Only process keyboard input if focused AND editable
+    # This prevents unfocused/read-only TextFields from stealing input
+    # (e.g., buffer pane shouldn't receive input when search bar is open,
+    #  read-only HyperCards shouldn't capture keyboard input)
+    case input do
+      # Keyboard input - only process if focused AND editable
+      {:key, _} when not state.focused or not state.editable ->
+        {:noreply, scene}
 
+      {:codepoint, _} when not state.focused or not state.editable ->
+        {:noreply, scene}
+
+      # Mouse/scroll input - always process (for clicks, scrolling)
+      # But don't allow gaining focus if not editable
+      _ ->
+        do_handle_input(input, scene)
+    end
+  end
+
+  defp do_handle_input(input, scene) do
+    state = scene.assigns.state
 
     # For buffer_backed mode, route input to Buffer.Process
     if state.input_mode == :buffer_backed do
@@ -276,6 +301,27 @@ defmodule ScenicWidgets.TextField do
 
       {:local_update, new_state} ->
         # Some updates (like focus, scrollbar drag) are handled locally
+        update_scene(scene, state, new_state)
+
+      {:click_move_cursor, new_state, action} ->
+        # Click updates focus locally and sends cursor move to buffer
+        if state.buffer_controller do
+          GenServer.cast(state.buffer_controller, {:action, [action]})
+        end
+        update_scene(scene, state, new_state)
+
+      {:drag_select, new_state, action} ->
+        # Drag selection updates cursor locally and sends selection to buffer
+        if state.buffer_controller do
+          GenServer.cast(state.buffer_controller, {:action, [action]})
+        end
+        update_scene(scene, state, new_state)
+
+      {:double_click_select, new_state, action} ->
+        # Double-click word selection - send selection action to buffer
+        if state.buffer_controller do
+          GenServer.cast(state.buffer_controller, {:action, [action]})
+        end
         update_scene(scene, state, new_state)
 
       {:find_requested, id} ->
@@ -387,6 +433,58 @@ defmodule ScenicWidgets.TextField do
     update_scene(scene, scene.assigns.state, state)
   end
 
+  def handle_put(%{editable: editable} = opts, scene) do
+    # Update editable and optionally focused state
+    state = scene.assigns.state
+
+    # Handle cursor blink timer when editable changes
+    new_timer = if editable != state.editable do
+      if editable and state.cursor_timer == nil do
+        # Becoming editable - start blink timer
+        {:ok, timer} = :timer.send_interval(state.cursor_blink_rate, :blink)
+        timer
+      else if not editable and state.cursor_timer != nil do
+        # Becoming read-only - stop blink timer
+        :timer.cancel(state.cursor_timer)
+        nil
+      else
+        state.cursor_timer
+      end
+      end
+    else
+      state.cursor_timer
+    end
+
+    # When entering edit mode, ensure cursor starts visible
+    cursor_visible = if editable and not state.editable do
+      true  # Always start with cursor visible when entering edit mode
+    else
+      state.cursor_visible
+    end
+
+    new_state = %{state |
+      editable: editable,
+      focused: Map.get(opts, :focused, state.focused),
+      cursor_timer: new_timer,
+      cursor_visible: cursor_visible
+    }
+
+    # CRITICAL: When editable changes, update input registration
+    # If becoming editable, request keyboard input; if becoming read-only, release it
+    if editable != state.editable and state.input_mode in [:direct, :buffer_backed] do
+      if editable do
+        # Now editable - request keyboard input
+        request_input(scene, [:cursor_button, :cursor_pos, :key, :codepoint, :cursor_scroll])
+      else
+        # Now read-only - only need mouse/scroll (release keyboard)
+        # Note: Scenic doesn't have release_input, but re-requesting with fewer types works
+        request_input(scene, [:cursor_button, :cursor_pos, :cursor_scroll])
+      end
+    end
+
+    update_scene(scene, state, new_state)
+  end
+
   # ===== CURSOR BLINK TIMER =====
 
   @doc """
@@ -429,9 +527,10 @@ defmodule ScenicWidgets.TextField do
         _ -> state.cursor
       end
 
-      # Convert selection from buffer format %{start: ..., end: ...} to TextField format {start, end}
+      # Convert selection from buffer format %{start: ..., end: ...} to TextField format {{line, col}, {line, col}}
       selection = case buf_state.selection do
-        %{start: start_pos, end: end_pos} -> {start_pos, end_pos}
+        %{start: %{line: sl, col: sc}, end: %{line: el, col: ec}} ->
+          {{sl, sc}, {el, ec}}
         nil -> nil
         other -> other  # Pass through if already in tuple format
       end
@@ -450,6 +549,14 @@ defmodule ScenicWidgets.TextField do
         search_matches: new_search_matches,
         search_current_index: new_search_index
       }
+
+      # Update scroll content size when lines change (critical for horizontal scrolling)
+      # This ensures the scroll state knows the actual content dimensions
+      new_state = if state.lines != buf_state.data do
+        Reducer.update_scroll_content_size(new_state)
+      else
+        new_state
+      end
 
       # Emit search_complete if search results changed
       old_matches = state.search_matches || []

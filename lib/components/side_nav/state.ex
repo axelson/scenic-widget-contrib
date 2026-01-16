@@ -7,8 +7,10 @@ defmodule ScenicWidgets.SideNav.State do
   - Expand/collapse state per node
   - Active item tracking
   - Focused item for keyboard navigation
-  - Scroll offset for viewport management
+  - Scroll state via Widgex.Scrollable
   """
+
+  use Widgex.Scrollable, direction: :vertical
 
   alias ScenicWidgets.SideNav.Item
 
@@ -19,7 +21,7 @@ defmodule ScenicWidgets.SideNav.State do
     :focused_id,         # Currently focused item (for keyboard nav)
     :hovered_id,         # Currently hovered item (for hover effects)
     :expanded,           # MapSet of expanded node IDs
-    :scroll_offset,      # Current scroll position (pixels)
+    :scroll,             # Widgex.Scroll.ScrollState for scrolling
     :theme,              # Visual theme configuration
     :item_bounds         # Pre-calculated bounds for hit-testing
   ]
@@ -38,7 +40,7 @@ defmodule ScenicWidgets.SideNav.State do
     # Dimensions
     item_height: 28,                        # Slightly smaller item height
     indent: 16,                            # Indentation per level
-    font: :ibm_plex_mono,                  # Use IBM Plex Mono
+    font: :roboto,                         # Use Roboto (standard Scenic font)
     font_size: 14,                         # Font size
     line_height: 20,
 
@@ -59,16 +61,60 @@ defmodule ScenicWidgets.SideNav.State do
     theme = Map.merge(@default_theme, Map.get(data, :theme, %{}))
     tree = Map.get(data, :tree, [])
 
+    # Build expanded set from data or from items marked as expanded
+    initial_expanded = Map.get(data, :expanded, build_initial_expanded_set(tree))
+
+    # Calculate item bounds to determine content height
+    item_bounds = calculate_item_bounds(tree, theme, initial_expanded)
+    content_height = calculate_content_height(item_bounds)
+
     %__MODULE__{
       frame: data.frame,
       tree: tree,
       active_id: Map.get(data, :active_id),
       focused_id: Map.get(data, :focused_id),
-      expanded: Map.get(data, :expanded, MapSet.new()),
-      scroll_offset: 0,
+      expanded: initial_expanded,
+      scroll: init_scroll(data.frame, content_height: content_height),
       theme: theme,
-      item_bounds: calculate_item_bounds(tree, theme, MapSet.new())
+      item_bounds: item_bounds
     }
+  end
+
+  @doc """
+  Calculate total content height from item bounds.
+  """
+  def calculate_content_height(item_bounds) when map_size(item_bounds) == 0, do: 0
+  def calculate_content_height(item_bounds) do
+    item_bounds
+    |> Map.values()
+    |> Enum.map(fn bounds -> bounds.y + bounds.height end)
+    |> Enum.max()
+  end
+
+  # Build expanded set from items that have expanded: true
+  defp build_initial_expanded_set(tree) do
+    collect_expanded_items(tree, MapSet.new())
+  end
+
+  defp collect_expanded_items([], acc), do: acc
+  defp collect_expanded_items([item | rest], acc) do
+    item_id = Item.get_id(item)
+
+    # Add this item to expanded set if it's marked as expanded
+    acc = if Item.is_expanded?(item) do
+      MapSet.put(acc, item_id)
+    else
+      acc
+    end
+
+    # Recursively check children
+    acc = if Item.has_children?(item) do
+      collect_expanded_items(Item.get_children(item), acc)
+    else
+      acc
+    end
+
+    collect_expanded_items(rest, acc)
   end
 
   @doc """
@@ -134,8 +180,10 @@ defmodule ScenicWidgets.SideNav.State do
 
     # Recalculate bounds with new expansion state
     new_bounds = calculate_item_bounds(state.tree, state.theme, new_expanded)
+    content_height = calculate_content_height(new_bounds)
+    new_scroll = update_content_size(state.scroll, state.frame.size.width, content_height)
 
-    %{state | expanded: new_expanded, item_bounds: new_bounds}
+    %{state | expanded: new_expanded, item_bounds: new_bounds, scroll: new_scroll}
   end
 
   @doc """
@@ -147,7 +195,9 @@ defmodule ScenicWidgets.SideNav.State do
     else
       new_expanded = MapSet.put(state.expanded, item_id)
       new_bounds = calculate_item_bounds(state.tree, state.theme, new_expanded)
-      %{state | expanded: new_expanded, item_bounds: new_bounds}
+      content_height = calculate_content_height(new_bounds)
+      new_scroll = update_content_size(state.scroll, state.frame.size.width, content_height)
+      %{state | expanded: new_expanded, item_bounds: new_bounds, scroll: new_scroll}
     end
   end
 
@@ -158,7 +208,9 @@ defmodule ScenicWidgets.SideNav.State do
     if MapSet.member?(state.expanded, item_id) do
       new_expanded = MapSet.delete(state.expanded, item_id)
       new_bounds = calculate_item_bounds(state.tree, state.theme, new_expanded)
-      %{state | expanded: new_expanded, item_bounds: new_bounds}
+      content_height = calculate_content_height(new_bounds)
+      new_scroll = update_content_size(state.scroll, state.frame.size.width, content_height)
+      %{state | expanded: new_expanded, item_bounds: new_bounds, scroll: new_scroll}
     else
       state
     end
@@ -176,8 +228,10 @@ defmodule ScenicWidgets.SideNav.State do
     end)
 
     new_bounds = calculate_item_bounds(state.tree, state.theme, new_expanded)
+    content_height = calculate_content_height(new_bounds)
+    new_scroll = update_content_size(state.scroll, state.frame.size.width, content_height)
 
-    %{state | active_id: item_id, expanded: new_expanded, item_bounds: new_bounds}
+    %{state | active_id: item_id, expanded: new_expanded, item_bounds: new_bounds, scroll: new_scroll}
   end
 
   @doc """
@@ -188,22 +242,12 @@ defmodule ScenicWidgets.SideNav.State do
   end
 
   @doc """
-  Update scroll offset.
-  """
-  def set_scroll_offset(%__MODULE__{} = state, offset) do
-    # Clamp scroll to valid range
-    max_offset = calculate_max_scroll(state)
-    clamped = max(0, min(offset, max_offset))
-    %{state | scroll_offset: clamped}
-  end
-
-  @doc """
   Find which item (if any) is at the given coordinates.
   Returns {item_id, :chevron | :text} if hit, nil otherwise.
   """
   def hit_test(%__MODULE__{} = state, {x, y}) do
     # Adjust y for scroll offset
-    adjusted_y = y + state.scroll_offset
+    adjusted_y = y + state.scroll.offset_y
     theme = state.theme
 
     Enum.find_value(state.item_bounds, fn {item_id, bounds} ->
@@ -305,23 +349,6 @@ defmodule ScenicWidgets.SideNav.State do
       true ->
         # Not this item, try siblings
         do_find_ancestors(rest, target_id, path, ancestors)
-    end
-  end
-
-  # Calculate maximum scroll offset
-  defp calculate_max_scroll(%__MODULE__{} = state) do
-    if map_size(state.item_bounds) == 0 do
-      0
-    else
-      # Find the bottom-most item
-      max_y = state.item_bounds
-      |> Map.values()
-      |> Enum.map(fn bounds -> bounds.y + bounds.height end)
-      |> Enum.max()
-
-      # Max scroll is total height minus visible height
-      viewport_height = state.frame.size.height
-      max(0, max_y - viewport_height)
     end
   end
 end

@@ -186,9 +186,9 @@ defmodule ScenicWidgets.MenuBar do
       |> assign(state: state, graph: graph)
       |> push_graph(graph)
 
-    # DON'T request input - we get it through hit testing on our primitives
-    # Requesting it here causes duplicate input delivery!
-    # request_input(scene, [:cursor_button, :cursor_pos, :key])
+    # Request keyboard input for Escape key handling
+    # Cursor input comes through hit testing on primitives, so we don't request it here
+    request_input(scene, [:key])
 
     # Register semantic elements for MCP interaction
     register_semantic_elements(scene, state)
@@ -255,6 +255,9 @@ defmodule ScenicWidgets.MenuBar do
 
     # Close all menus
     scene = if state.active_menu do
+      # Release input capture when closing menus
+      release_input(scene)
+
       new_state = %{state | active_menu: nil, hovered_item: nil, hovered_dropdown: nil, active_sub_menus: %{}}
       graph = OptimizedRenderizer.update_render(scene.assigns.graph, state, new_state)
 
@@ -293,6 +296,12 @@ defmodule ScenicWidgets.MenuBar do
     new_state = Reducer.handle_cursor_pos(state, coords)
 
     if new_state != state do
+      # Handle input capture if menu closed due to cursor leaving area
+      if state.active_menu != nil and new_state.active_menu == nil do
+        Logger.info("🎯 MenuBar: cursor_pos caused menu close at coords #{inspect(coords)}")
+        release_input(scene)
+      end
+
       graph = OptimizedRenderizer.update_render(scene.assigns.graph, state, new_state)
       scene = scene
       |> assign(state: new_state, graph: graph)
@@ -304,11 +313,18 @@ defmodule ScenicWidgets.MenuBar do
   end
 
   def handle_input({:cursor_button, {:btn_left, 1, [], coords}}, _context, scene) do
-    # Logger.debug("MenuBar handle_input click received at: #{inspect(coords)}")
+    Logger.info("🎯 MenuBar: click at #{inspect(coords)}, active_menu=#{inspect(scene.assigns.state.active_menu)}")
     state = scene.assigns.state
+    old_active_menu = state.active_menu
 
     case Reducer.handle_click(state, coords) do
       {:menu_item_clicked, item_id, new_state} ->
+        Logger.info("🎯 MenuBar: menu item clicked: #{inspect(item_id)}")
+        # Menu closed - release input capture
+        if old_active_menu != nil do
+          release_input(scene)
+        end
+
         # Send event to parent
         send_parent_event(scene, {:menu_item_clicked, item_id})
 
@@ -320,6 +336,10 @@ defmodule ScenicWidgets.MenuBar do
         {:noreply, scene}
 
       {:noop, new_state} ->
+        Logger.info("🎯 MenuBar: noop, old_active=#{inspect(old_active_menu)}, new_active=#{inspect(new_state.active_menu)}")
+        # Handle input capture transitions
+        scene = handle_input_capture_transition(scene, old_active_menu, new_state.active_menu)
+
         graph = OptimizedRenderizer.update_render(scene.assigns.graph, state, new_state)
         scene = scene
         |> assign(state: new_state, graph: graph)
@@ -328,11 +348,36 @@ defmodule ScenicWidgets.MenuBar do
     end
   end
 
+  # Handle capture/release based on menu open/close transitions
+  defp handle_input_capture_transition(scene, nil, new_menu) when not is_nil(new_menu) do
+    # Menu opened - capture input so clicks go to us, not underlying components
+    Logger.info("🎯 MenuBar: Capturing input for dropdown #{inspect(new_menu)}")
+    :ok = capture_input(scene, [:cursor_button, :cursor_pos])
+    scene
+  end
+
+  defp handle_input_capture_transition(scene, old_menu, nil) when not is_nil(old_menu) do
+    # Menu closed - release input capture
+    Logger.info("🎯 MenuBar: Releasing input capture (menu #{inspect(old_menu)} closed)")
+    :ok = release_input(scene)
+    scene
+  end
+
+  defp handle_input_capture_transition(scene, _old, _new) do
+    # No transition (both nil or both non-nil) - no change needed
+    scene
+  end
+
   def handle_input({:key, {:key_escape, 1, _}}, _context, scene) do
     state = scene.assigns.state
     new_state = Reducer.handle_escape(state)
 
     if new_state != state do
+      # Menu closed via Escape - release input capture
+      if state.active_menu != nil and new_state.active_menu == nil do
+        release_input(scene)
+      end
+
       graph = OptimizedRenderizer.update_render(scene.assigns.graph, state, new_state)
       scene = scene
       |> assign(state: new_state, graph: graph)
@@ -350,38 +395,116 @@ defmodule ScenicWidgets.MenuBar do
   # Helper to register semantic elements for MCP
   defp register_semantic_elements(scene, %State{} = state) do
     viewport = scene.viewport
-    graph_key = scene.assigns[:id] || :menu_bar
+    scene_name = scene.assigns[:id] || :menu_bar
 
-    # Register each menu header button as a clickable semantic element
-    state.menu_map
-    |> Enum.with_index()
-    |> Enum.each(fn {{menu_id, {label, _items}}, index} ->
-      # Calculate bounds for this menu header
-      x = index * 150  # @item_width from optimized_renderizer
-      y = 0
-      width = 150
-      height = 40
+    # Get offset from frame pin
+    {offset_x, offset_y} = state.frame.pin.point
 
-      # Create semantic ID like "menu_button_file"
-      semantic_id = String.to_atom("menu_button_#{Atom.to_string(menu_id) |> String.replace("menu_", "") |> String.replace("_", "")}")
+    # Get theme values (with defaults matching optimized_renderizer)
+    menu_height = Map.get(state.theme, :menu_height, 40)
+    item_height = Map.get(state.theme, :item_height, 30)
+    item_width = Map.get(state.theme, :item_width, 150)
+    dropdown_padding = Map.get(state.theme, :padding, 5)
 
-      # TODO: Re-enable when Scenic.ViewPort.register_semantic/4 is available
-      # Scenic.ViewPort.register_semantic(
-      #   viewport,
-      #   graph_key,
-      #   semantic_id,
-      #   %{
-      #     type: :button,
-      #     label: label,
-      #     clickable: true,
-      #     bounds: %{left: x, top: y, width: width, height: height}
-      #   }
-      # )
+    # Only register if semantic tables are available
+    unless viewport.semantic_table && viewport.semantic_enabled do
+      Logger.debug("MenuBar semantic registration skipped - tables not available")
+      :ok
+    else
+      # Register each menu header button as a clickable semantic element
+      state.menu_map
+      |> Enum.with_index()
+      |> Enum.each(fn {{menu_id, {label, items}}, index} ->
+        # Calculate bounds for this menu header
+        local_x = index * item_width
+        local_y = 0
 
-      # Logger.info("🎯 Registered MenuBar button '#{label}' with ID #{inspect(semantic_id)} at {#{x}, #{y}, #{width}x#{height}}")
-    end)
+        # Create semantic ID like "menu_file" for the menu header
+        menu_label = label |> String.downcase() |> String.replace(" ", "_")
+        semantic_id = String.to_atom("menu_#{menu_label}")
 
-    :ok
+        # Register the menu header button
+        register_button(viewport, scene_name, semantic_id, label,
+          offset_x + local_x, offset_y + local_y, item_width, menu_height)
+
+        Logger.debug("✅ Registered MenuBar button '#{label}' with ID #{inspect(semantic_id)}")
+
+        # Also register menu items (for when dropdown is open)
+        # Dropdown is translated to y = menu_height, items start at padding
+        items
+        |> Enum.with_index()
+        |> Enum.each(fn {item, item_index} ->
+          # Item y position: menu_height + padding + (index * item_height)
+          item_y = offset_y + menu_height + dropdown_padding + (item_index * item_height)
+
+          case item do
+            {item_id, item_label} when is_binary(item_id) and is_binary(item_label) ->
+              register_menu_item(viewport, scene_name, item_id, item_label, menu_label,
+                offset_x + local_x, item_y, item_width, item_height)
+
+            {item_id, item_label, _action} when is_binary(item_id) and is_binary(item_label) ->
+              register_menu_item(viewport, scene_name, item_id, item_label, menu_label,
+                offset_x + local_x, item_y, item_width, item_height)
+
+            {:sub_menu, _sub_label, _sub_items} ->
+              # TODO: Register sub-menu items recursively
+              :ok
+
+            _ ->
+              :ok
+          end
+        end)
+      end)
+
+      Logger.info("✅ MenuBar semantic registration complete")
+      :ok
+    end
+  end
+
+  defp register_button(viewport, scene_name, id, label, x, y, w, h) do
+    entry = %Scenic.Semantic.Compiler.Entry{
+      id: id,
+      type: :button,
+      module: nil,
+      parent_id: nil,
+      children: [],
+      local_bounds: %{left: x, top: y, width: w, height: h},
+      screen_bounds: %{left: x, top: y, width: w, height: h},
+      clickable: true,
+      focusable: false,
+      label: label,
+      role: :button,
+      value: nil,
+      hidden: false,
+      z_index: 0
+    }
+    :ets.insert(viewport.semantic_table, {{scene_name, id}, entry})
+    :ets.insert(viewport.semantic_index, {id, {scene_name, id}})
+  end
+
+  defp register_menu_item(viewport, scene_name, item_id, item_label, menu_label, x, y, w, h) do
+    # Create semantic ID like "menu_file_new_tidbit"
+    semantic_id = String.to_atom("menu_#{menu_label}_#{item_id}")
+
+    entry = %Scenic.Semantic.Compiler.Entry{
+      id: semantic_id,
+      type: :menuitem,
+      module: nil,
+      parent_id: nil,
+      children: [],
+      local_bounds: %{left: x, top: y, width: w, height: h},
+      screen_bounds: %{left: x, top: y, width: w, height: h},
+      clickable: true,
+      focusable: false,
+      label: item_label,
+      role: :menuitem,
+      value: nil,
+      hidden: false,
+      z_index: 1
+    }
+    :ets.insert(viewport.semantic_table, {{scene_name, semantic_id}, entry})
+    :ets.insert(viewport.semantic_index, {semantic_id, {scene_name, semantic_id}})
+    Logger.debug("     ✅ Registered menu item '#{item_label}' with ID #{inspect(semantic_id)}")
   end
 
   # Remove handle_cast - we're using handle_put for state updates now

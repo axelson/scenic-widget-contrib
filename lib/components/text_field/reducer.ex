@@ -20,6 +20,9 @@ defmodule ScenicWidgets.TextField.Reducer do
   # This prevents the key that triggered focus (e.g., "k" from space+k) from being inserted.
   @focus_debounce_ms 50
 
+  # Double-click threshold in milliseconds
+  @double_click_ms 400
+
   # ===== DIRECT INPUT PROCESSING =====
 
   @doc """
@@ -389,7 +392,8 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   defp handle_click_focus(%State{focused: false} = state, pos) do
     inside = State.point_inside?(state, pos)
-    if inside do
+    # Only allow focus if editable - read-only TextFields should not gain focus
+    if inside and state.editable do
       # Click to focus AND position cursor at click location
       {line, col} = State.click_to_cursor(state, pos)
       new_state = %{state |
@@ -655,11 +659,143 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:find_requested, state.id}
   end
 
-  # Mouse click for focus
+  # ===== SCROLLBAR DRAG (buffer_backed mode) =====
+
+  # Mouse button release - end scrollbar drag
+  def input_to_buffer_action(%State{scrollbar_drag: drag} = state, {:cursor_button, {:btn_left, 0, _, _pos}}) when drag != nil do
+    {:local_update, %{state | scrollbar_drag: nil, scrollbar_drag_start: nil, scrollbar_drag_offset: nil}}
+  end
+
+  # Mouse move during horizontal scrollbar drag
+  def input_to_buffer_action(%State{scrollbar_drag: :x, scrollbar_drag_start: {start_x, _}, scrollbar_drag_offset: start_offset, scroll: scroll} = state, {:cursor_pos, {x, _y}}) do
+    drag_delta = x - start_x
+    {_track_start, track_length, content_size, viewport_size} = State.scrollbar_track_info(state, :x)
+    max_offset = content_size - viewport_size
+
+    scroll_delta = (drag_delta / track_length) * max_offset
+    new_offset_x = max(0, min(max_offset, start_offset + scroll_delta))
+    new_scroll = %{scroll | offset_x: new_offset_x}
+
+    {:local_update, %{state | scroll: new_scroll}}
+  end
+
+  # Mouse move during vertical scrollbar drag
+  def input_to_buffer_action(%State{scrollbar_drag: :y, scrollbar_drag_start: {_, start_y}, scrollbar_drag_offset: start_offset, scroll: scroll} = state, {:cursor_pos, {_x, y}}) do
+    drag_delta = y - start_y
+    {_track_start, track_length, content_size, viewport_size} = State.scrollbar_track_info(state, :y)
+    max_offset = content_size - viewport_size
+
+    scroll_delta = (drag_delta / track_length) * max_offset
+    new_offset_y = max(0, min(max_offset, start_offset + scroll_delta))
+    new_scroll = %{scroll | offset_y: new_offset_y}
+
+    {:local_update, %{state | scroll: new_scroll}}
+  end
+
+  # Mouse click - check for scrollbar hit first, then focus
   def input_to_buffer_action(%State{} = state, {:cursor_button, {:btn_left, 1, _mods, coords}}) do
-    if State.point_inside?(state, coords) do
-      new_state = %{state | focused: true}
-      {:local_update, new_state}
+    hit_result = State.scrollbar_hit_test(state, coords)
+    {x, y} = coords
+    gutter = if state.show_line_numbers, do: state.line_number_width, else: 0
+    content_w = state.frame.size.width - gutter
+    IO.puts("🖱️ CLICK: coords=#{inspect(coords)}, frame=#{state.frame.size.width}x#{state.frame.size.height}, gutter=#{gutter}, scrollbar_hit=#{inspect(hit_result)}")
+    IO.puts("   Expected scrollbar_x range: #{gutter + content_w - 15}..#{gutter + content_w}")
+
+    case hit_result do
+      :x ->
+        # Start horizontal scrollbar drag
+        IO.puts("📜 Starting horizontal scrollbar drag at #{inspect(coords)}")
+        {:local_update, %{state |
+          scrollbar_drag: :x,
+          scrollbar_drag_start: coords,
+          scrollbar_drag_offset: state.scroll.offset_x
+        }}
+
+      :y ->
+        # Start vertical scrollbar drag
+        IO.puts("📜 Starting vertical scrollbar drag at #{inspect(coords)}")
+        {:local_update, %{state |
+          scrollbar_drag: :y,
+          scrollbar_drag_start: coords,
+          scrollbar_drag_offset: state.scroll.offset_y
+        }}
+
+      nil ->
+        # Not on scrollbar - handle focus, cursor positioning, double-click, and text drag
+        if State.point_inside?(state, coords) do
+          # Convert click position to cursor line/col
+          {line, col} = State.click_to_cursor(state, coords)
+          click_pos = {line, col}
+          now = System.monotonic_time(:millisecond)
+
+          # Check for double-click
+          is_double_click = case {state.last_click_time, state.last_click_pos} do
+            {last_time, last_pos} when is_integer(last_time) and last_pos == click_pos ->
+              now - last_time < @double_click_ms
+            _ ->
+              false
+          end
+
+          if is_double_click do
+            # Double-click: select word at click position
+            case State.word_boundaries_at(state, click_pos) do
+              {start_col, end_col} ->
+                # Select the word - start at word start, end at word end
+                start_pos = {line, start_col}
+                end_pos = {line, end_col}
+                new_state = %{state |
+                  focused: true,
+                  text_drag: nil,
+                  text_drag_start: nil,
+                  last_click_time: nil,
+                  last_click_pos: nil
+                }
+                {:double_click_select, new_state, {:select_range, start_pos, end_pos}}
+
+              nil ->
+                # No word at position - just move cursor (treat as single click)
+                new_state = %{state |
+                  focused: true,
+                  text_drag: true,
+                  text_drag_start: click_pos,
+                  last_click_time: now,
+                  last_click_pos: click_pos
+                }
+                {:click_move_cursor, new_state, {:set_cursor, click_pos}}
+            end
+          else
+            # Single click: focus, start text drag for potential selection, and move cursor
+            new_state = %{state |
+              focused: true,
+              text_drag: true,
+              text_drag_start: click_pos,
+              last_click_time: now,
+              last_click_pos: click_pos
+            }
+            # Use :set_cursor for absolute positioning (not :move_cursor which is for relative movement)
+            {:click_move_cursor, new_state, {:set_cursor, click_pos}}
+          end
+        else
+          nil
+        end
+    end
+  end
+
+  # Mouse button release - end text drag
+  def input_to_buffer_action(%State{text_drag: true} = state, {:cursor_button, {:btn_left, 0, _, _pos}}) do
+    {:local_update, %{state | text_drag: nil, text_drag_start: nil}}
+  end
+
+  # Mouse move during text drag - update selection
+  def input_to_buffer_action(%State{text_drag: true, text_drag_start: start_pos} = state, {:cursor_pos, coords}) when start_pos != nil do
+    # Convert current position to line/col
+    {line, col} = State.click_to_cursor(state, coords)
+    current_pos = {line, col}
+
+    # Only update if position changed
+    if current_pos != state.cursor do
+      # Send selection action to buffer
+      {:drag_select, %{state | cursor: current_pos}, {:select_range, start_pos, current_pos}}
     else
       nil
     end
@@ -680,6 +816,23 @@ defmodule ScenicWidgets.TextField.Reducer do
       {:noop, new_state} -> {:local_update, new_state}
       _ -> nil
     end
+  end
+
+  # Shift key tracking for shift+scroll horizontal scrolling (buffer_backed mode)
+  def input_to_buffer_action(%State{scroll: scroll} = state, {:key, {:key_leftshift, 1, _}}) do
+    {:local_update, %{state | scroll: set_scroll_shift(scroll, true)}}
+  end
+
+  def input_to_buffer_action(%State{scroll: scroll} = state, {:key, {:key_rightshift, 1, _}}) do
+    {:local_update, %{state | scroll: set_scroll_shift(scroll, true)}}
+  end
+
+  def input_to_buffer_action(%State{scroll: scroll} = state, {:key, {:key_leftshift, 0, _}}) do
+    {:local_update, %{state | scroll: set_scroll_shift(scroll, false)}}
+  end
+
+  def input_to_buffer_action(%State{scroll: scroll} = state, {:key, {:key_rightshift, 0, _}}) do
+    {:local_update, %{state | scroll: set_scroll_shift(scroll, false)}}
   end
 
   # Fallback - unhandled input

@@ -7,11 +7,71 @@ defmodule ScenicWidgets.FilePicker.Reducer do
 
   alias ScenicWidgets.FilePicker.State
 
+  # ===========================================================================
+  # Save Mode Keyboard Input
+  # ===========================================================================
+
   @doc """
-  Process keyboard input.
+  Process keyboard input in save mode - handles filename typing.
   Returns `{:state, new_state}` or `{:action, action}` or `:noop`.
   """
-  def process_input(%State{} = state, {:key, {key, 1, _mods}}) do
+  def process_input(%State{mode: :save} = state, {:key, {key, 1, _mods}}) do
+    case key do
+      :key_up ->
+        {:state, State.select_prev(state)}
+
+      :key_down ->
+        {:state, State.select_next(state)}
+
+      :key_enter ->
+        # In save mode, Enter confirms the save if filename is valid
+        if State.valid_filename?(state) do
+          {:action, {:file_saved, State.save_path(state)}}
+        else
+          :noop
+        end
+
+      :key_backspace ->
+        # Backspace deletes from filename
+        {:state, State.backspace(state)}
+
+      :key_delete ->
+        {:state, State.delete_at_cursor(state)}
+
+      :key_left ->
+        {:state, State.cursor_left(state)}
+
+      :key_right ->
+        {:state, State.cursor_right(state)}
+
+      :key_home ->
+        {:state, State.cursor_home(state)}
+
+      :key_end ->
+        {:state, State.cursor_end(state)}
+
+      :key_escape ->
+        {:action, :cancel}
+
+      _ ->
+        :noop
+    end
+  end
+
+  # Handle character input in save mode
+  def process_input(%State{mode: :save} = state, {:codepoint, {char, _}}) do
+    {:state, State.insert_char(state, char)}
+  end
+
+  # ===========================================================================
+  # Open Mode Keyboard Input
+  # ===========================================================================
+
+  @doc """
+  Process keyboard input in open mode.
+  Returns `{:state, new_state}` or `{:action, action}` or `:noop`.
+  """
+  def process_input(%State{mode: :open} = state, {:key, {key, 1, _mods}}) do
     case key do
       :key_up ->
         {:state, State.select_prev(state)}
@@ -62,7 +122,17 @@ defmodule ScenicWidgets.FilePicker.Reducer do
     {:state, State.navigate_up(state)}
   end
 
-  def process_event(:open_button, %State{} = state) do
+  # Save/Open button in save mode
+  def process_event(:save_button, %State{mode: :save} = state) do
+    if State.valid_filename?(state) do
+      {:action, {:file_saved, State.save_path(state)}}
+    else
+      :noop
+    end
+  end
+
+  # Open button in open mode
+  def process_event(:open_button, %State{mode: :open} = state) do
     case State.selected_entry(state) do
       %{type: :directory, path: path} ->
         {:state, State.navigate_to(state, path)}

@@ -95,6 +95,9 @@ defmodule ScenicWidgets.IconMenu do
     # Request input for mouse and keyboard interaction
     request_input(scene, [:cursor_pos, :cursor_button, :key])
 
+    # Register semantic elements for MCP automation
+    register_semantic_elements(scene, state)
+
     Logger.debug("IconMenu initialized with #{length(state.menus)} menus")
 
     {:ok, scene}
@@ -168,5 +171,126 @@ defmodule ScenicWidgets.IconMenu do
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
     {:noreply, scene}
+  end
+
+  # ===========================================================================
+  # Semantic Registration (for MCP automation/testing)
+  # ===========================================================================
+
+  defp register_semantic_elements(scene, %State{} = state) do
+    viewport = scene.viewport
+    scene_name = scene.assigns[:id] || :icon_menu
+
+    # Get offset from frame pin (this is where the component is translated to)
+    {offset_x, offset_y} = state.frame.pin.point
+
+    # Get theme values
+    button_size = Map.get(state.theme, :icon_button_size, 40)
+
+    # Get the alignment offset (for right-aligned menus, icons start from the right)
+    x_offset = State.alignment_offset(state)
+
+    # Only register if semantic tables are available
+    unless viewport.semantic_table && viewport.semantic_enabled do
+      Logger.debug("IconMenu semantic registration skipped - tables not available")
+      :ok
+    else
+      # Register each menu icon button using the same positioning as rendering
+      state.menus
+      |> Enum.with_index()
+      |> Enum.each(fn {menu, index} ->
+        # Calculate button position (same as rendering)
+        button_x = x_offset + index * button_size
+        button_y = 0
+
+        # Create semantic ID like "icon_menu_file" for the menu icon
+        menu_id_str = Atom.to_string(menu.id)
+        semantic_id = String.to_atom("icon_menu_#{menu_id_str}")
+
+        # Register the icon button (convert local to screen coordinates)
+        register_button(viewport, scene_name, semantic_id, menu.icon,
+          offset_x + button_x, offset_y + button_y, button_size, button_size)
+
+        Logger.debug("✅ Registered IconMenu button '#{menu.icon}' with ID #{inspect(semantic_id)}")
+
+        # Register menu items using the pre-calculated dropdown bounds
+        case Map.get(state.dropdown_bounds, menu.id) do
+          nil ->
+            :ok
+
+          dropdown ->
+            Enum.each(dropdown.items, fn {item_id, item_bounds} ->
+              # Get the label from the menu items
+              item_label = find_item_label(menu.items, item_id)
+
+              # Convert local bounds to screen coordinates
+              screen_x = offset_x + item_bounds.x
+              screen_y = offset_y + item_bounds.y
+
+              register_menu_item(viewport, scene_name, item_id, item_label, menu_id_str,
+                screen_x, screen_y, item_bounds.width, item_bounds.height)
+            end)
+        end
+      end)
+
+      Logger.debug("✅ IconMenu semantic registration complete")
+      :ok
+    end
+  end
+
+  # Find the label for a menu item by its ID
+  defp find_item_label(items, item_id) do
+    Enum.find_value(items, item_id, fn
+      {id, label} when id == item_id -> label
+      {id, label, _opts} when id == item_id -> label
+      _ -> nil
+    end)
+  end
+
+  defp register_button(viewport, scene_name, id, label, x, y, w, h) do
+    entry = %Scenic.Semantic.Compiler.Entry{
+      id: id,
+      type: :button,
+      module: nil,
+      parent_id: nil,
+      children: [],
+      local_bounds: %{left: x, top: y, width: w, height: h},
+      screen_bounds: %{left: x, top: y, width: w, height: h},
+      clickable: true,
+      focusable: false,
+      label: label,
+      role: :button,
+      value: nil,
+      hidden: false,
+      z_index: 0
+    }
+    :ets.insert(viewport.semantic_table, {{scene_name, id}, entry})
+    :ets.insert(viewport.semantic_index, {id, {scene_name, id}})
+  end
+
+  defp register_menu_item(viewport, scene_name, item_id, item_label, menu_id_str, x, y, w, h) do
+    # Create semantic ID like "icon_menu_file_new"
+    semantic_id = String.to_atom("icon_menu_#{menu_id_str}_#{item_id}")
+
+    entry = %Scenic.Semantic.Compiler.Entry{
+      id: semantic_id,
+      type: :menuitem,
+      module: nil,
+      parent_id: nil,
+      children: [],
+      local_bounds: %{left: x, top: y, width: w, height: h},
+      screen_bounds: %{left: x, top: y, width: w, height: h},
+      clickable: true,
+      focusable: false,
+      label: item_label,
+      role: :menuitem,
+      value: item_id,
+      hidden: false,  # Will be visible when dropdown is open
+      z_index: 10
+    }
+    :ets.insert(viewport.semantic_table, {{scene_name, semantic_id}, entry})
+    :ets.insert(viewport.semantic_index, {semantic_id, {scene_name, semantic_id}})
+
+    Logger.debug("✅ Registered menu item '#{item_label}' with ID #{inspect(semantic_id)}")
   end
 end

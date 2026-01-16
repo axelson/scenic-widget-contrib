@@ -25,35 +25,39 @@ defmodule ScenicWidgets.FilePicker.Renderer do
 
   # Dimensions
   @header_height 60
-  @footer_height 70
+  @footer_height_open 70
+  @footer_height_save 110
   @item_height 28
   @padding 20
   @border_radius 8
+  @input_height 32
 
   @doc """
   Initial render of the FilePicker modal.
   """
   def initial_render(graph, %State{frame: frame} = state) do
-    {modal_frame, list_frame} = calculate_frames(frame)
+    {modal_frame, list_frame} = calculate_frames(state)
 
     graph
     |> render_overlay(frame)
     |> render_modal_background(modal_frame)
     |> render_header(modal_frame, state)
     |> render_file_list(modal_frame, list_frame, state)
-    |> render_footer(modal_frame)
+    |> render_footer(modal_frame, state)
   end
 
   @doc """
   Update render when state changes.
   """
   def update_render(graph, %State{} = old_state, %State{} = new_state) do
-    {modal_frame, list_frame} = calculate_frames(new_state.frame)
+    {modal_frame, list_frame} = calculate_frames(new_state)
 
     # Check what changed
     path_changed = old_state.current_path != new_state.current_path
     selection_changed = old_state.selected_index != new_state.selected_index
     scroll_changed = scroll_changed?(old_state.scroll, new_state.scroll)
+    filename_changed = old_state.filename != new_state.filename or
+                       old_state.filename_cursor != new_state.filename_cursor
 
     cond do
       path_changed ->
@@ -63,6 +67,11 @@ defmodule ScenicWidgets.FilePicker.Renderer do
         |> Graph.delete(:path_text)
         |> render_header(modal_frame, new_state)
         |> render_file_list(modal_frame, list_frame, new_state)
+
+      filename_changed and new_state.mode == :save ->
+        # Update filename input in save mode
+        graph
+        |> update_filename_input(modal_frame, new_state)
 
       selection_changed or scroll_changed ->
         # Update list content and scroll position
@@ -76,8 +85,8 @@ defmodule ScenicWidgets.FilePicker.Renderer do
     end
   end
 
-  # Calculate modal and list frames
-  defp calculate_frames(%Frame{} = frame) do
+  # Calculate modal and list frames based on mode
+  defp calculate_frames(%State{frame: frame, mode: mode}) do
     {frame_width, frame_height} = frame.size.box
     modal_width = frame_width * 0.7
     modal_height = frame_height * 0.7
@@ -89,7 +98,8 @@ defmodule ScenicWidgets.FilePicker.Renderer do
       size: {modal_width, modal_height}
     )
 
-    list_height = modal_height - @header_height - @footer_height
+    footer_height = if mode == :save, do: @footer_height_save, else: @footer_height_open
+    list_height = modal_height - @header_height - footer_height
     list_frame = Frame.new(
       pin: {0, 0},
       size: {modal_width - @padding * 2, list_height}
@@ -226,16 +236,16 @@ defmodule ScenicWidgets.FilePicker.Renderer do
     )
   end
 
-  # Render footer with buttons
-  defp render_footer(graph, %Frame{} = modal_frame) do
+  # Render footer with buttons (open mode)
+  defp render_footer(graph, %Frame{} = modal_frame, %State{mode: :open}) do
     {width, height} = modal_frame.size.box
     {x, y} = modal_frame.pin.point
 
-    footer_y = y + height - @footer_height
+    footer_y = y + height - @footer_height_open
 
     graph
     # Footer background for visibility
-    |> Primitives.rect({width, @footer_height},
+    |> Primitives.rect({width, @footer_height_open},
       id: :footer_bg,
       fill: @header_bg,
       translate: {x, footer_y}
@@ -244,6 +254,100 @@ defmodule ScenicWidgets.FilePicker.Renderer do
     |> render_button("Cancel", :cancel_button, {x + width - 200, footer_y + 15}, {85, 36})
     # Open button (custom drawn, primary style)
     |> render_button("Open", :open_button, {x + width - 100, footer_y + 15}, {85, 36}, :primary)
+  end
+
+  # Render footer with filename input and buttons (save mode)
+  defp render_footer(graph, %Frame{} = modal_frame, %State{mode: :save} = state) do
+    {width, height} = modal_frame.size.box
+    {x, y} = modal_frame.pin.point
+
+    footer_y = y + height - @footer_height_save
+    input_width = width - @padding * 2
+
+    graph
+    # Footer background
+    |> Primitives.rect({width, @footer_height_save},
+      id: :footer_bg,
+      fill: @header_bg,
+      translate: {x, footer_y}
+    )
+    # "File name:" label
+    |> Primitives.text("File name:",
+      id: :filename_label,
+      font_size: 14,
+      fill: @path_color,
+      translate: {x + @padding, footer_y + 22}
+    )
+    # Filename input field
+    |> render_filename_input({x + @padding, footer_y + 30}, input_width, state)
+    # Cancel button
+    |> render_button("Cancel", :cancel_button, {x + width - 200, footer_y + 72}, {85, 36})
+    # Save button (primary style)
+    |> render_button("Save", :save_button, {x + width - 100, footer_y + 72}, {85, 36}, :primary)
+  end
+
+  # Render the filename text input
+  defp render_filename_input(graph, {input_x, input_y}, width, %State{filename: filename, filename_cursor: cursor}) do
+    # Calculate cursor x position based on text before cursor
+    text_before_cursor = String.slice(filename, 0, cursor)
+    # Rough estimate: ~8 pixels per character for monospace
+    cursor_x = String.length(text_before_cursor) * 8 + 8
+
+    graph
+    |> Primitives.group(fn g ->
+      g
+      # Input background
+      |> Primitives.rect({width, @input_height},
+        id: :filename_input_bg,
+        fill: :white,
+        stroke: {1, {150, 150, 150}}
+      )
+      # Filename text
+      |> Primitives.text(filename,
+        id: :filename_text,
+        font_size: 14,
+        fill: :black,
+        translate: {8, 21}
+      )
+      # Cursor (blinking would require animation, just show static)
+      |> Primitives.line({{cursor_x, 4}, {cursor_x, @input_height - 4}},
+        id: :filename_cursor,
+        stroke: {2, :black}
+      )
+    end,
+      id: :filename_input_group,
+      translate: {input_x, input_y}
+    )
+  end
+
+  # Update filename input when typing
+  defp update_filename_input(graph, modal_frame, %State{filename: filename, filename_cursor: cursor}) do
+    {width, height} = modal_frame.size.box
+    {x, y} = modal_frame.pin.point
+    footer_y = y + height - @footer_height_save
+    input_width = width - @padding * 2
+
+    # Calculate cursor position
+    text_before_cursor = String.slice(filename, 0, cursor)
+    cursor_x = String.length(text_before_cursor) * 8 + 8
+
+    graph
+    |> Graph.modify(:filename_text, fn prim ->
+      Scenic.Primitive.put(prim, filename)
+    end)
+    |> Graph.modify(:filename_cursor, fn prim ->
+      Scenic.Primitive.put(prim, {{cursor_x, 4}, {cursor_x, @input_height - 4}})
+    end)
+  rescue
+    # If elements don't exist, do full re-render of footer
+    _ ->
+      graph
+      |> Graph.delete(:footer_bg)
+      |> Graph.delete(:filename_label)
+      |> Graph.delete(:filename_input_group)
+      |> Graph.delete(:cancel_button)
+      |> Graph.delete(:save_button)
+      |> render_footer(modal_frame, %State{mode: :save, filename: filename, filename_cursor: cursor})
   end
 
   # Custom button renderer using primitives

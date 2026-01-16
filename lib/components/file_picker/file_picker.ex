@@ -77,7 +77,13 @@ defmodule ScenicWidgets.FilePicker do
       |> push_graph(graph)
 
     # Request input for keyboard navigation
-    request_input(scene, [:key, :cursor_scroll, :cursor_button])
+    # In save mode, also request codepoint for typing filename
+    input_types = if state.mode == :save do
+      [:key, :codepoint, :cursor_scroll, :cursor_button]
+    else
+      [:key, :cursor_scroll, :cursor_button]
+    end
+    request_input(scene, input_types)
 
     {:ok, scene}
   end
@@ -88,6 +94,11 @@ defmodule ScenicWidgets.FilePicker do
   Handle keyboard and scroll input.
   """
   def handle_input({:key, _} = input, _context, scene) do
+    handle_reducer_result(scene, Reducer.process_input(scene.assigns.state, input))
+  end
+
+  # Handle character input for filename in save mode
+  def handle_input({:codepoint, _} = input, _context, scene) do
     handle_reducer_result(scene, Reducer.process_input(scene.assigns.state, input))
   end
 
@@ -175,8 +186,13 @@ defmodule ScenicWidgets.FilePicker do
         {:noreply, new_scene}
 
       {:action, {:file_selected, path}} ->
-        # Notify parent that a file was selected
+        # Notify parent that a file was selected (open mode)
         cast_parent(scene, {:file_picker, :file_selected, path})
+        {:noreply, scene}
+
+      {:action, {:file_saved, path}} ->
+        # Notify parent that a file save path was chosen (save mode)
+        cast_parent(scene, {:file_picker, :file_saved, path})
         {:noreply, scene}
 
       {:action, :cancel} ->
@@ -190,7 +206,7 @@ defmodule ScenicWidgets.FilePicker do
   end
 
   # Check if a click is within the file list area and return local coordinates
-  defp click_in_list_area?(%State{frame: frame}, {click_x, click_y}) do
+  defp click_in_list_area?(%State{frame: frame, mode: mode}, {click_x, click_y}) do
     {frame_width, frame_height} = frame.size.box
 
     # Modal dimensions
@@ -199,11 +215,15 @@ defmodule ScenicWidgets.FilePicker do
     modal_x = (frame_width - modal_width) / 2
     modal_y = (frame_height - modal_height) / 2
 
+    # Footer height depends on mode
+    footer_height = if mode == :save, do: 110, else: 70
+    header_height = 60
+
     # List area dimensions (inside modal)
     list_x = modal_x + 20
-    list_y = modal_y + 50  # After header
+    list_y = modal_y + header_height  # After header
     list_width = modal_width - 40
-    list_height = modal_height - 110  # Minus header and footer
+    list_height = modal_height - header_height - footer_height
 
     # Check if click is within list bounds
     if click_x >= list_x and click_x <= list_x + list_width and
@@ -236,7 +256,7 @@ defmodule ScenicWidgets.FilePicker do
   end
 
   # Check if click is on any button, returns button id or nil
-  defp click_on_button?(%State{frame: frame}, {click_x, click_y}) do
+  defp click_on_button?(%State{frame: frame, mode: mode}, {click_x, click_y}) do
     {frame_width, frame_height} = frame.size.box
 
     # Modal dimensions
@@ -245,18 +265,23 @@ defmodule ScenicWidgets.FilePicker do
     modal_x = (frame_width - modal_width) / 2
     modal_y = (frame_height - modal_height) / 2
 
-    # Header/footer heights (must match renderer)
-    header_height = 60
-    footer_height = 70
+    # Footer height depends on mode (must match renderer)
+    footer_height = if mode == :save, do: 110, else: 70
+
+    # Button y position in footer (save mode has buttons lower due to filename input)
+    button_y_offset = if mode == :save, do: 72, else: 15
 
     # Button definitions: {id, x, y, width, height}
+    # The action button is either :open_button or :save_button based on mode
+    action_button_id = if mode == :save, do: :save_button, else: :open_button
+
     buttons = [
       # Up button in header
       {:up_button, modal_x + 15, modal_y + 12, 60, 36},
       # Cancel button in footer
-      {:cancel_button, modal_x + modal_width - 200, modal_y + modal_height - footer_height + 15, 85, 36},
-      # Open button in footer
-      {:open_button, modal_x + modal_width - 100, modal_y + modal_height - footer_height + 15, 85, 36}
+      {:cancel_button, modal_x + modal_width - 200, modal_y + modal_height - footer_height + button_y_offset, 85, 36},
+      # Open/Save button in footer
+      {action_button_id, modal_x + modal_width - 100, modal_y + modal_height - footer_height + button_y_offset, 85, 36}
     ]
 
     # Find which button (if any) was clicked

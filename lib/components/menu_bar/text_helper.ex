@@ -8,7 +8,7 @@ defmodule ScenicWidgets.MenuBar.TextHelper do
 
   alias Scenic.Assets.Static
 
-  @default_font :ibm_plex_mono
+  @default_font :roboto
   @default_font_size 16
   @ellipsis "..."
 
@@ -19,7 +19,7 @@ defmodule ScenicWidgets.MenuBar.TextHelper do
   - `text`: The text string to potentially truncate
   - `max_width`: Maximum width in pixels
   - `opts`: Optional keyword list
-    - `:font` - Font to use (default: :ibm_plex_mono)
+    - `:font` - Font to use (default: :roboto)
     - `:font_size` - Font size (default: 16)
     - `:ellipsis` - String to append when truncating (default: "...")
 
@@ -64,7 +64,7 @@ defmodule ScenicWidgets.MenuBar.TextHelper do
   ## Parameters
   - `text`: The text string to measure
   - `opts`: Optional keyword list
-    - `:font` - Font to use (default: :ibm_plex_mono)
+    - `:font` - Font to use (default: :roboto)
     - `:font_size` - Font size (default: 16)
 
   ## Returns

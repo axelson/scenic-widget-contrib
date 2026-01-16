@@ -27,7 +27,8 @@ defmodule ScenicWidgets.SearchBar.State do
     :focused,               # Whether the search input is focused
     :cursor_pos,            # Cursor position in query string
     :font,                  # Font settings
-    :theme                  # Color theme
+    :theme,                 # Color theme
+    :replace_on_next_input  # If true, next input clears query (mimics select-all)
   ]
 
   @type t :: %__MODULE__{
@@ -39,7 +40,8 @@ defmodule ScenicWidgets.SearchBar.State do
     focused: boolean(),
     cursor_pos: non_neg_integer(),
     font: map(),
-    theme: map()
+    theme: map(),
+    replace_on_next_input: boolean()
   }
 
   @doc """
@@ -65,7 +67,7 @@ defmodule ScenicWidgets.SearchBar.State do
     default_theme = %{
       background: {45, 45, 45},          # Dark gray background
       input_background: {60, 60, 60},    # Slightly lighter input area
-      text: :white,
+      text: {255, 255, 255},             # White text (explicit RGB)
       placeholder: {128, 128, 128},      # Gray placeholder
       border: {80, 80, 80},              # Border color
       button_bg: {70, 70, 70},           # Button background
@@ -82,7 +84,8 @@ defmodule ScenicWidgets.SearchBar.State do
       focused: true,
       cursor_pos: String.length(opts[:query] || ""),
       font: Map.merge(default_font, opts[:font] || %{}),
-      theme: Map.merge(default_theme, opts[:theme] || %{})
+      theme: Map.merge(default_theme, opts[:theme] || %{}),
+      replace_on_next_input: false
     }
   end
 
@@ -95,14 +98,30 @@ defmodule ScenicWidgets.SearchBar.State do
 
   @doc """
   Sets the search query and resets cursor to end.
+  Sets replace_on_next_input to true so that the next typed character
+  replaces the query (mimics select-all behavior).
   """
   def set_query(%__MODULE__{} = state, query) when is_binary(query) do
-    %{state | query: query, cursor_pos: String.length(query)}
+    %{state |
+      query: query,
+      cursor_pos: String.length(query),
+      replace_on_next_input: query != ""  # Only replace if there's a query to replace
+    }
   end
 
   @doc """
   Appends a character to the query at cursor position.
+  If replace_on_next_input is true, clears the query first (mimics select-all replacement).
   """
+  def insert_char(%__MODULE__{replace_on_next_input: true} = state, char) when is_binary(char) do
+    # Clear query and insert the new character
+    %{state |
+      query: char,
+      cursor_pos: String.length(char),
+      replace_on_next_input: false
+    }
+  end
+
   def insert_char(%__MODULE__{query: query, cursor_pos: pos} = state, char) when is_binary(char) do
     {before, after_cursor} = String.split_at(query, pos)
     new_query = before <> char <> after_cursor
@@ -111,15 +130,16 @@ defmodule ScenicWidgets.SearchBar.State do
 
   @doc """
   Deletes character before cursor (backspace).
+  Also resets replace_on_next_input flag (user wants to edit, not replace).
   """
   def delete_before_cursor(%__MODULE__{query: query, cursor_pos: pos} = state) when pos > 0 do
     graphemes = String.graphemes(query)
     new_graphemes = List.delete_at(graphemes, pos - 1)
     new_query = Enum.join(new_graphemes)
-    %{state | query: new_query, cursor_pos: pos - 1}
+    %{state | query: new_query, cursor_pos: pos - 1, replace_on_next_input: false}
   end
 
-  def delete_before_cursor(%__MODULE__{} = state), do: state
+  def delete_before_cursor(%__MODULE__{} = state), do: %{state | replace_on_next_input: false}
 
   @doc """
   Deletes character at cursor (delete key).
@@ -137,37 +157,41 @@ defmodule ScenicWidgets.SearchBar.State do
 
   @doc """
   Moves cursor left.
+  Also resets replace_on_next_input flag (user wants to edit, not replace).
   """
   def cursor_left(%__MODULE__{cursor_pos: pos} = state) when pos > 0 do
-    %{state | cursor_pos: pos - 1}
+    %{state | cursor_pos: pos - 1, replace_on_next_input: false}
   end
 
-  def cursor_left(%__MODULE__{} = state), do: state
+  def cursor_left(%__MODULE__{} = state), do: %{state | replace_on_next_input: false}
 
   @doc """
   Moves cursor right.
+  Also resets replace_on_next_input flag (user wants to edit, not replace).
   """
   def cursor_right(%__MODULE__{query: query, cursor_pos: pos} = state) do
     max_pos = String.length(query)
     if pos < max_pos do
-      %{state | cursor_pos: pos + 1}
+      %{state | cursor_pos: pos + 1, replace_on_next_input: false}
     else
-      state
+      %{state | replace_on_next_input: false}
     end
   end
 
   @doc """
   Moves cursor to start of query.
+  Also resets replace_on_next_input flag (user wants to edit, not replace).
   """
   def cursor_home(%__MODULE__{} = state) do
-    %{state | cursor_pos: 0}
+    %{state | cursor_pos: 0, replace_on_next_input: false}
   end
 
   @doc """
   Moves cursor to end of query.
+  Also resets replace_on_next_input flag (user wants to edit, not replace).
   """
   def cursor_end(%__MODULE__{query: query} = state) do
-    %{state | cursor_pos: String.length(query)}
+    %{state | cursor_pos: String.length(query), replace_on_next_input: false}
   end
 
   @doc """

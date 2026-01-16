@@ -20,7 +20,7 @@ defmodule ScenicWidgets.MenuBar.OptimizedRenderizer do
   defp sub_menu_width(%State{theme: theme}), do: Map.get(theme, :sub_menu_width, 150)
   defp item_height(%State{theme: theme}), do: Map.get(theme, :item_height, 30)
   defp padding(%State{theme: theme}), do: Map.get(theme, :padding, 5)
-  defp font(%State{theme: theme}), do: Map.get(theme, :font, :ibm_plex_mono)
+  defp font(%State{theme: theme}), do: Map.get(theme, :font, :roboto)
   defp font_size(%State{theme: theme}), do: Map.get(theme, :font_size, 16)
   defp max_text_width(%State{theme: theme}), do: Map.get(theme, :max_text_width, 120)
   defp text_overflow(%State{theme: theme}), do: Map.get(theme, :text_overflow, :ellipsis)

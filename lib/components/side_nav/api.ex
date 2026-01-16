@@ -18,6 +18,8 @@ defmodule ScenicWidgets.SideNav.Api do
       SideNav.Api.set_filter(state, "search term")
   """
 
+  use Widgex.Scrollable, direction: :vertical
+
   alias ScenicWidgets.SideNav.{State, Item}
 
   @doc """
@@ -161,29 +163,10 @@ defmodule ScenicWidgets.SideNav.Api do
         state
 
       bounds ->
-        viewport_height = state.frame.size.height
-        item_top = bounds.y
-        item_bottom = bounds.y + bounds.height
-
-        # Calculate visible range
-        visible_top = state.scroll_offset
-        visible_bottom = state.scroll_offset + viewport_height
-
-        new_offset = cond do
-          # Item is above visible area
-          item_top < visible_top ->
-            item_top
-
-          # Item is below visible area
-          item_bottom > visible_bottom ->
-            item_bottom - viewport_height
-
-          # Item is already visible
-          true ->
-            state.scroll_offset
-        end
-
-        State.set_scroll_offset(state, new_offset)
+        # Use scroll_to_show to make item visible with small margin
+        rect = {bounds.x, bounds.y, bounds.width, bounds.height}
+        new_scroll = scroll_to_show(state.scroll, rect, 4)
+        %{state | scroll: new_scroll}
     end
   end
 

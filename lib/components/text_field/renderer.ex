@@ -59,6 +59,7 @@ defmodule ScenicWidgets.TextField.Renderer do
       |> update_semantic_if_changed(old_state, new_state)
       |> update_line_numbers_if_changed(old_state, new_state)
       |> update_selection_if_changed(old_state, new_state)
+      |> update_search_matches_if_changed(old_state, new_state)
       |> update_cursor_if_changed(old_state, new_state)
       |> update_scrollbars_if_changed(old_state, new_state)
     end
@@ -178,6 +179,9 @@ defmodule ScenicWidgets.TextField.Renderer do
     # Calculate wrapped display lines
     display_lines = wrap_lines(state)
 
+    # text_y_offset no longer used - single-line mode uses text_base: :middle
+    text_y_offset = 0
+
     Primitives.group(graph, fn outer_g ->
       outer_g
       # Inner group that scrolls both directions
@@ -185,8 +189,9 @@ defmodule ScenicWidgets.TextField.Renderer do
         inner_g
         |> render_semantic_content(state)
         |> render_selection(state)
-        |> render_text_lines(state, display_lines, text_padding, line_height)
-        |> render_cursor(state, text_padding, line_height)
+        |> render_search_matches(state)
+        |> render_text_lines(state, display_lines, text_padding, line_height, text_y_offset)
+        |> render_cursor(state, text_padding, line_height, text_y_offset)
       end,
         id: :text_content,
         translate: {-scroll.offset_x, -scroll.offset_y}
@@ -286,35 +291,48 @@ defmodule ScenicWidgets.TextField.Renderer do
   # Render all text lines
   # Uses explicit x-positioning for indentation because Scenic renders
   # leading spaces as zero-width
-  defp render_text_lines(graph, %State{} = state, display_lines, x_offset, line_height) do
+  # For single-line mode, uses text_base: :middle for perfect vertical centering
+  defp render_text_lines(graph, %State{mode: mode, frame: frame} = state, display_lines, x_offset, line_height, _text_y_offset \\ 0) do
     Enum.reduce(Enum.with_index(display_lines, 1), graph, fn {line_text, line_num}, g ->
-      y_pos = (line_num - 1) * line_height + line_height
-
       # Expand tabs and get indent width + trimmed content
       # Scenic renders leading spaces as zero-width, so we position explicitly
       {indent_width, content} = State.expand_tabs_with_indent(state, line_text)
       line_x = x_offset + indent_width
 
+      # For single-line mode, use text_base: :middle and center in frame
+      # For multi-line, use standard baseline positioning
+      # Small +2 adjustment accounts for visual centering vs typographic middle
+      {y_pos, text_opts} = case mode do
+        :single_line ->
+          {frame.size.height / 2 + 2, [text_base: :middle]}
+        _ ->
+          {(line_num - 1) * line_height + line_height, []}
+      end
+
       g
       |> Primitives.text(
         content,
-        translate: {line_x, y_pos},
-        fill: state.colors.text,
-        font_size: state.font.size,
-        font: state.font.name,
-        id: {:text_line, line_num}
+        [{:translate, {line_x, y_pos}},
+         {:fill, state.colors.text},
+         {:font_size, state.font.size},
+         {:font, state.font.name},
+         {:id, {:text_line, line_num}}
+         | text_opts]
       )
     end)
   end
 
   # Render the cursor
+  # text_y_offset is used for vertical centering in single-line mode
   defp render_cursor(graph, %State{
     cursor: {line, col},
     cursor_visible: visible,
     focused: focused,
     cursor_mode: cursor_mode,
-    colors: colors
-  } = state, x_offset, line_height) do
+    colors: colors,
+    frame: frame,
+    mode: mode
+  } = state, x_offset, line_height, _text_y_offset \\ 0) do
     # Get cursor position in display line coordinates
     {display_line, display_col} = source_to_display_cursor(state, {line, col})
 
@@ -326,9 +344,17 @@ defmodule ScenicWidgets.TextField.Renderer do
     # Calculate cursor X position
     cursor_x = x_offset + State.string_width(state, text_before_cursor)
 
-    # Position cursor at line top
-    line_top = (display_line - 1) * line_height
-    cursor_y = line_top + 4
+    # For single-line mode, center cursor vertically (text uses text_base: :middle)
+    # For multi-line, use standard line-based positioning
+    cursor_y = case mode do
+      :single_line ->
+        # Text is centered at frame_height/2 + 2 with text_base: :middle
+        # Cursor needs no extra adjustment
+        frame.size.height / 2 - line_height / 2
+      _ ->
+        # Standard multi-line: position at line top + small offset
+        (display_line - 1) * line_height + 4
+    end
 
     # Calculate cursor width based on mode
     cursor_width = case cursor_mode do
@@ -379,7 +405,7 @@ defmodule ScenicWidgets.TextField.Renderer do
     x_offset = 10
     line_height = State.line_height(state)
     display_lines = wrap_lines(state)
-    # Selection highlight - steel blue with higher opacity for visibility on dark backgrounds
+    # Selection highlight - steel blue with good visibility on dark backgrounds
     selection_color = {:color_rgba, {70, 130, 180, 180}}
 
     Enum.reduce(sel_start_line..sel_end_line, graph, fn line_num, acc_graph ->
@@ -402,7 +428,7 @@ defmodule ScenicWidgets.TextField.Renderer do
       selected_text = String.slice(line_text, start_col_on_line - 1, max(0, end_col_on_line - start_col_on_line))
 
       start_x_offset = State.string_width(state, text_before_selection)
-      selection_width = State.string_width(state, selected_text)
+      selection_width = max(1, State.string_width(state, selected_text))
 
       acc_graph
       |> Primitives.rect(
@@ -412,6 +438,130 @@ defmodule ScenicWidgets.TextField.Renderer do
         id: {:selection_highlight, line_num}
       )
     end)
+  end
+
+  # Render search match highlighting
+  defp render_search_matches(graph, %State{search_matches: nil}), do: graph
+  defp render_search_matches(graph, %State{search_matches: []}), do: graph
+
+  defp render_search_matches(graph, %State{search_matches: matches, search_current_index: current_idx, lines: state_lines} = state) do
+    x_offset = 10
+    line_height = State.line_height(state)
+    # Yellow highlight for search matches, orange for current match
+    match_color = {:color_rgba, {255, 255, 0, 120}}
+    current_match_color = {:color_rgba, {255, 165, 0, 180}}
+
+    # Small vertical adjustment to center highlight behind text
+    # Text baseline is at (line_num * line_height), text appears above baseline
+    # Highlight should cover the visual text area
+    y_adjust = 4  # pixels to shift down for better centering
+
+    # Build mapping from source line number to first display line index
+    # This accounts for word wrap where one source line becomes multiple display lines
+    source_to_display = build_source_to_display_map(state_lines, state)
+
+    matches
+    |> Enum.with_index()
+    |> Enum.reduce(graph, fn {{line_num, col_num, match_text}, idx}, acc_graph ->
+      # Get the display line index for this source line (accounting for word wrap)
+      display_line_idx = Map.get(source_to_display, line_num, line_num)
+
+      # Position highlight at correct display line position
+      y_position = (display_line_idx - 1) * line_height + y_adjust
+
+      # Get line text for x positioning
+      # Use state_lines (actual lines) for consistency with search
+      line_text = Enum.at(state_lines, line_num - 1, "")
+
+      # For wrapped lines, we need to handle x position differently
+      # The match might be on a wrapped portion of the line
+      # Calculate which wrapped segment the match is in and its x offset within that segment
+      {wrapped_y_offset, wrapped_x_offset} =
+        calculate_wrapped_position(state, line_text, col_num - 1)
+
+      # Adjust y for wrapped segments
+      final_y = y_position + (wrapped_y_offset * line_height)
+      final_x = x_offset + wrapped_x_offset
+
+      match_width = max(1, State.string_width(state, match_text))
+
+      # Use different color for current match
+      color = if idx == current_idx, do: current_match_color, else: match_color
+
+      acc_graph
+      |> Primitives.rect(
+        {match_width, line_height},
+        fill: color,
+        translate: {final_x, final_y},
+        id: {:search_match, idx}
+      )
+    end)
+  end
+
+  # Build a map from source line number (1-indexed) to first display line index (1-indexed)
+  # This accounts for word wrap where one source line might span multiple display lines
+  defp build_source_to_display_map(source_lines, %State{} = state) do
+    max_width = content_area_width(state)
+
+    {map, _display_idx} =
+      Enum.with_index(source_lines, 1)
+      |> Enum.reduce({%{}, 1}, fn {source_line, source_num}, {acc_map, current_display_idx} ->
+        # Record that this source line starts at this display line
+        new_map = Map.put(acc_map, source_num, current_display_idx)
+
+        # Count how many display lines this source line produces
+        display_line_count = case state.wrap_mode do
+          :word -> length(wrap_line(source_line, max_width, state))
+          :char -> length(wrap_line_by_chars(source_line, max_width, state))
+          :none -> 1
+        end
+
+        {new_map, current_display_idx + display_line_count}
+      end)
+
+    map
+  end
+
+  # Calculate the y-offset (in line counts) and x-offset (in pixels) for a character position
+  # within a potentially wrapped line
+  defp calculate_wrapped_position(%State{wrap_mode: :none} = state, line_text, char_idx) do
+    # No wrapping - simple x offset calculation
+    text_before = String.slice(line_text, 0, char_idx)
+    {0, State.string_width(state, text_before)}
+  end
+
+  defp calculate_wrapped_position(%State{} = state, line_text, char_idx) do
+    max_width = content_area_width(state)
+
+    # Wrap the line to see how it breaks
+    wrapped = case state.wrap_mode do
+      :word -> wrap_line(line_text, max_width, state)
+      :char -> wrap_line_by_chars(line_text, max_width, state)
+      :none -> [line_text]
+    end
+
+    # Find which wrapped segment contains char_idx
+    find_char_in_wrapped_segments(wrapped, char_idx, 0, state)
+  end
+
+  defp find_char_in_wrapped_segments([], _char_idx, segment_num, _state) do
+    # Character beyond end of line - use last segment
+    {segment_num, 0}
+  end
+
+  defp find_char_in_wrapped_segments([segment | rest], char_idx, segment_num, state) do
+    segment_len = String.length(segment)
+
+    if char_idx < segment_len do
+      # Found it in this segment - calculate x offset within this segment
+      text_before = String.slice(segment, 0, char_idx)
+      {segment_num, State.string_width(state, text_before)}
+    else
+      # Not in this segment - check next one
+      # Note: subtract segment length, but wrapped segments might not have clean character boundaries
+      # For word wrap, there may be a space that's elided
+      find_char_in_wrapped_segments(rest, char_idx - segment_len, segment_num + 1, state)
+    end
   end
 
   # Render scrollbars inside the main group (for z-order)
@@ -613,6 +763,7 @@ defmodule ScenicWidgets.TextField.Renderer do
 
     x_offset = 10  # text_padding
     line_height = State.line_height(new_state)
+    frame_height = new_state.frame.size.height
 
     # If line count increased, we need to rebuild the content area
     if new_count > old_count do
@@ -623,7 +774,14 @@ defmodule ScenicWidgets.TextField.Renderer do
         # Get indent width and trimmed content
         {indent_width, content} = State.expand_tabs_with_indent(new_state, line_text)
         line_x = x_offset + indent_width
-        y_pos = (line_num - 1) * line_height + line_height
+
+        # For single-line mode, use frame center (text_base: :middle is already set)
+        # For multi-line, use standard baseline positioning
+        # +2 adjustment matches initial render
+        y_pos = case new_state.mode do
+          :single_line -> frame_height / 2 + 2
+          _ -> (line_num - 1) * line_height + line_height
+        end
 
         try do
           Graph.modify(g, {:text_line, line_num}, fn primitive ->
@@ -639,7 +797,10 @@ defmodule ScenicWidgets.TextField.Renderer do
       # Clear any extra old lines (reset position to base x_offset)
       if old_count > new_count do
         Enum.reduce((new_count + 1)..old_count, graph, fn line_num, g ->
-          y_pos = (line_num - 1) * line_height + line_height
+          y_pos = case new_state.mode do
+            :single_line -> frame_height / 2 + 2
+            _ -> (line_num - 1) * line_height + line_height
+          end
           try do
             Graph.modify(g, {:text_line, line_num}, fn primitive ->
               primitive
@@ -658,28 +819,40 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   defp update_lines_if_changed(graph, _old_state, _new_state), do: graph
 
-  defp update_semantic_if_changed(
-         graph,
-         %State{lines: old_lines, cursor: old_cursor, selection: old_selection, editable: old_editable, mode: old_mode},
-         %State{lines: new_lines, cursor: new_cursor, selection: new_selection, editable: new_editable, mode: new_mode} = new_state
-       )
-       when old_lines != new_lines or old_cursor != new_cursor or old_selection != new_selection or
-              old_editable != new_editable or old_mode != new_mode do
-    semantic = semantic_metadata(new_state)
-    text = State.get_text(new_state)
+  defp update_semantic_if_changed(graph, old_state, new_state) do
+    if semantic_changed?(old_state, new_state) do
+      semantic = semantic_metadata(new_state)
+      text = State.get_text(new_state)
 
-    try do
-      Graph.modify(graph, :semantic_content, fn primitive ->
-        primitive
-        |> Scenic.Primitive.put(text)
-        |> Scenic.Primitive.put_style(:semantic, semantic)
-      end)
-    rescue
-      _ -> graph
+      try do
+        Graph.modify(graph, :semantic_content, fn primitive ->
+          primitive
+          |> Scenic.Primitive.put(text)
+          |> Scenic.Primitive.put_style(:semantic, semantic)
+        end)
+      rescue
+        _ -> graph
+      end
+    else
+      graph
     end
   end
 
-  defp update_semantic_if_changed(graph, _old_state, _new_state), do: graph
+  defp semantic_changed?(old_state, new_state) do
+    old_state.lines != new_state.lines or
+    old_state.cursor != new_state.cursor or
+    old_state.selection != new_state.selection or
+    old_state.editable != new_state.editable or
+    old_state.mode != new_state.mode or
+    scroll_changed?(old_state.scroll, new_state.scroll)
+  end
+
+  defp scroll_changed?(nil, nil), do: false
+  defp scroll_changed?(nil, _), do: true
+  defp scroll_changed?(_, nil), do: true
+  defp scroll_changed?(old, new) do
+    old.offset_x != new.offset_x or old.offset_y != new.offset_y
+  end
 
   # Update line numbers when source line count changes
   # Always rebuild gutter to ensure correct line number display, especially for wrapped lines
@@ -693,45 +866,31 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   defp update_line_numbers_if_changed(graph, _old_state, _new_state), do: graph
 
-  # Update cursor position
   # Update selection highlight when selection changes
+  # Selection changes require rebuilding the content area since we can't
+  # dynamically add/remove primitives from nested groups
   defp update_selection_if_changed(graph, %State{selection: old_sel}, %State{selection: new_sel} = new_state)
       when old_sel != new_sel do
-    # Selection primitives live inside :text_content group
-    # We need to modify that group to update selection
-    Graph.modify(graph, :text_content, fn text_content_primitive ->
-      # Get the inner graph from the group primitive
-      inner_graph = Scenic.Primitive.get(text_content_primitive)
-
-      # Delete old selection primitives and render new ones
-      updated_inner = inner_graph
-        |> delete_selection_primitives()
-        |> render_selection(new_state)
-
-      # Put the updated inner graph back
-      Scenic.Primitive.put(text_content_primitive, updated_inner)
-    end)
+    rebuild_content_area(graph, new_state)
   end
 
   defp update_selection_if_changed(graph, _old_state, _new_state), do: graph
 
-  # Delete all selection highlight primitives from the graph
-  defp delete_selection_primitives(graph) do
-    # Selection primitives are created with IDs like {:selection_highlight, 1}, {:selection_highlight, 2}, etc.
-    # We need to delete them all - try deleting for a reasonable range of lines
-    Enum.reduce(1..1000, graph, fn line_num, g ->
-      try do
-        Graph.delete(g, {:selection_highlight, line_num})
-      rescue
-        _ -> g
-      end
-    end)
+  # Update search match highlighting when matches or current index changes
+  defp update_search_matches_if_changed(graph,
+      %State{search_matches: old_matches, search_current_index: old_idx},
+      %State{search_matches: new_matches, search_current_index: new_idx} = new_state)
+      when old_matches != new_matches or old_idx != new_idx do
+    rebuild_content_area(graph, new_state)
   end
+
+  defp update_search_matches_if_changed(graph, _old_state, _new_state), do: graph
 
   defp update_cursor_if_changed(graph, %State{cursor: old_cursor}, %State{cursor: new_cursor} = new_state)
       when old_cursor != new_cursor do
     x_offset = 10
     line_height = State.line_height(new_state)
+    frame_height = new_state.frame.size.height
 
     # Get cursor position in display line coordinates
     {display_line, display_col} = source_to_display_cursor(new_state, new_cursor)
@@ -741,8 +900,18 @@ defmodule ScenicWidgets.TextField.Renderer do
     text_before_cursor = String.slice(current_line, 0, max(0, display_col - 1))
 
     cursor_x = x_offset + State.string_width(new_state, text_before_cursor)
-    line_top = (display_line - 1) * line_height
-    cursor_y = line_top + 4
+
+    # For single-line mode, center cursor vertically (text uses text_base: :middle)
+    # For multi-line, use standard line-based positioning
+    cursor_y = case new_state.mode do
+      :single_line ->
+        # Text is centered at frame_height/2 + 2 with text_base: :middle
+        # Cursor needs no extra adjustment
+        frame_height / 2 - line_height / 2
+      _ ->
+        # Standard multi-line: position at line top + small offset
+        (display_line - 1) * line_height + 4
+    end
 
     should_show_cursor = new_state.focused and new_state.cursor_visible
 
@@ -775,7 +944,7 @@ defmodule ScenicWidgets.TextField.Renderer do
     end
   end
 
-  defp semantic_metadata(%State{id: id, editable: editable, mode: mode, cursor: cursor, selection: selection}) do
+  defp semantic_metadata(%State{id: id, editable: editable, mode: mode, cursor: cursor, selection: selection, scroll: scroll}) do
     %{
       type: if(mode == :multi_line, do: :text_buffer, else: :text_field),
       field_id: id,
@@ -785,7 +954,21 @@ defmodule ScenicWidgets.TextField.Renderer do
     }
     |> maybe_put(:cursor_position, cursor)
     |> maybe_put(:selection, selection_to_map(selection))
+    |> maybe_put(:scroll, scroll_to_map(scroll))
   end
+
+  defp scroll_to_map(nil), do: nil
+  defp scroll_to_map(%{offset_x: ox, offset_y: oy, viewport_width: vw, viewport_height: vh, content_width: cw, content_height: ch}) do
+    %{
+      offset_x: ox,
+      offset_y: oy,
+      viewport_width: vw,
+      viewport_height: vh,
+      content_width: cw,
+      content_height: ch
+    }
+  end
+  defp scroll_to_map(_), do: nil
 
   defp selection_to_map(nil), do: nil
   defp selection_to_map({start_pos, end_pos}), do: %{start: start_pos, end: end_pos}
@@ -894,9 +1077,11 @@ defmodule ScenicWidgets.TextField.Renderer do
   end
 
   # Calculate the available width for text content
-  defp content_area_width(%State{scroll: scroll, show_line_numbers: show_ln, line_number_width: ln_width}) do
-    gutter_width = if show_ln, do: ln_width, else: 0
-    scroll.viewport_width - gutter_width - 20  # 20 for padding
+  # Note: scroll.viewport_width already excludes gutter (set from content_frame in State.new)
+  # Subtract 40 for: text padding (20) + scrollbar (12) + buffer (8)
+  # This must match the calculation in State.new and Reducer for consistent wrapping
+  defp content_area_width(%State{scroll: scroll}) do
+    scroll.viewport_width - 40
   end
 
   # Build mapping from display line number to {source_line_number, is_first_of_source}

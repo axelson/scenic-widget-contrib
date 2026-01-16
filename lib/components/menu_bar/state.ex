@@ -35,7 +35,7 @@ defmodule ScenicWidgets.MenuBar.State do
     padding: 5,
 
     # Typography
-    font: :ibm_plex_mono,
+    font: :roboto,
     font_size: 16,
 
     # Text Overflow

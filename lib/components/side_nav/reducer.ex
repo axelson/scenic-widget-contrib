@@ -7,7 +7,11 @@ defmodule ScenicWidgets.SideNav.Reducer do
   - Click text: emit navigation event (no expand/collapse)
   - Keyboard navigation: Up/Down/Left/Right/Enter
   - Auto-scroll to keep focused item visible
+
+  Uses Widgex.Scrollable for scroll handling.
   """
+
+  use Widgex.Scrollable, direction: :vertical
 
   alias ScenicWidgets.SideNav.{State, Item}
 
@@ -210,13 +214,34 @@ defmodule ScenicWidgets.SideNav.Reducer do
 
   @doc """
   Handle scroll wheel input.
+  Accepts either {dx, dy} or {{dx, dy}, coords} format.
+  Returns {:scroll_changed, new_state} or {:noop, state}
   """
-  def handle_scroll(%State{} = state, {_dx, dy}) do
-    # Scroll down = positive dy, move content up (increase offset)
-    # Scenic's scroll events use this convention
-    scroll_speed = 40  # pixels per scroll tick
-    new_offset = state.scroll_offset + (dy * scroll_speed)
-    State.set_scroll_offset(state, new_offset)
+  def handle_scroll_input(%State{} = state, {{_dx, dy}, _coords}) do
+    # Full scroll event with coords - extract delta
+    do_scroll(state, dy)
+  end
+
+  def handle_scroll_input(%State{} = state, {_dx, dy}) do
+    # Just the delta tuple
+    do_scroll(state, dy)
+  end
+
+  def handle_scroll_input(%State{} = state, {_dx, dy, _x, _y}) do
+    # Alternative format from some Scenic drivers
+    do_scroll(state, dy)
+  end
+
+  defp do_scroll(%State{} = state, dy) when is_number(dy) do
+    # Use Widgex.Scrollable's handle_scroll function
+    # Negate for natural scrolling (scroll down = content moves up)
+    new_scroll = handle_scroll(state.scroll, -dy)
+
+    if scroll_changed?(state.scroll, new_scroll) do
+      {:scroll_changed, %{state | scroll: new_scroll}}
+    else
+      {:noop, state}
+    end
   end
 
   # Private helpers
@@ -227,29 +252,10 @@ defmodule ScenicWidgets.SideNav.Reducer do
         state
 
       bounds ->
-        viewport_height = state.frame.size.height
-        item_top = bounds.y
-        item_bottom = bounds.y + bounds.height
-
-        # Calculate visible range
-        visible_top = state.scroll_offset
-        visible_bottom = state.scroll_offset + viewport_height
-
-        new_offset = cond do
-          # Item is above visible area - scroll up to show it at top
-          item_top < visible_top ->
-            item_top
-
-          # Item is below visible area - scroll down to show it at bottom
-          item_bottom > visible_bottom ->
-            item_bottom - viewport_height
-
-          # Item is already visible
-          true ->
-            state.scroll_offset
-        end
-
-        State.set_scroll_offset(state, new_offset)
+        # Use scroll_to_show to make item visible with small margin
+        rect = {bounds.x, bounds.y, bounds.width, bounds.height}
+        new_scroll = scroll_to_show(state.scroll, rect, 4)
+        %{state | scroll: new_scroll}
     end
   end
 

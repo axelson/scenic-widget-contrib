@@ -9,8 +9,10 @@ defmodule ScenicWidgets.SideNav.Renderizer do
   - Active item highlighting with left accent bar
   - Hover states
   - Focus ring for keyboard navigation
-  - Scrollable viewport with scissor clipping
+  - Scrollable viewport via Widgex.Scrollable
   """
+
+  use Widgex.Scrollable, direction: :vertical
 
   alias Scenic.Graph
   alias Scenic.Primitives
@@ -21,7 +23,6 @@ defmodule ScenicWidgets.SideNav.Renderizer do
   This builds the complete graph structure.
   """
   def initial_render(graph, %State{} = state) do
-    {width, height} = state.frame.size.box
     border_color = Map.get(state.theme, :border, {220, 220, 220})
 
     # Note: Parent component positions us via `translate:` option in add_to_graph
@@ -38,16 +39,13 @@ defmodule ScenicWidgets.SideNav.Renderizer do
           fill: state.theme.background,
           stroke: {1, border_color}
         )
-        # Scrollable content area (with scissor clipping)
-        |> Primitives.group(
-          fn scroll_g ->
-            scroll_g
-            |> render_tree(state.tree, state, 0)
-          end,
-          id: :sidebar_scroll_group,
-          translate: {0, -state.scroll_offset},
-          scissor: {width - 2, height - 2}  # Account for border
-        )
+        # Scrollable content area using Widgex.Scrollable macro
+        |> scrollable_group(state.scroll, state.frame, fn scroll_g ->
+          scroll_g
+          |> render_tree(state.tree, state, 0)
+        end, id: :sidebar_scroll_group)
+        # Scrollbars on top
+        |> render_scrollbars(state.scroll, state.frame)
       end,
       # Render at local origin - parent handles positioning via translate
       translate: {0, 0}
@@ -64,9 +62,11 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       old_state.expanded != new_state.expanded ->
         initial_render(Graph.build(), new_state)
 
-      # Scroll offset changed - just update transform
-      old_state.scroll_offset != new_state.scroll_offset ->
-        update_scroll_transform(graph, new_state)
+      # Scroll changed - use efficient transform update from Widgex.Scrollable
+      scroll_changed?(old_state.scroll, new_state.scroll) ->
+        graph
+        |> update_scroll_transform(:sidebar_scroll_group, old_state.scroll, new_state.scroll)
+        |> update_scrollbars(old_state.scroll, new_state.scroll, new_state.frame)
 
       # Hover/focus/active changed - update individual item styling
       old_state.hovered_id != new_state.hovered_id ||
@@ -100,11 +100,16 @@ defmodule ScenicWidgets.SideNav.Renderizer do
 
   # Render a single item as a self-contained row group
   # Each row is a group translated to its y position, containing:
-  # - Background rect (full width, at y=0 within group)
+  # - Background rect (for visual styling)
+  # - Full-width clickable rect (for row click/navigate)
+  # - Chevron hit area ON TOP (if has children) - catches clicks before row rect
   # - Optional active accent bar
-  # - Optional chevron (vertically centered)
-  # - Text label (vertically centered)
+  # - Chevron visual (triangle)
+  # - Text label
   # - Optional focus ring
+  #
+  # Scenic hit-testing: later primitives are "on top" and catch clicks first
+  # So chevron rect is rendered AFTER row rect to intercept clicks in that area
   defp render_item(graph, item, state, depth, is_expanded) do
     item_id = Item.get_id(item)
     bounds = Map.get(state.item_bounds, item_id)
@@ -138,16 +143,36 @@ defmodule ScenicWidgets.SideNav.Renderizer do
 
       # Build semantic IDs
       row_id = String.to_atom("row_#{item_id}")
-      text_id = String.to_atom("item_text_#{item_id}")
 
       # Render the entire row as a group
       graph
       |> Primitives.group(
         fn g ->
           g
-          # Background (full width, starts at 0,0 within group)
+          # 1. Visual background
           |> Primitives.rect({row_width, row_height}, fill: bg_fill)
-          # Active accent bar (left edge)
+          # 2. Full-width clickable rect for row navigation (covers entire row)
+          #    Also handles hover detection
+          |> Primitives.rect({row_width, row_height},
+            fill: :clear,
+            input: [:cursor_button, :cursor_pos],
+            id: {:row_click, item_id}
+          )
+          # 3. Chevron clickable area ON TOP - rendered after row rect so it catches clicks first
+          |> then(fn g2 ->
+            if has_children do
+              # Chevron hit area is slightly larger than the visual for easier clicking
+              Primitives.rect(g2, {chevron_area_width + 4, row_height},
+                fill: :clear,
+                input: [:cursor_button],
+                id: {:chevron_click, item_id},
+                translate: {indent_x - 2, 0}
+              )
+            else
+              g2
+            end
+          end)
+          # 4. Active accent bar (left edge) - visual only
           |> then(fn g2 ->
             if is_active do
               Primitives.rect(g2, {3, row_height}, fill: theme.active_bar)
@@ -155,26 +180,24 @@ defmodule ScenicWidgets.SideNav.Renderizer do
               g2
             end
           end)
-          # Chevron (if has children) - centered vertically
+          # 5. Chevron visual (triangle) - no input, just visual
           |> then(fn g2 ->
             if has_children do
-              # Chevron centered vertically in the row
               chevron_y = v_center - theme.chevron_size / 2
-              render_chevron_local(g2, indent_x, chevron_y, theme.chevron_size, is_expanded, theme.chevron, item_id)
+              render_chevron_visual(g2, indent_x, chevron_y, theme.chevron_size, is_expanded, theme.chevron)
             else
               g2
             end
           end)
-          # Text label - centered vertically
+          # 6. Text label - visual only
           |> Primitives.text(
             Item.get_title(item),
-            id: text_id,
             fill: text_fill,
             font: theme.font,
             font_size: theme.font_size,
             translate: {text_x, v_center + theme.font_size / 3}
           )
-          # Focus ring
+          # 7. Focus ring
           |> then(fn g2 ->
             if is_focused do
               Primitives.rect(g2, {row_width - 2, row_height - 2},
@@ -195,10 +218,8 @@ defmodule ScenicWidgets.SideNav.Renderizer do
     end
   end
 
-  # Render chevron with local coordinates (within row group)
-  defp render_chevron_local(graph, x, y, size, is_expanded, color, item_id) do
-    chevron_id = String.to_atom("chevron_#{item_id}")
-
+  # Render chevron visual (triangle only, no input)
+  defp render_chevron_visual(graph, x, y, size, is_expanded, color) do
     # Center of chevron
     cx = x + size / 2
     cy = y + size / 2
@@ -221,15 +242,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
     end
 
     graph
-    |> Primitives.triangle(List.to_tuple(points), id: chevron_id, fill: color)
-  end
-
-  # Update scroll transform only
-  defp update_scroll_transform(graph, state) do
-    graph
-    |> Graph.modify(:sidebar_scroll_group, fn primitive ->
-      Scenic.Primitive.put_style(primitive, :translate, {0, -state.scroll_offset})
-    end)
+    |> Primitives.triangle(List.to_tuple(points), fill: color)
   end
 
   # Update item visual states (hover/focus/active)

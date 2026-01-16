@@ -63,6 +63,11 @@ defmodule ScenicWidgets.SideNav.Item do
   def has_children?(%__MODULE__{children: children}), do: length(children) > 0
 
   @doc """
+  Check if an item is marked as initially expanded.
+  """
+  def is_expanded?(%__MODULE__{expanded: expanded}), do: expanded == true
+
+  @doc """
   Get the type of an item.
   """
   def get_type(%__MODULE__{type: type}), do: type

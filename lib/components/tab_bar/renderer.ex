@@ -20,6 +20,7 @@ defmodule ScenicWidgets.TabBar.Renderer do
     |> render_background(state)
     |> render_all_tabs(state)
     |> render_selection_indicator(state)
+    |> render_semantic_content(state)
   end
 
   @doc """
@@ -31,6 +32,7 @@ defmodule ScenicWidgets.TabBar.Renderer do
     |> update_hover_if_changed(old_state, new_state)
     |> update_selection_if_changed(old_state, new_state)
     |> update_selection_indicator(old_state, new_state)
+    |> update_semantic_if_changed(old_state, new_state)
   end
 
   # ===========================================================================
@@ -331,6 +333,51 @@ defmodule ScenicWidgets.TabBar.Renderer do
       true ->
         graph
     end
+  end
+
+  # ===========================================================================
+  # Semantic Content (for testing/automation)
+  # ===========================================================================
+
+  defp render_semantic_content(graph, %State{} = state) do
+    graph
+    |> Primitives.text(
+      "",  # Empty text - just used as semantic carrier
+      id: :semantic_tab_bar_content,
+      hidden: true,
+      semantic: semantic_metadata(state)
+    )
+  end
+
+  defp update_semantic_if_changed(graph, old_state, new_state) do
+    if semantic_changed?(old_state, new_state) do
+      Graph.modify(graph, :semantic_tab_bar_content, fn p ->
+        Primitives.update_opts(p, semantic: semantic_metadata(new_state))
+      end)
+    else
+      graph
+    end
+  end
+
+  defp semantic_changed?(old_state, new_state) do
+    old_state.tabs != new_state.tabs or
+    old_state.selected_id != new_state.selected_id
+  end
+
+  defp semantic_metadata(%State{tabs: tabs, selected_id: selected_id}) do
+    %{
+      type: :tab_bar,
+      tab_count: length(tabs),
+      selected_id: selected_id,
+      tabs: Enum.map(tabs, fn tab ->
+        %{
+          id: tab.id,
+          label: tab.label,
+          selected: tab.id == selected_id,
+          closeable: tab.closeable
+        }
+      end)
+    }
   end
 
   # ===========================================================================

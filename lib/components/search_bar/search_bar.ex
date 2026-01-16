@@ -293,7 +293,11 @@ defmodule ScenicWidgets.SearchBar do
   # Handle clicks on different areas
   defp handle_click(scene, {click_x, _click_y}) do
     %{frame: frame} = scene.assigns.state
-    {width, _height} = frame.size
+    # Handle both tuple and Dimensions struct for size
+    width = case frame.size do
+      %{width: w} -> w
+      {w, _h} -> w
+    end
 
     button_width = 32
     match_count_width = 60

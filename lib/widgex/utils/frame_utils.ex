@@ -77,7 +77,8 @@ defmodule Widgex.Frame.Utils do
   """
   def v_split(%Widgex.Frame{size: %{width: f_width}} = f, px: px) do
     # TODO assert that px < f.size.height
-    top = Frame.new(%{pin: {0, 0}, size: {f_width, px}})
+    # Top frame preserves the parent frame's pin position
+    top = Frame.new(%{pin: f.pin.point, size: {f_width, px}})
 
     bottom =
       Frame.new(
