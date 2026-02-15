@@ -427,8 +427,6 @@ defmodule ScenicWidgets.MenuBar do
         register_button(viewport, scene_name, semantic_id, label,
           offset_x + local_x, offset_y + local_y, item_width, menu_height)
 
-        Logger.debug("✅ Registered MenuBar button '#{label}' with ID #{inspect(semantic_id)}")
-
         # Also register menu items (for when dropdown is open)
         # Dropdown is translated to y = menu_height, items start at padding
         items
@@ -504,7 +502,6 @@ defmodule ScenicWidgets.MenuBar do
     }
     :ets.insert(viewport.semantic_table, {{scene_name, semantic_id}, entry})
     :ets.insert(viewport.semantic_index, {semantic_id, {scene_name, semantic_id}})
-    Logger.debug("     ✅ Registered menu item '#{item_label}' with ID #{inspect(semantic_id)}")
   end
 
   # Remove handle_cast - we're using handle_put for state updates now
