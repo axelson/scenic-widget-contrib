@@ -290,7 +290,5 @@ defmodule ScenicWidgets.IconMenu do
     }
     :ets.insert(viewport.semantic_table, {{scene_name, semantic_id}, entry})
     :ets.insert(viewport.semantic_index, {semantic_id, {scene_name, semantic_id}})
-
-    Logger.debug("✅ Registered menu item '#{item_label}' with ID #{inspect(semantic_id)}")
   end
 end

@@ -26,16 +26,15 @@ defmodule ScenicWidgets.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      # {:scenic, git: "https://github.com/ScenicFramework/scenic.git", tag: "v0.11.1", override: true},
-      {:scenic, path: "../scenic", override: true},
-      {:scenic_driver_local, git: "https://github.com/JediLuke/scenic_driver_local", branch: "flamelex_vsn", override: true},
+      {:scenic, git: "https://github.com/JediLuke/scenic.git", branch: "main", override: true},
+      {:scenic_driver_local, git: "https://github.com/JediLuke/scenic_driver_local.git", branch: "main", override: true},
       {:font_metrics, "~> 0.5"},
       {:ex_doc, "~> 0.25", only: :dev},
       {:earmark, "~> 1.4", only: :dev},
       # {:stream_data, "~> 1.0", only: :test},
       # Added dependencies for widget development
-      # {:scenic_mcp, path: "../scenic_mcp_experimental", optional: true},
-      {:sexy_spex, path: "../spex", optional: true},
+      {:scenic_mcp, git: "https://github.com/scenic-contrib/scenic_mcp_experimental.git", branch: "main", optional: true},
+      {:sexy_spex, git: "https://github.com/JediLuke/spex.git", branch: "main", optional: true},
       {:scenic_live_reload, git: "https://github.com/axelson/scenic_live_reload.git", branch: "main", only: :dev},
       {:tidewave, "~> 0.1", only: :dev},
       {:bandit, "~> 1.0", only: :dev}
