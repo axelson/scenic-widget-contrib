@@ -4,9 +4,11 @@ defmodule ScenicWidgets.Application do
   use Application
   require Logger
 
+  @dev_mode? Mix.env() == :dev
+  @live_reload_available? Code.ensure_loaded?(ScenicLiveReload)
+
   def start(_type, _args) do
-    # Check for required development tools
-    if Mix.env() == :dev do
+    if @dev_mode? and @live_reload_available? do
       check_dev_dependencies()
     end
 
