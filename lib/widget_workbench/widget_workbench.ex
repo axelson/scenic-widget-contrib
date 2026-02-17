@@ -51,6 +51,8 @@ defmodule WidgetWorkbench do
           ],
           on_close: :stop_viewport,
           debug: false,
+          debugger: "",
+          debug_fps: 0,
           cursor: true,
           antialias: true,
           layer: 0,
