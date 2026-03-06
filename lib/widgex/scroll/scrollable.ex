@@ -318,15 +318,15 @@ defmodule Widgex.Scrollable do
       @doc """
       Update scrollbar position and visibility.
       """
-      def update_scrollbars(graph, %ScrollState{} = old_scroll, %ScrollState{} = new_scroll, %Frame{} = frame) do
-        ScrollRenderer.update_scrollbars(graph, old_scroll, new_scroll, frame)
+      def update_scrollbars(graph, %ScrollState{} = old_scroll, %ScrollState{} = new_scroll, %Frame{} = frame, opts \\ []) do
+        ScrollRenderer.update_scrollbars(graph, old_scroll, new_scroll, frame, opts)
       end
 
       @doc """
       Update only the scrollbar visibility/opacity (for fade animation).
       """
-      def update_scrollbar_visibility(graph, %ScrollState{} = scroll) do
-        ScrollRenderer.update_scrollbar_visibility(graph, scroll)
+      def update_scrollbar_visibility(graph, %ScrollState{} = scroll, opts \\ []) do
+        ScrollRenderer.update_scrollbar_visibility(graph, scroll, opts)
       end
     end
   end
