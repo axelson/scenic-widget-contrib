@@ -621,16 +621,19 @@ defmodule ScenicWidgets.TextField.Reducer do
     :select_all
   end
 
-  # Ctrl+C - Copy
-  def input_to_buffer_action(%State{focused: true, selection: selection} = state, {:key, {:key_c, 1, [:ctrl]}}) when selection != nil do
-    text = get_selected_text(state)
-    {:clipboard_copy, text}
+  # Ctrl+C - Copy. In buffer_backed mode the buffer controller is the source of
+  # truth for the selection shape; TextField's local `selection` mirror can lag
+  # behind a mouse-drag by one broadcast. Route the action through unconditionally
+  # and let `Quillex.Buffer.Process.Reducer.process/2 {:copy, :selection}` no-op
+  # when the buffer itself has no selection. See quillex bug 001.
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_c, 1, [:ctrl]}}) do
+    {:copy, :selection}
   end
 
-  # Ctrl+X - Cut
-  def input_to_buffer_action(%State{focused: true, selection: selection} = state, {:key, {:key_x, 1, [:ctrl]}}) when selection != nil do
-    text = get_selected_text(state)
-    {:clipboard_cut, text}
+  # Ctrl+X - Cut. Same rationale as Ctrl+C above — pass through to the buffer
+  # and let the buffer decide whether there is anything to cut.
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_x, 1, [:ctrl]}}) do
+    {:cut, :selection}
   end
 
   # Ctrl+V - Paste
