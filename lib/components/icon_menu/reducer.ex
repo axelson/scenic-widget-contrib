@@ -22,7 +22,8 @@ defmodule ScenicWidgets.IconMenu.Reducer do
     handle_click(state, coords)
   end
 
-  def process_input(%State{} = state, {:key, {"escape", _mods, _action}}) do
+  def process_input(%State{} = state, {:key, {:key_esc, key_state, _mods}})
+      when key_state > 0 do
     handle_escape(state)
   end
 
@@ -90,7 +91,7 @@ defmodule ScenicWidgets.IconMenu.Reducer do
           menu_id ->
             if state.active_menu == menu_id do
               # Click on active menu - close it
-              {:noop, %{state | active_menu: nil, hovered_item: nil}}
+              {:noop, %{state | active_menu: nil, hovered_menu: nil, hovered_item: nil}}
             else
               # Open this menu
               {:noop, %{state | active_menu: menu_id, hovered_item: nil}}
