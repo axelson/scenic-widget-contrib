@@ -39,7 +39,7 @@ defmodule ScenicWidgets.TextField.Reducer do
   # We use :codepoint for text input and :key only for non-character keys (arrows, backspace, etc.)
 
   # Debounce: Ignore codepoints that arrive immediately after focus (e.g., "k" from space+k shortcut)
-  def process_input(%State{focused: true, focus_time: focus_time} = state, {:codepoint, _} = _input)
+  def process_input(%State{focused: true, focus_time: focus_time} = state, {:codepoint, _} = input)
       when is_integer(focus_time) do
     now = System.monotonic_time(:millisecond)
     if now - focus_time < @focus_debounce_ms do
@@ -48,21 +48,12 @@ defmodule ScenicWidgets.TextField.Reducer do
       {:noop, state}
     else
       # Past debounce window - process normally
-      process_input_codepoint(state, _input)
+      process_input_codepoint(state, input)
     end
   end
 
   def process_input(%State{focused: true} = state, {:codepoint, {char, _mods}} = input) when is_bitstring(char) do
     process_input_codepoint(state, input)
-  end
-
-  defp process_input_codepoint(state, {:codepoint, {char, _mods}}) when is_bitstring(char) do
-    # Push undo before making changes
-    state_with_undo = State.push_undo(state)
-    # Delete selection first if any, then insert
-    state_after_delete = delete_selection(state_with_undo)
-    new_state = insert_char(state_after_delete, char)
-    {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
 
   # ===== TEXT INPUT - Using key2string conversion =====
@@ -390,6 +381,27 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
+  # ===== FALLBACK - Unhandled input =====
+
+  def process_input(state, {:key, {:key_v, 1, [:ctrl]}} = _input) do
+    # Fallback for Ctrl+V if not caught above
+    {:noop, state}
+  end
+
+  # Catch-all for unhandled input
+  def process_input(state, _input) do
+    {:noop, state}
+  end
+
+  defp process_input_codepoint(state, {:codepoint, {char, _mods}}) when is_bitstring(char) do
+    # Push undo before making changes
+    state_with_undo = State.push_undo(state)
+    # Delete selection first if any, then insert
+    state_after_delete = delete_selection(state_with_undo)
+    new_state = insert_char(state_after_delete, char)
+    {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+  end
+
   defp handle_click_focus(%State{focused: false} = state, pos) do
     inside = State.point_inside?(state, pos)
     # Only allow focus if editable - read-only TextFields should not gain focus
@@ -417,18 +429,6 @@ defmodule ScenicWidgets.TextField.Reducer do
     else
       {:event, {:focus_lost, state.id}, %{state | focused: false}}
     end
-  end
-
-  # ===== FALLBACK - Unhandled input =====
-
-  def process_input(state, {:key, {:key_v, 1, [:ctrl]}} = _input) do
-    # Fallback for Ctrl+V if not caught above
-    {:noop, state}
-  end
-
-  # Catch-all for unhandled input
-  def process_input(state, _input) do
-    {:noop, state}
   end
 
   # ===== EXTERNAL ACTION PROCESSING (Phase 3) =====
@@ -549,7 +549,7 @@ defmodule ScenicWidgets.TextField.Reducer do
   - {:local_update, new_state} - Local-only update (focus, scrollbar drag)
   - action - Buffer action tuple/atom to send to Buffer.Process
   """
-  def input_to_buffer_action(%State{focused: true} = state, {:codepoint, {char, _mods}}) when is_bitstring(char) do
+  def input_to_buffer_action(%State{focused: true} = _state, {:codepoint, {char, _mods}}) when is_bitstring(char) do
     # Insert character at cursor
     {:insert, char, :at_cursor}
   end
@@ -695,7 +695,7 @@ defmodule ScenicWidgets.TextField.Reducer do
   # Mouse click - check for scrollbar hit first, then focus
   def input_to_buffer_action(%State{} = state, {:cursor_button, {:btn_left, 1, _mods, coords}}) do
     hit_result = State.scrollbar_hit_test(state, coords)
-    {x, y} = coords
+    {_x, _y} = coords
     gutter = if state.show_line_numbers, do: state.line_number_width, else: 0
     content_w = state.frame.size.width - gutter
     IO.puts("🖱️ CLICK: coords=#{inspect(coords)}, frame=#{state.frame.size.width}x#{state.frame.size.height}, gutter=#{gutter}, scrollbar_hit=#{inspect(hit_result)}")
@@ -842,11 +842,9 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # ===== SEARCH HELPER =====
 
-  @doc """
-  Finds all occurrences of a query string in the lines.
-  Returns list of {line_num, col_num, matched_text} tuples.
-  Line and column numbers are 1-based.
-  """
+  # Finds all occurrences of a query string in the lines.
+  # Returns list of {line_num, col_num, matched_text} tuples.
+  # Line and column numbers are 1-based.
   defp find_all_matches(lines, query) when is_list(lines) and is_binary(query) do
     query_len = String.length(query)
 
@@ -883,11 +881,9 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # ===== HELPER FUNCTIONS =====
 
-  @doc """
-  Insert character at cursor position.
-  Handles newlines (\n) by splitting the current line.
-  Automatically ensures cursor remains visible after insertion.
-  """
+  # Insert character at cursor position.
+  # Handles newlines (\n) by splitting the current line.
+  # Automatically ensures cursor remains visible after insertion.
   defp insert_char(%State{lines: lines, cursor: {line_num, col}} = state, "\n") do
     # Handle Enter key - split current line
     current_line = Enum.at(lines, line_num - 1, "")
@@ -917,9 +913,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     |> State.ensure_cursor_visible()
   end
 
-  @doc """
-  Delete character before cursor (Backspace).
-  """
+  # Delete character before cursor (Backspace).
   defp delete_before_cursor(%State{cursor: {1, 1}} = state) do
     # At start of document - nothing to delete
     state
@@ -958,9 +952,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     |> update_scroll_content_size()
   end
 
-  @doc """
-  Delete character at cursor (Delete key).
-  """
+  # Delete character at cursor (Delete key).
   defp delete_at_cursor(%State{lines: lines, cursor: {line_num, col}} = state) do
     current_line = Enum.at(lines, line_num - 1, "")
 
@@ -992,10 +984,8 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  @doc """
-  Move cursor in specified direction.
-  Automatically ensures cursor remains visible after movement.
-  """
+  # Move cursor in specified direction.
+  # Automatically ensures cursor remains visible after movement.
   defp move_cursor(%State{cursor: {line, col}, lines: lines} = state, :left) do
     new_state = if col > 1 do
       %{state | cursor: {line, col - 1}}
@@ -1066,10 +1056,8 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # ===== SELECTION HELPERS =====
 
-  @doc """
-  Move cursor with selection (Shift+Arrow).
-  If no selection exists, start one at current cursor position.
-  """
+  # Move cursor with selection (Shift+Arrow).
+  # If no selection exists, start one at current cursor position.
   defp move_cursor_with_selection(%State{selection: nil, cursor: cursor} = state, direction) do
     # Start selection at current cursor
     new_state = move_cursor(state, direction)
@@ -1082,16 +1070,12 @@ defmodule ScenicWidgets.TextField.Reducer do
     %{new_state | selection: {anchor, new_state.cursor}}
   end
 
-  @doc """
-  Clear selection.
-  """
+  # Clear selection.
   defp clear_selection(%State{} = state) do
     %{state | selection: nil}
   end
 
-  @doc """
-  Select all text in the document.
-  """
+  # Select all text in the document.
   defp select_all(%State{lines: lines} = state) do
     last_line_num = length(lines)
     last_line = Enum.at(lines, last_line_num - 1, "")
@@ -1103,10 +1087,8 @@ defmodule ScenicWidgets.TextField.Reducer do
     }
   end
 
-  @doc """
-  Delete selected text if any.
-  Returns state with selection deleted and cursor at selection start.
-  """
+  # Delete selected text if any.
+  # Returns state with selection deleted and cursor at selection start.
   defp delete_selection(%State{selection: nil} = state), do: state
 
   defp delete_selection(%State{selection: {start_pos, end_pos}} = state) do
@@ -1153,9 +1135,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  @doc """
-  Normalize selection so start comes before end.
-  """
+  # Normalize selection so start comes before end.
   defp normalize_selection({line1, col1} = pos1, {line2, col2} = pos2) do
     cond do
       line1 < line2 -> {pos1, pos2}
@@ -1165,9 +1145,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  @doc """
-  Get the currently selected text as a string.
-  """
+  # Get the currently selected text as a string.
   defp get_selected_text(%State{selection: nil}), do: ""
 
   defp get_selected_text(%State{selection: {start_pos, end_pos}, lines: lines}) do
@@ -1204,12 +1182,10 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  @doc """
-  Insert text at cursor position (used for paste).
-  Unlike insert_char which handles single characters, this handles multi-line strings
-  efficiently in a single operation.
-  Returns the final cursor position after all text is inserted.
-  """
+  # Insert text at cursor position (used for paste).
+  # Unlike insert_char which handles single characters, this handles multi-line strings
+  # efficiently in a single operation.
+  # Returns the final cursor position after all text is inserted.
   defp insert_text_at_cursor(%State{lines: lines, cursor: {line, col}} = state, text) when is_binary(text) do
     paste_lines = String.split(text, "\n")
 
@@ -1255,10 +1231,8 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # ===== SCROLL HELPERS =====
 
-  @doc """
-  Handle scroll input with smart Shift+scroll support using the Scrollable macro functions.
-  When Shift is held, vertical scrolling is converted to horizontal scrolling.
-  """
+  # Handle scroll input with smart Shift+scroll support using the Scrollable macro functions.
+  # When Shift is held, vertical scrolling is converted to horizontal scrolling.
   defp handle_scroll_input_smart(%State{scroll: scroll} = state, delta_x, delta_y) do
     # Negate deltas for natural scrolling (scroll down = content moves up)
     new_scroll = handle_scroll_smart(scroll, -delta_x, -delta_y)
@@ -1270,20 +1244,6 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  @doc """
-  Handle 2D scroll input using the Scrollable macro functions.
-  Supports both vertical and horizontal scrolling based on scroll direction setting.
-  """
-  defp handle_scroll_input_2d(%State{scroll: scroll} = state, delta_x, delta_y) do
-    # Negate deltas for natural scrolling (scroll down = content moves up)
-    new_scroll = handle_scroll_2d(scroll, -delta_x, -delta_y)
-
-    if scroll_changed?(scroll, new_scroll) do
-      {:noop, %{state | scroll: new_scroll}}
-    else
-      {:noop, state}
-    end
-  end
 
   @doc """
   Update scroll content size based on current wrapped line count and max line width.

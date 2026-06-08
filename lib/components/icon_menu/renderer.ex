@@ -145,7 +145,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       is_toggle = State.is_toggle_item?(item)
       is_checked = State.is_item_checked?(item)
 
-      item_bounds = Map.get(dropdown.items, item_id)
+      _item_bounds = Map.get(dropdown.items, item_id)
       is_hovered = hovered_item == item_id
 
       # Position relative to dropdown origin

@@ -60,11 +60,13 @@ defmodule ScenicWidgets.ListSelectorDialog do
   @doc """
   Adds a ListSelectorDialog to a graph.
   """
+  @impl true
   def add_to_graph(graph, data, opts \\ []) do
     super(graph, data, opts)
   end
 
   @doc false
+  @impl true
   def validate(%{frame: frame} = data) when is_map(frame) do
     {:ok, data}
   end
@@ -73,7 +75,7 @@ defmodule ScenicWidgets.ListSelectorDialog do
     {:error, "ListSelectorDialog requires :frame, got: #{inspect(data)}"}
   end
 
-  @impl Scenic.Component
+  @impl true
   def init(scene, data, opts) do
     id = opts[:id] || data[:id] || :list_selector_dialog
 
@@ -94,7 +96,7 @@ defmodule ScenicWidgets.ListSelectorDialog do
   # Keyboard Input
   # ─────────────────────────────────────────────────────────────
 
-  @impl Scenic.Component
+  @impl true
   def handle_input({:key, {:key_escape, 1, _}}, _context, scene) do
     emit_cancel(scene)
     {:noreply, scene}
@@ -163,7 +165,7 @@ defmodule ScenicWidgets.ListSelectorDialog do
     state = scene.assigns.state
     {x, y} = coords
 
-    local_x = x - state.dialog_x
+    _local_x = x - state.dialog_x
     local_y = y - state.dialog_y
 
     hover_index = if State.in_list_area?(state, local_y) do

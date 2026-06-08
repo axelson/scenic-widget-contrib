@@ -3,8 +3,6 @@ defmodule Widgex.Frame.Utils do
   Utility functions for working with frames.
   """
   alias Widgex.Frame
-  alias Widgex.Structs.Coordinates
-
   @doc """
   Split a frame into two frames, one to the left of the other.
 
@@ -145,7 +143,7 @@ defmodule Widgex.Frame.Utils do
     Widgex.Frame.new(%{pin: f.pin, size: {f.size.width, new_height}})
   end
 
-  def with_margin(%Widgex.Frame{} = f, m) do
+  def with_margin(%Widgex.Frame{} = _f, _m) do
     raise "not but do it!"
   end
 end

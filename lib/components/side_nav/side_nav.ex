@@ -59,6 +59,7 @@ defmodule ScenicWidgets.SideNav do
   alias Scenic.Graph
 
   # Override add_to_graph to add logging
+  @impl true
   def add_to_graph(graph, data, opts \\ []) do
     IO.puts("🎯🎯🎯 SideNav.add_to_graph called!")
     IO.puts("   data: #{inspect(data)}")
@@ -70,6 +71,7 @@ defmodule ScenicWidgets.SideNav do
   @doc """
   Validate initialization data.
   """
+  @impl true
   def validate(data) when is_map(data) do
     case {Map.get(data, :frame), Map.get(data, :tree)} do
       {%{pin: _, size: _}, tree} when is_list(tree) ->
@@ -84,7 +86,7 @@ defmodule ScenicWidgets.SideNav do
     end
   end
 
-  @impl Scenic.Component
+  @impl true
   def init(scene, data, _opts) do
     IO.puts("🎯🎯🎯 SideNav.init called!!!")
     Logger.info("🎯 SideNav component initializing!")
@@ -285,62 +287,6 @@ defmodule ScenicWidgets.SideNav do
     end
   end
 
-  # Actual row click handling (after debounce check)
-  defp handle_row_click(scene, item_id, now) do
-    Logger.info("🖱️ SideNav row clicked: #{item_id}")
-    state = scene.assigns.state
-
-    # Find the item to determine its type
-    item = Item.find_by_id(state.tree, item_id)
-    Logger.info("   Found item: #{inspect(item != nil)}, has_children: #{inspect(item && Item.has_children?(item))}")
-
-    # If it's a group with children, toggle expansion instead of navigating
-    if item && Item.has_children?(item) do
-      Logger.info("   📂 Group item - toggling expansion")
-      new_state = State.toggle_expanded(state, item_id)
-
-      # Send expand/collapse event to parent (informational only)
-      if MapSet.member?(new_state.expanded, item_id) do
-        send_parent_event(scene, {:sidebar, :expand, item_id})
-      else
-        send_parent_event(scene, {:sidebar, :collapse, item_id})
-      end
-
-      graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
-      scene = scene
-        |> assign(state: new_state, graph: graph, last_click_time: now)
-        |> push_graph(graph)
-      register_semantic_elements(scene, new_state)
-      {:noreply, scene}
-    else
-      # Leaf item - navigate
-      action = Item.get_action(item)
-
-      Logger.info("📍 ITEM CLICKED: #{item_id}")
-      Logger.info("   📤 Sending parent message: {:sidebar, :navigate, #{inspect(item_id)}}")
-      send_parent_event(scene, {:sidebar, :navigate, item_id})
-
-      # Execute action callback if present (OPTIONAL)
-      if action do
-        Logger.info("   🔥 Executing action callback for #{item_id}")
-        action.()
-      else
-        Logger.info("   ℹ️  No action callback - parent message only")
-      end
-
-      # Set as active and focused
-      new_state = state
-        |> State.set_active(item_id)
-        |> State.set_focused(item_id)
-
-      graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
-      scene = scene
-        |> assign(state: new_state, graph: graph, last_click_time: now)
-        |> push_graph(graph)
-      {:noreply, scene}
-    end
-  end
-
   # Click not on any recognized element - log for debugging
   def handle_input({:cursor_button, {:btn_left, 1, [], coords}}, context, scene) do
     Logger.info("🔴 SideNav cursor_button NOT MATCHED - context: #{inspect(context)}, coords: #{inspect(coords)}")
@@ -410,6 +356,62 @@ defmodule ScenicWidgets.SideNav do
 
   def handle_input(_input, _context, scene) do
     {:noreply, scene}
+  end
+
+  # Actual row click handling (after debounce check)
+  defp handle_row_click(scene, item_id, now) do
+    Logger.info("🖱️ SideNav row clicked: #{item_id}")
+    state = scene.assigns.state
+
+    # Find the item to determine its type
+    item = Item.find_by_id(state.tree, item_id)
+    Logger.info("   Found item: #{inspect(item != nil)}, has_children: #{inspect(item && Item.has_children?(item))}")
+
+    # If it's a group with children, toggle expansion instead of navigating
+    if item && Item.has_children?(item) do
+      Logger.info("   📂 Group item - toggling expansion")
+      new_state = State.toggle_expanded(state, item_id)
+
+      # Send expand/collapse event to parent (informational only)
+      if MapSet.member?(new_state.expanded, item_id) do
+        send_parent_event(scene, {:sidebar, :expand, item_id})
+      else
+        send_parent_event(scene, {:sidebar, :collapse, item_id})
+      end
+
+      graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+      scene = scene
+        |> assign(state: new_state, graph: graph, last_click_time: now)
+        |> push_graph(graph)
+      register_semantic_elements(scene, new_state)
+      {:noreply, scene}
+    else
+      # Leaf item - navigate
+      action = Item.get_action(item)
+
+      Logger.info("📍 ITEM CLICKED: #{item_id}")
+      Logger.info("   📤 Sending parent message: {:sidebar, :navigate, #{inspect(item_id)}}")
+      send_parent_event(scene, {:sidebar, :navigate, item_id})
+
+      # Execute action callback if present (OPTIONAL)
+      if action do
+        Logger.info("   🔥 Executing action callback for #{item_id}")
+        action.()
+      else
+        Logger.info("   ℹ️  No action callback - parent message only")
+      end
+
+      # Set as active and focused
+      new_state = state
+        |> State.set_active(item_id)
+        |> State.set_focused(item_id)
+
+      graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+      scene = scene
+        |> assign(state: new_state, graph: graph, last_click_time: now)
+        |> push_graph(graph)
+      {:noreply, scene}
+    end
   end
 
   # Helper for keyboard input handling

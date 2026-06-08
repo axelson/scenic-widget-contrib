@@ -120,6 +120,7 @@ defmodule ScenicWidgets.TextField do
   - Widgex.Frame directly (Widget Workbench passes this)
   - Map with :frame key containing Widgex.Frame
   """
+  @impl true
   def validate(%Widgex.Frame{} = frame) do
     # Widget Workbench passes frame directly - wrap it in a map
     {:ok, %{frame: frame}}
@@ -138,6 +139,7 @@ defmodule ScenicWidgets.TextField do
   @doc """
   Initialize the TextField component.
   """
+  @impl true
   def init(scene, data, _opts) do
     # Create initial state
     state = State.new(data)
@@ -147,7 +149,7 @@ defmodule ScenicWidgets.TextField do
       # Subscribe to buffer PubSub updates
       IO.puts("🔔 TextField init: subscribing to buffer_topic=#{inspect(state.buffer_topic)}")
       if Code.ensure_loaded?(Quillex.Utils.PubSub) do
-        result = Quillex.Utils.PubSub.subscribe(topic: state.buffer_topic)
+        result = apply(Quillex.Utils.PubSub, :subscribe, [[topic: state.buffer_topic]])
         IO.puts("🔔 TextField init: subscribe result=#{inspect(result)}")
       else
         IO.puts("⚠️ TextField init: Quillex.Utils.PubSub NOT loaded!")
@@ -227,6 +229,7 @@ defmodule ScenicWidgets.TextField do
 
   # ===== INPUT HANDLING (Phase 2) =====
 
+  @impl true
   def handle_input(input, _context, scene) do
     state = scene.assigns.state
 
@@ -387,6 +390,7 @@ defmodule ScenicWidgets.TextField do
   Actions are processed by the Reducer and may emit events.
   In buffer_backed mode, actions are forwarded to Buffer.Process.
   """
+  @impl true
   def handle_put({:action, action}, scene) do
     state = scene.assigns.state
 
@@ -490,6 +494,7 @@ defmodule ScenicWidgets.TextField do
   @doc """
   Handle cursor blink timer message.
   """
+  @impl true
   def handle_info(:blink, scene) do
     state = scene.assigns.state
 
@@ -507,10 +512,8 @@ defmodule ScenicWidgets.TextField do
     {:noreply, scene}
   end
 
-  @doc """
-  Handle buffer state updates (for buffer_backed mode).
-  When Buffer.Process broadcasts state changes, update TextField to match.
-  """
+  # Handle buffer state updates (for buffer_backed mode).
+  # When Buffer.Process broadcasts state changes, update TextField to match.
   def handle_info({:buf_state_changes, buf_state}, scene) do
     state = scene.assigns.state
 
@@ -592,6 +595,7 @@ defmodule ScenicWidgets.TextField do
   Handle input sent via GenServer.cast from Scenic.
   This is how Scenic delivers input when a component requests it.
   """
+  @impl true
   def handle_cast({:user_input, input}, scene) do
     # Forward to handle_input
     handle_input(input, nil, scene)

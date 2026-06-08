@@ -213,8 +213,6 @@ defmodule WidgetWorkbench.ComponentBuilder do
   end
 
   defmodule Flamelex.GUI.Component.AgentHuddle.Render do
-    alias Flamelex.GUI.Component.AgentHuddle.State
-    alias Flamelex.GUI.Utils.Draw
   end
 
   defp user_input_handler_content(module_base) do

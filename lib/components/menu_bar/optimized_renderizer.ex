@@ -26,10 +26,8 @@ defmodule ScenicWidgets.MenuBar.OptimizedRenderizer do
   defp text_overflow(%State{theme: theme}), do: Map.get(theme, :text_overflow, :ellipsis)
   defp ellipsis_char(%State{theme: theme}), do: Map.get(theme, :ellipsis_char, "...")
 
-  @doc """
-  Apply text overflow handling to a label based on theme settings.
-  Returns the potentially truncated text.
-  """
+  # Apply text overflow handling to a label based on theme settings.
+  # Returns the potentially truncated text.
   defp apply_text_overflow(label, state) do
     case text_overflow(state) do
       :none ->
@@ -47,7 +45,7 @@ defmodule ScenicWidgets.MenuBar.OptimizedRenderizer do
 
       :truncate ->
         # Simple character-based truncation without ellipsis
-        max_chars = div(max_text_width(state), font_size(state) * 0.6) |> trunc()
+        max_chars = trunc(max_text_width(state) / (font_size(state) * 0.6))
         if String.length(label) > max_chars do
           String.slice(label, 0, max_chars)
         else
@@ -273,7 +271,7 @@ defmodule ScenicWidgets.MenuBar.OptimizedRenderizer do
     end)
   end
   
-  defp render_all_sub_menus_hidden(graph, menu_id, items, menu_index, state) do
+  defp render_all_sub_menus_hidden(graph, _menu_id, items, menu_index, state) do
     items
     |> Enum.with_index()
     |> Enum.reduce(graph, fn {item, item_index}, g ->
@@ -340,7 +338,7 @@ defmodule ScenicWidgets.MenuBar.OptimizedRenderizer do
   
   defp add_interaction_layer(graph, %State{frame: frame, active_menu: active_menu, menu_map: menu_map} = state) do
     # Calculate height based on whether a dropdown is open
-    height = if active_menu do
+    _height = if active_menu do
       # Get the items for the active menu
       case Map.get(menu_map, active_menu) do
         {_label, items} ->
@@ -407,7 +405,7 @@ defmodule ScenicWidgets.MenuBar.OptimizedRenderizer do
     # This prevents orphaned sub-menus when the parent closes
     graph
     |> Graph.reduce(graph, fn
-      {id, primitive}, acc when is_tuple(id) ->
+      {id, _primitive}, acc when is_tuple(id) ->
         case id do
           {:sub_menu_group, ^menu_id, _sub_id} ->
             # This is a sub-menu for our menu, hide it
@@ -561,10 +559,10 @@ defmodule ScenicWidgets.MenuBar.OptimizedRenderizer do
     # A more sophisticated approach would track the hierarchy
 
     Graph.reduce(graph, graph, fn
-      {{:sub_dropdown_group, _id}, _primitive}, acc ->
+      {{:sub_dropdown_group, id}, _primitive}, acc ->
         # Try to hide this sub-dropdown
         try do
-          Graph.modify(acc, {:sub_dropdown_group, _id}, fn p ->
+          Graph.modify(acc, {:sub_dropdown_group, id}, fn p ->
             Scenic.Primitive.put_style(p, :hidden, true)
           end)
         rescue

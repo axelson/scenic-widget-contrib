@@ -9,9 +9,7 @@ defmodule ScenicWidgets.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
-      preferred_cli_env: [
-        spex: :test
-      ]
+      aliases: aliases()
     ]
   end
 
@@ -27,7 +25,7 @@ defmodule ScenicWidgets.MixProject do
   defp deps do
     [
       {:scenic, git: "https://github.com/JediLuke/scenic.git", branch: "main", override: true},
-      {:scenic_driver_local, git: "https://github.com/JediLuke/scenic_driver_local.git", branch: "main", override: true},
+      {:scenic_driver_local, git: "https://github.com/JediLuke/scenic_driver_local.git", branch: "cairo_screenshots", override: true},
       {:font_metrics, "~> 0.5"},
       {:ex_doc, "~> 0.25", only: :dev},
       {:earmark, "~> 1.4", only: :dev},
@@ -38,6 +36,27 @@ defmodule ScenicWidgets.MixProject do
       {:scenic_live_reload, git: "https://github.com/axelson/scenic_live_reload.git", branch: "main", only: :dev},
       {:tidewave, "~> 0.1", only: :dev},
       {:bandit, "~> 1.0", only: :dev}
+    ]
+  end
+
+  def cli do
+    [preferred_envs: [spex: :test, precommit: :test, check: :test]]
+  end
+
+  defp aliases do
+    [
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format --check-formatted",
+        "test"
+      ],
+      check: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format --check-formatted",
+        "test"
+      ]
     ]
   end
 

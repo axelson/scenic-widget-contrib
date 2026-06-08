@@ -93,6 +93,7 @@ defmodule ScenicWidgets.MenuBar do
   alias Scenic.Graph
 
 
+  @impl true
   def validate(data) when is_map(data) do
     # Required: frame and menu_map
     case {Map.get(data, :frame), Map.get(data, :menu_map)} do
@@ -170,7 +171,7 @@ defmodule ScenicWidgets.MenuBar do
     end)
   end
 
-  @impl Scenic.Component
+  @impl true
   def init(scene, data, _opts) do
     # Logger.info("🎯 ScenicWidgets.MenuBar component initializing (regular MenuBar, NOT Enhanced)")
     # Logger.info("MenuBar init called with data: #{inspect(data)}")
@@ -249,6 +250,7 @@ defmodule ScenicWidgets.MenuBar do
   #   {:noreply, scene}
   # end
 
+  @impl true
   def handle_put(:close_all_menus, scene) do
     # Logger.debug("MenuBar received :close_all_menus via handle_put")
     state = scene.assigns.state
@@ -291,6 +293,7 @@ defmodule ScenicWidgets.MenuBar do
     {:noreply, scene}
   end
 
+  @impl true
   def handle_input({:cursor_pos, coords}, _context, scene) do
     state = scene.assigns.state
     new_state = Reducer.handle_cursor_pos(state, coords)
@@ -348,26 +351,6 @@ defmodule ScenicWidgets.MenuBar do
     end
   end
 
-  # Handle capture/release based on menu open/close transitions
-  defp handle_input_capture_transition(scene, nil, new_menu) when not is_nil(new_menu) do
-    # Menu opened - capture input so clicks go to us, not underlying components
-    Logger.info("🎯 MenuBar: Capturing input for dropdown #{inspect(new_menu)}")
-    :ok = capture_input(scene, [:cursor_button, :cursor_pos])
-    scene
-  end
-
-  defp handle_input_capture_transition(scene, old_menu, nil) when not is_nil(old_menu) do
-    # Menu closed - release input capture
-    Logger.info("🎯 MenuBar: Releasing input capture (menu #{inspect(old_menu)} closed)")
-    :ok = release_input(scene)
-    scene
-  end
-
-  defp handle_input_capture_transition(scene, _old, _new) do
-    # No transition (both nil or both non-nil) - no change needed
-    scene
-  end
-
   def handle_input({:key, {:key_escape, 1, _}}, _context, scene) do
     state = scene.assigns.state
     new_state = Reducer.handle_escape(state)
@@ -392,6 +375,26 @@ defmodule ScenicWidgets.MenuBar do
     {:noreply, scene}
   end
 
+  # Handle capture/release based on menu open/close transitions
+  defp handle_input_capture_transition(scene, nil, new_menu) when not is_nil(new_menu) do
+    # Menu opened - capture input so clicks go to us, not underlying components
+    Logger.info("🎯 MenuBar: Capturing input for dropdown #{inspect(new_menu)}")
+    :ok = capture_input(scene, [:cursor_button, :cursor_pos])
+    scene
+  end
+
+  defp handle_input_capture_transition(scene, old_menu, nil) when not is_nil(old_menu) do
+    # Menu closed - release input capture
+    Logger.info("🎯 MenuBar: Releasing input capture (menu #{inspect(old_menu)} closed)")
+    :ok = release_input(scene)
+    scene
+  end
+
+  defp handle_input_capture_transition(scene, _old, _new) do
+    # No transition (both nil or both non-nil) - no change needed
+    scene
+  end
+
   # Helper to register semantic elements for MCP
   defp register_semantic_elements(scene, %State{} = state) do
     viewport = scene.viewport
@@ -414,7 +417,7 @@ defmodule ScenicWidgets.MenuBar do
       # Register each menu header button as a clickable semantic element
       state.menu_map
       |> Enum.with_index()
-      |> Enum.each(fn {{menu_id, {label, items}}, index} ->
+      |> Enum.each(fn {{_menu_id, {label, items}}, index} ->
         # Calculate bounds for this menu header
         local_x = index * item_width
         local_y = 0

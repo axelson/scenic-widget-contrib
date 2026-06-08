@@ -23,8 +23,6 @@ defmodule ScenicWidgets.SpareParts.LukesMultiSelect do
   @rotate_neutral :math.pi() / 2
   @rotate_down 0
   @rotate_up :math.pi()
-  @drop_click_window_ms 400
-
   # --------------------------------------------------------
   @impl Scenic.Component
   def validate({items, _initial_selected_ids} = data) when is_list(items) do
@@ -190,6 +188,7 @@ defmodule ScenicWidgets.SpareParts.LukesMultiSelect do
   end
 
   # Handle input when the dropdown is closed and button is pressed
+  @impl true
   def handle_input(
         {:cursor_button, {:btn_left, 1, _, _}},
         @button_id,
@@ -222,7 +221,7 @@ defmodule ScenicWidgets.SpareParts.LukesMultiSelect do
         %Scene{
           assigns: %{
             down: true,
-            theme: theme,
+            theme: _theme,
             graph: graph
           }
         } = scene
@@ -303,6 +302,7 @@ defmodule ScenicWidgets.SpareParts.LukesMultiSelect do
 
   def handle_input(_, _, scene), do: {:noreply, scene}
 
+  @impl true
   def handle_cast({:set_scroll, _coords}, scene) do
     IO.puts "GETTING SET SCROLL BUT ignoring it"
     {:noreply, scene}

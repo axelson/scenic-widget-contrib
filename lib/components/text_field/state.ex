@@ -502,7 +502,8 @@ defmodule ScenicWidgets.TextField.State do
   Calculate character width using FontMetrics.
   Raises if FontMetrics are not available - cursor positioning requires accurate metrics.
   """
-  def char_width(%__MODULE__{font: %{metrics: %FontMetrics{} = metrics, size: size}}, char \\ "W") do
+  def char_width(state, char \\ "W")
+  def char_width(%__MODULE__{font: %{metrics: %FontMetrics{} = metrics, size: size}}, char) do
     FontMetrics.width(char, size, metrics)
   end
   def char_width(%__MODULE__{font: %{name: name}}, _char) do
@@ -610,8 +611,8 @@ defmodule ScenicWidgets.TextField.State do
 
   # Convert an X coordinate to a column position within a line of text
   # Uses binary search-like approach for efficiency with FontMetrics
-  defp x_to_column(state, line_text, x) when x <= 0, do: 1
-  defp x_to_column(state, "", _x), do: 1
+  defp x_to_column(_state, _line_text, x) when x <= 0, do: 1
+  defp x_to_column(_state, "", _x), do: 1
   defp x_to_column(state, line_text, x) do
     # Walk through characters and find where the click falls
     chars = String.graphemes(line_text)
@@ -701,7 +702,7 @@ defmodule ScenicWidgets.TextField.State do
     end
   end
 
-  defp find_word_start(graphemes, pos) when pos <= 0, do: 0
+  defp find_word_start(_graphemes, pos) when pos <= 0, do: 0
   defp find_word_start(graphemes, pos) do
     char = Enum.at(graphemes, pos - 1, "")
     if word_char?(char), do: find_word_start(graphemes, pos - 1), else: pos

@@ -271,7 +271,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
 
   defp update_item_styling(graph, item_id, state) do
     is_active = state.active_id == item_id
-    is_focused = state.focused_id == item_id
+    _is_focused = state.focused_id == item_id
     is_hovered = Map.get(state, :hovered_id) == item_id
 
     theme = state.theme
@@ -314,11 +314,4 @@ defmodule ScenicWidgets.SideNav.Renderizer do
     graph
   end
 
-  # Calculate vertical position for text (centering)
-  defp calculate_v_pos(theme) do
-    # Use Scenic's font metrics if available
-    # For now, use a simple approximation
-    font_size = theme.font_size
-    -font_size / 3
-  end
 end

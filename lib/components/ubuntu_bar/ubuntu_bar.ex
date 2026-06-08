@@ -63,7 +63,7 @@ defmodule ScenicWidgets.UbuntuBar do
     {:error, "UbuntuBar data must be a map, got: #{inspect(data)}"}
   end
 
-  @impl Scenic.Component  
+  @impl true
   def init(scene, data, opts) do
     # Extract frame from opts
     frame = case Keyword.get(opts, :frame) do
@@ -109,7 +109,7 @@ defmodule ScenicWidgets.UbuntuBar do
     {:ok, scene}
   end
 
-  @impl Scenic.Component
+  @impl true
   def handle_cast({:set_active_button, button_id}, scene) do
     new_state = %{scene.assigns.state | active_button: button_id}
     new_graph = render_ubuntu_bar(Scenic.Graph.build(), new_state)
@@ -122,7 +122,7 @@ defmodule ScenicWidgets.UbuntuBar do
     {:noreply, scene}
   end
 
-  @impl Scenic.Component
+  @impl true
   def handle_input(
         {:cursor_button, {:btn_left, 1, _empty_list?, _local_coords}},
         {:button_bg, button_id},
@@ -153,7 +153,7 @@ defmodule ScenicWidgets.UbuntuBar do
     end
   end
 
-  @impl Scenic.Component
+  @impl true
   def handle_input({:cursor_pos, _coords}, {:button_bg, button_id}, scene) do
     state = scene.assigns.state
     
@@ -173,7 +173,7 @@ defmodule ScenicWidgets.UbuntuBar do
     end
   end
 
-  @impl Scenic.Component
+  @impl true
   def handle_input({:cursor_pos, _coords}, _context, scene) do
     state = scene.assigns.state
     
@@ -193,14 +193,14 @@ defmodule ScenicWidgets.UbuntuBar do
     end
   end
 
-  @impl Scenic.Component
-  def handle_input({:cursor_button, _details} = input, _context, scene) do
+  @impl true
+  def handle_input({:cursor_button, _details} = _input, _context, scene) do
     # Logger.debug("#{__MODULE__} ignoring input: #{inspect(input)}")
     {:noreply, scene}
   end
 
-  @impl Scenic.Component
-  def handle_input(input, context, scene) do
+  @impl true
+  def handle_input(_input, _context, scene) do
     # Logger.debug("#{__MODULE__} unhandled input: #{inspect(input)} context: #{inspect(context)}")
     {:noreply, scene}
   end

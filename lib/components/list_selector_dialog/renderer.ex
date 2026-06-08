@@ -135,7 +135,7 @@ defmodule ScenicWidgets.ListSelectorDialog.Renderer do
 
   # Renders the Cancel and Confirm buttons
   defp render_buttons(graph, %State{} = state) do
-    %{dimensions: dims, theme: theme} = state
+    %{dimensions: _dims, theme: theme} = state
 
     confirm_color = if state.selected_index do
       theme.button_confirm

@@ -7,7 +7,6 @@ defmodule ScenicWidgets.FilePicker.Renderer do
 
   alias Scenic.Graph
   alias Scenic.Primitives
-  alias Scenic.Components
   alias Widgex.Frame
   alias ScenicWidgets.FilePicker.State
 
@@ -161,7 +160,7 @@ defmodule ScenicWidgets.FilePicker.Renderer do
 
   # Render the scrollable file list
   defp render_file_list(graph, %Frame{} = modal_frame, %Frame{} = list_frame, %State{} = state) do
-    {modal_width, modal_height} = modal_frame.size.box
+    {_modal_width, _modal_height} = modal_frame.size.box
     {modal_x, modal_y} = modal_frame.pin.point
     {list_width, list_height} = list_frame.size.box
 
@@ -322,10 +321,8 @@ defmodule ScenicWidgets.FilePicker.Renderer do
 
   # Update filename input when typing
   defp update_filename_input(graph, modal_frame, %State{filename: filename, filename_cursor: cursor}) do
-    {width, height} = modal_frame.size.box
-    {x, y} = modal_frame.pin.point
-    footer_y = y + height - @footer_height_save
-    input_width = width - @padding * 2
+    {_width, _height} = modal_frame.size.box
+    {_x, _y} = modal_frame.pin.point
 
     # Calculate cursor position
     text_before_cursor = String.slice(filename, 0, cursor)

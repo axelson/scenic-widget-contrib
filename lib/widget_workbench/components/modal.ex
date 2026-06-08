@@ -13,7 +13,7 @@ defmodule WidgetWorkbench.Components.Modal do
   """
 
   # Validate the data passed to the component
-  def validate(%{id: id, frame: %Frame{} = _frame} = data), do: {:ok, data}
+  def validate(%{id: _id, frame: %Frame{} = _frame} = data), do: {:ok, data}
   def validate(_), do: {:error, "Invalid data for Modal component"}
 
   def init(scene, %{id: id, frame: frame, title: title, placeholder: placeholder}, _opts) do
@@ -36,7 +36,7 @@ defmodule WidgetWorkbench.Components.Modal do
   end
 
   # Render the modal
-  defp render_modal(%Frame{} = frame, title, placeholder) do
+  defp render_modal(%Frame{} = frame, title, _placeholder) do
     modal_width = 400
     modal_height = 200
     modal_x = (frame.size.width - modal_width) / 2
@@ -110,7 +110,7 @@ defmodule WidgetWorkbench.Components.Modal do
   def handle_input({:cursor_button, {:btn_left, 0, _, _}}, _context, scene), do: {:noreply, scene}
 
   def handle_input(@backspace, _context, scene) do
-    input_value = String.slice(scene.assigns.input_value, 0..-2)
+    input_value = String.slice(scene.assigns.input_value, 0..-2//1)
     update_input_text(scene, input_value)
   end
 
@@ -128,8 +128,7 @@ defmodule WidgetWorkbench.Components.Modal do
     update_input_text(scene, input_value)
   end
 
-  def handle_input(input, _context, scene) do
-    # IO.puts("Unhandled input: #{inspect(input)}")
+  def handle_input(_input, _context, scene) do
     {:noreply, scene}
   end
 

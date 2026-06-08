@@ -67,10 +67,6 @@ defmodule ScenicWidgets.FilePicker.Reducer do
   # Open Mode Keyboard Input
   # ===========================================================================
 
-  @doc """
-  Process keyboard input in open mode.
-  Returns `{:state, new_state}` or `{:action, action}` or `:noop`.
-  """
   def process_input(%State{mode: :open} = state, {:key, {key, 1, _mods}}) do
     case key do
       :key_up ->
@@ -97,11 +93,8 @@ defmodule ScenicWidgets.FilePicker.Reducer do
     end
   end
 
-  def process_input(%State{} = state, {:key, _}), do: :noop
+  def process_input(%State{} = _state, {:key, _}), do: :noop
 
-  @doc """
-  Process scroll wheel input.
-  """
   def process_input(%State{scroll: scroll} = state, {:cursor_scroll, scroll_data}) do
     case normalize_scroll_input(scroll_data) do
       {_dx, dy} when dy != 0 ->

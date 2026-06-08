@@ -130,7 +130,7 @@ defmodule ScenicWidgets.TextField.Renderer do
   # Render the line number gutter with its own scissor clip
   # Scrolls vertically with text but NOT horizontally
   defp render_line_number_gutter(graph, %State{} = state, gutter_width) do
-    frame_height = state.frame.size.height
+    _frame_height = state.frame.size.height
     scroll = state.scroll
     line_height = State.line_height(state)
 
@@ -291,7 +291,7 @@ defmodule ScenicWidgets.TextField.Renderer do
   # Uses explicit x-positioning for indentation because Scenic renders
   # leading spaces as zero-width
   # For single-line mode, uses text_base: :middle for perfect vertical centering
-  defp render_text_lines(graph, %State{mode: mode, frame: frame} = state, display_lines, x_offset, line_height, _text_y_offset \\ 0) do
+  defp render_text_lines(graph, %State{mode: mode, frame: frame} = state, display_lines, x_offset, line_height, _text_y_offset) do
     Enum.reduce(Enum.with_index(display_lines, 1), graph, fn {line_text, line_num}, g ->
       # Expand tabs and get indent width + trimmed content
       # Scenic renders leading spaces as zero-width, so we position explicitly
@@ -331,7 +331,7 @@ defmodule ScenicWidgets.TextField.Renderer do
     colors: colors,
     frame: frame,
     mode: mode
-  } = state, x_offset, line_height, _text_y_offset \\ 0) do
+  } = state, x_offset, line_height, _text_y_offset) do
     # Get cursor position in display line coordinates
     {display_line, display_col} = source_to_display_cursor(state, {line, col})
 
@@ -568,125 +568,6 @@ defmodule ScenicWidgets.TextField.Renderer do
     end
   end
 
-  # Render scrollbars inside the main group (for z-order)
-  defp render_scrollbars_inner(graph, %State{scroll: scroll, frame: frame, show_line_numbers: show_ln, line_number_width: ln_width} = _state) do
-    alias Widgex.Structs.Dimensions
-
-    gutter_offset = if show_ln, do: ln_width, else: 0
-    content_width = frame.size.width - gutter_offset
-    {frame_height} = {frame.size.height}
-
-    {frame_width, _} = frame.size.box
-    IO.puts("📜 TextField.render_scrollbars_inner: gutter=#{gutter_offset}, content_width=#{content_width}, frame_width=#{frame_width}, frame_height=#{frame_height}")
-
-    # Render scrollbars directly (not via ScrollRenderer) for debugging
-    # Vertical scrollbar on the right edge of content area
-    if Widgex.Scroll.ScrollState.scrollable_y?(scroll) do
-      scrollbar_width = 12
-      scrollbar_padding = 4
-
-      # Position at right edge of FULL frame (not content area)
-      track_x = frame_width - scrollbar_width - scrollbar_padding
-      track_height = frame_height - scrollbar_padding * 2
-
-      # Calculate thumb position and size
-      {thumb_y_ratio, thumb_height_ratio} = Widgex.Scroll.ScrollState.scrollbar_thumb(scroll, :y)
-      scale = track_height / scroll.viewport_height
-      thumb_height = max(thumb_height_ratio * scale, 20)  # Minimum thumb size
-      thumb_y = thumb_y_ratio * scale
-
-      IO.puts("📜 Vertical scrollbar: track_x=#{track_x}, track_height=#{track_height}, thumb_height=#{thumb_height}")
-
-      # DEBUG: Try hardcoded position at bottom-right corner
-      # If this appears at top-left, there's a coordinate transform issue
-      test_x = 500  # Should be 500px from left
-      test_y = 500  # Should be 500px from top
-
-      graph
-      # Track - put at hardcoded position to debug
-      |> Primitives.rrect({scrollbar_width, 200, 4},
-        id: :scrollbar_y_track,
-        fill: {255, 0, 0, 128},
-        translate: {test_x, test_y}
-      )
-      # Thumb
-      |> Primitives.rrect({scrollbar_width, thumb_height, 4},
-        id: :scrollbar_y_thumb,
-        fill: {255, 0, 0, 255},
-        translate: {test_x, test_y + 10}
-      )
-      # Add horizontal scrollbar if needed
-      |> maybe_render_horizontal_scrollbar(scroll, frame_width, frame_height, gutter_offset, scrollbar_width, scrollbar_padding)
-    else
-      graph
-      |> maybe_render_horizontal_scrollbar(scroll, frame_width, frame_height, gutter_offset, 12, 4)
-    end
-  end
-
-  defp maybe_render_horizontal_scrollbar(graph, scroll, frame_width, frame_height, gutter_offset, scrollbar_width, scrollbar_padding) do
-    if Widgex.Scroll.ScrollState.scrollable_x?(scroll) do
-      # Horizontal scrollbar at bottom, starting after gutter
-      track_width = frame_width - gutter_offset - scrollbar_padding * 2
-      # If vertical scrollbar exists, reduce width
-      track_width = if Widgex.Scroll.ScrollState.scrollable_y?(scroll) do
-        track_width - scrollbar_width - scrollbar_padding
-      else
-        track_width
-      end
-      track_y = frame_height - scrollbar_width - scrollbar_padding
-      track_x = gutter_offset + scrollbar_padding
-
-      # Calculate thumb
-      {thumb_x_ratio, thumb_width_ratio} = Widgex.Scroll.ScrollState.scrollbar_thumb(scroll, :x)
-      scale = track_width / scroll.viewport_width
-      thumb_width = max(thumb_width_ratio * scale, 20)
-      thumb_x = thumb_x_ratio * scale
-
-      IO.puts("📜 Horizontal scrollbar: track_x=#{track_x}, track_y=#{track_y}, track_width=#{track_width}, thumb_width=#{thumb_width}")
-
-      graph
-      # Track
-      |> Primitives.rrect({track_width, scrollbar_width, 4},
-        id: :scrollbar_x_track,
-        fill: {0, 0, 255, 128},  # Blue for horizontal
-        translate: {track_x, track_y}
-      )
-      # Thumb
-      |> Primitives.rrect({thumb_width, scrollbar_width, 4},
-        id: :scrollbar_x_thumb,
-        fill: {0, 0, 255, 255},
-        translate: {track_x + thumb_x, track_y}
-      )
-    else
-      graph
-    end
-  end
-
-  # Render scrollbars using ScrollRenderer (original, kept for reference)
-  defp render_scrollbars(graph, %State{scroll: scroll, frame: frame, show_line_numbers: show_ln, line_number_width: ln_width} = _state) do
-    alias Widgex.Scroll.ScrollRenderer
-    alias Widgex.Structs.Dimensions
-
-    # Calculate content frame (text area only, excluding gutter)
-    # IMPORTANT: Must create a proper Dimensions struct so .box is correct
-    gutter_offset = if show_ln, do: ln_width, else: 0
-    content_width = frame.size.width - gutter_offset
-    content_frame = %{frame |
-      size: Dimensions.new({content_width, frame.size.height})
-    }
-
-    IO.puts("📜 TextField.render_scrollbars: gutter_offset=#{gutter_offset}, content_width=#{content_width}, frame=#{frame.size.width}x#{frame.size.height}")
-
-    # Render scrollbars in a group translated by gutter offset
-    graph
-    |> Scenic.Primitives.group(fn g ->
-      ScrollRenderer.render_scrollbars(g, scroll, content_frame)
-    end,
-      id: :scrollbars_group,
-      translate: {gutter_offset, 0}
-    )
-  end
-
   # ===== UPDATE HELPERS =====
 
   defp update_border_if_changed(graph, %State{focused: old_focused}, %State{focused: new_focused, colors: colors})
@@ -753,7 +634,8 @@ defmodule ScenicWidgets.TextField.Renderer do
     |> render_line_number_gutter(state, gutter_width)
   end
 
-  defp rebuild_gutter(graph, %State{show_line_numbers: false}), do: graph
+  # Note: rebuild_gutter/2 is only called when show_line_numbers is true,
+  # so the false clause is unreachable and has been removed.
 
   # Update text lines when content changes
   # Must update both text content AND x-position due to explicit indent positioning
@@ -927,7 +809,7 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   defp update_cursor_if_changed(graph, _old_state, _new_state), do: graph
 
-  defp update_scrollbars_if_changed(graph, %State{scroll: old_scroll} = old_state, %State{scroll: new_scroll} = new_state) do
+  defp update_scrollbars_if_changed(graph, %State{scroll: old_scroll} = _old_state, %State{scroll: new_scroll} = new_state) do
     alias Widgex.Scroll.ScrollState
 
     # Check if scrollability changed (primitives may not exist)
@@ -1002,7 +884,7 @@ defmodule ScenicWidgets.TextField.Renderer do
     |> update_v_scrollbar_thumb(old_scroll, new_scroll, content_width, frame_height, scrollbar_width, scrollbar_padding)
   end
 
-  defp update_h_scrollbar_thumb(graph, old_scroll, new_scroll, content_width, frame_height, scrollbar_width, scrollbar_padding) do
+  defp update_h_scrollbar_thumb(graph, _old_scroll, new_scroll, content_width, frame_height, scrollbar_width, scrollbar_padding) do
     alias Widgex.Scroll.ScrollState
 
     if ScrollState.scrollable_x?(new_scroll) do
@@ -1032,7 +914,7 @@ defmodule ScenicWidgets.TextField.Renderer do
     end
   end
 
-  defp update_v_scrollbar_thumb(graph, old_scroll, new_scroll, content_width, frame_height, scrollbar_width, scrollbar_padding) do
+  defp update_v_scrollbar_thumb(graph, _old_scroll, new_scroll, content_width, frame_height, scrollbar_width, scrollbar_padding) do
     alias Widgex.Scroll.ScrollState
 
     if ScrollState.scrollable_y?(new_scroll) do

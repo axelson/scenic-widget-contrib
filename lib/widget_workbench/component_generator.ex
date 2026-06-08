@@ -221,7 +221,7 @@ defmodule WidgetWorkbench.ComponentGenerator do
   # State Template
   # ============================================================================
 
-  defp state_template(name, module_name) do
+  defp state_template(_name, module_name) do
     """
     defmodule ScenicWidgets.#{module_name}.State do
       @moduledoc \"\"\"
@@ -548,7 +548,7 @@ defmodule WidgetWorkbench.ComponentGenerator do
   # Spex Template
   # ============================================================================
 
-  defp spex_template(name, module_name) do
+  defp spex_template(_name, module_name) do
     """
     defmodule ScenicWidgets.#{module_name}.BasicSpex do
       @moduledoc \"\"\"

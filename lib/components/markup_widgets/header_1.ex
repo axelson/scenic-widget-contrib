@@ -2,7 +2,7 @@ defmodule ScenicWidgets.Markup.Header1 do
   @font_size 40
   @font_color :black
 
-  def draw(graph, %{frame: %Widgex.Frame{} = f, text: text} = args)
+  def draw(graph, %{frame: %Widgex.Frame{} = f, text: text} = _args)
       when is_binary(text) do
     draw(graph, f, text)
   end
@@ -37,7 +37,7 @@ defmodule ScenicWidgets.Markup.Header1 do
     |> Widgex.Frame.draw_guidewires(f)
   end
 
-  def maybe_draw_debug_layer(graph, %Widgex.Frame{} = f, _args) do
+  def maybe_draw_debug_layer(graph, %Widgex.Frame{} = _f, _args) do
     graph
   end
 end
