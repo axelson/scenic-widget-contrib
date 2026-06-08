@@ -164,8 +164,7 @@ defmodule ScenicWidgets.TextField.Renderer do
         translate: {0, -scroll.offset_y}  # Only vertical scroll
       )
     end,
-      id: :gutter_group,
-      scissor: {gutter_width, frame_height}
+      id: :gutter_group
     )
   end
 
