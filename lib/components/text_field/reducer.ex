@@ -44,7 +44,6 @@ defmodule ScenicWidgets.TextField.Reducer do
     now = System.monotonic_time(:millisecond)
     if now - focus_time < @focus_debounce_ms do
       # Input arrived too soon after focus - ignore it (likely the focus-triggering key)
-      IO.puts("🔇 TextField: Ignoring codepoint within #{@focus_debounce_ms}ms of focus (focus_debounce)")
       {:noop, state}
     else
       # Past debounce window - process normally
@@ -100,7 +99,6 @@ defmodule ScenicWidgets.TextField.Reducer do
   # Escape key - emit :escape_pressed event for parent to handle (close dialogs, etc.)
   # Note: Scenic uses :key_esc not :key_escape
   def process_input(%State{focused: true} = state, {:key, {:key_esc, key_state, _mods}}) when key_state > 0 do
-    IO.puts("🔑 TextField.Reducer: Escape key pressed! id=#{inspect(state.id)}")
     {:event, {:escape_pressed, state.id}, state}
   end
 
@@ -160,10 +158,7 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   def process_input(%State{focused: true} = state, {:key, {:key_down, key_state, mods}}) when key_state > 0 do
     if :shift in mods do
-      # IO.puts("🔍 Shift+Down pressed! Current cursor: #{inspect(state.cursor)}, selection: #{inspect(state.selection)}, lines: #{length(state.lines)}")
-      # IO.puts("🔍 Lines content: #{inspect(state.lines)}")
       new_state = move_cursor_with_selection(state, :down)
-      # IO.puts("🔍 After Shift+Down: cursor: #{inspect(new_state.cursor)}, selection: #{inspect(new_state.selection)}")
       {:noop, new_state}
     else
       {:noop, move_cursor(state, :down) |> clear_selection()}
@@ -179,38 +174,35 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:noop, state |> move_cursor(:line_end) |> clear_selection()}
   end
 
-  # Escape - clear focus (optionally)
+  # Escape - lose focus and notify parent of escape (distinct from click-outside focus_lost)
+  # Parents like HyperCard listen for {:escape_pressed, id} to cancel edit mode.
   def process_input(%State{focused: true} = state, @escape_key) do
-    # IO.puts("🔍 Focus lost: Escape pressed")
-    {:event, {:focus_lost, state.id}, %{state | focused: false}}
+    {:event, {:escape_pressed, state.id}, %{state | focused: false}}
   end
 
-  # Tab - insert a tab character
+  # Tab - emit tab_pressed event so parent can handle field switching
+  # (Inserting literal tab characters is rarely useful; parents like HyperCard
+  #  use this event to cycle focus between title → content → title)
   def process_input(%State{focused: true} = state, @tab_key) do
-    state_with_undo = State.push_undo(state)
-    new_state = delete_selection(state_with_undo) |> insert_text_at_cursor("\t")
-    {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+    {:event, {:tab_pressed, state.id}, state}
   end
 
   # ===== KEYBOARD SHORTCUTS =====
 
   # Ctrl+A - Select all
   def process_input(%State{focused: true} = state, @ctrl_a) do
-    # IO.puts("🔍 Ctrl+A pressed! Focused: #{state.focused}")
     {:noop, select_all(state)}
   end
 
   # Ctrl+C - Copy selection to clipboard (works even when unfocused)
   def process_input(%State{selection: selection} = state, @ctrl_c) when selection != nil do
     text = get_selected_text(state)
-    # IO.puts("🔍 Ctrl+C pressed! Selection: #{inspect(selection)}, Text: #{inspect(text)}, Focused: #{state.focused}")
     # Send clipboard event to parent (Scenic doesn't have system clipboard access)
     {:event, {:clipboard_copy, state.id, text}, state}
   end
 
   def process_input(%State{} = state, @ctrl_c) do
     # No selection - do nothing
-    # IO.puts("🔍 Ctrl+C pressed but no selection (focused: #{state.focused})")
     {:noop, state}
   end
 
@@ -218,7 +210,6 @@ defmodule ScenicWidgets.TextField.Reducer do
   def process_input(%State{selection: selection} = state, @ctrl_x) when selection != nil do
     text = get_selected_text(state)
     new_state = delete_selection(state)
-    # IO.puts("🔍 Ctrl+X pressed! Focused: #{state.focused}")
     # Send clipboard event to parent
     {:event, {:clipboard_cut, state.id, text}, new_state}
   end
@@ -230,7 +221,6 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # Ctrl+V - Paste from clipboard (works even when unfocused for testing)
   def process_input(%State{} = state, @ctrl_v) do
-    # IO.puts("🔍 Ctrl+V pressed! Focused: #{state.focused}")
     # Emit event to request clipboard data from parent
     # Parent will call insert_text action with the clipboard content
     {:event, {:clipboard_paste_requested, state.id}, state}
@@ -243,8 +233,12 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # Ctrl+F - Find (emit event to open search dialog)
   def process_input(%State{focused: true} = state, @ctrl_f) do
-    IO.puts("🔍 Ctrl+F pressed! Emitting find_requested")
     {:event, {:find_requested, state.id}, state}
+  end
+
+  # Ctrl+H - Find & Replace (emit event to open replace bar)
+  def process_input(%State{focused: true} = state, @ctrl_h) do
+    {:event, {:replace_mode_requested, state.id}, state}
   end
 
   # Ctrl+G - Go to next match (if searching)
@@ -576,18 +570,18 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # Arrow keys - cursor movement
   def input_to_buffer_action(%State{focused: true}, {:key, {:key_left, key_state, mods}}) when key_state > 0 do
-    if :shift in mods do
-      {:select_text, :left, 1}
-    else
-      {:move_cursor, :left, 1}
+    cond do
+      :ctrl in mods  -> {:move_cursor, :prev_word}
+      :shift in mods -> {:select_text, :left, 1}
+      true           -> {:move_cursor, :left, 1}
     end
   end
 
   def input_to_buffer_action(%State{focused: true}, {:key, {:key_right, key_state, mods}}) when key_state > 0 do
-    if :shift in mods do
-      {:select_text, :right, 1}
-    else
-      {:move_cursor, :right, 1}
+    cond do
+      :ctrl in mods  -> {:move_cursor, :next_word}
+      :shift in mods -> {:select_text, :right, 1}
+      true           -> {:move_cursor, :right, 1}
     end
   end
 
@@ -658,8 +652,12 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # Ctrl+F - Find (emit event to parent)
   def input_to_buffer_action(%State{focused: true} = state, {:key, {:key_f, 1, [:ctrl]}}) do
-    IO.puts("🔍 Ctrl+F pressed in buffer_backed mode! Emitting find_requested")
     {:find_requested, state.id}
+  end
+
+  # Ctrl+H - Find & Replace (emit event to parent)
+  def input_to_buffer_action(%State{focused: true} = state, {:key, {:key_h, 1, [:ctrl]}}) do
+    {:replace_mode_requested, state.id}
   end
 
   # ===== SCROLLBAR DRAG (buffer_backed mode) =====
@@ -698,16 +696,10 @@ defmodule ScenicWidgets.TextField.Reducer do
   # Mouse click - check for scrollbar hit first, then focus
   def input_to_buffer_action(%State{} = state, {:cursor_button, {:btn_left, 1, _mods, coords}}) do
     hit_result = State.scrollbar_hit_test(state, coords)
-    {x, y} = coords
-    gutter = if state.show_line_numbers, do: state.line_number_width, else: 0
-    content_w = state.frame.size.width - gutter
-    IO.puts("🖱️ CLICK: coords=#{inspect(coords)}, frame=#{state.frame.size.width}x#{state.frame.size.height}, gutter=#{gutter}, scrollbar_hit=#{inspect(hit_result)}")
-    IO.puts("   Expected scrollbar_x range: #{gutter + content_w - 15}..#{gutter + content_w}")
 
     case hit_result do
       :x ->
         # Start horizontal scrollbar drag
-        IO.puts("📜 Starting horizontal scrollbar drag at #{inspect(coords)}")
         {:local_update, %{state |
           scrollbar_drag: :x,
           scrollbar_drag_start: coords,
@@ -716,7 +708,6 @@ defmodule ScenicWidgets.TextField.Reducer do
 
       :y ->
         # Start vertical scrollbar drag
-        IO.puts("📜 Starting vertical scrollbar drag at #{inspect(coords)}")
         {:local_update, %{state |
           scrollbar_drag: :y,
           scrollbar_drag_start: coords,
@@ -724,8 +715,15 @@ defmodule ScenicWidgets.TextField.Reducer do
         }}
 
       nil ->
-        # Not on scrollbar - handle focus, cursor positioning, double-click, and text drag
-        if State.point_inside?(state, coords) do
+        # Not on scrollbar - handle focus, cursor positioning, double-click, and text drag.
+        # In :buffer_backed mode the TextField receives every click in the
+        # viewport (request_input is non-positional), so a click that visually
+        # targets a sibling overlay (e.g. an IconMenu dropdown rendered above
+        # the buffer pane) still arrives here with point_inside? = true. Drop
+        # such clicks before they translate to a buffer cursor mutation.
+        # See docs/claude_notes/cursor_preservation_diagnosis_2026_05_02.md.
+        if State.point_inside?(state, coords) and
+             not buffer_backed_overlay_click?(state, coords) do
           # Convert click position to cursor line/col
           {line, col} = State.click_to_cursor(state, coords)
           click_pos = {line, col}
@@ -842,6 +840,40 @@ defmodule ScenicWidgets.TextField.Reducer do
   def input_to_buffer_action(_state, _input) do
     nil
   end
+
+  # In :buffer_backed mode, treat clicks whose local coordinates land far past
+  # the rendered text content of the clicked line as belonging to a sibling
+  # overlay (e.g. IconMenu dropdown). See click handler comment above.
+  # Tolerance of 4× font size past the line text width permits the usual
+  # "click past end of line → place cursor at EOL" affordance.
+  defp buffer_backed_overlay_click?(%State{input_mode: :buffer_backed} = state, {x, y}) do
+    line_height = State.line_height(state)
+    text_padding = 10
+    gutter_width = if state.show_line_numbers, do: state.line_number_width, else: 0
+    scroll = state.scroll
+
+    content_x = x - gutter_width - text_padding + scroll.offset_x
+    content_y = y + scroll.offset_y
+
+    line_idx = max(1, div(trunc(content_y), line_height) + 1)
+
+    cond do
+      line_idx > length(state.lines) ->
+        # Click is below all rendered text — clearly not on a text glyph
+        true
+
+      true ->
+        line_text = Enum.at(state.lines, line_idx - 1, "")
+        # Approximate text width without depending on FontMetrics: monospace
+        # characters are ~0.6 × font_size wide. The tolerance is generous
+        # enough to cover proportional fonts and trailing whitespace clicks.
+        approx_text_width = String.length(line_text) * state.font.size * 0.6
+        tolerance = state.font.size * 4
+        content_x > approx_text_width + tolerance
+    end
+  end
+
+  defp buffer_backed_overlay_click?(_state, _coords), do: false
 
   # ===== SEARCH HELPER =====
 
@@ -1299,16 +1331,12 @@ defmodule ScenicWidgets.TextField.Reducer do
     {content_width, display_line_count} = case wrap_mode do
       :none ->
         # No wrapping: content width is the widest line, height is line count
-        {max_line_width, longest_line, longest_line_chars} = lines
+        {max_line_width, _longest_line, _longest_line_chars} = lines
           |> Enum.with_index()
           |> Enum.map(fn {line, idx} -> {State.string_width(state, line), idx + 1, String.length(line)} end)
           |> Enum.max_by(fn {w, _, _} -> w end, fn -> {0, 0, 0} end)
         # Add padding for cursor at end of line
         content_w = max(scroll.viewport_width, max_line_width + 40)
-        max_scroll = content_w - scroll.viewport_width
-        longest_line_text = Enum.at(lines, longest_line - 1, "") |> String.slice(0, 60)
-        IO.puts("📏 Content (update): line #{longest_line} (#{longest_line_chars} chars)=#{max_line_width}px, viewport=#{scroll.viewport_width}, content_w=#{content_w}, max_scroll=#{max_scroll}")
-        IO.puts("   └─ \"#{longest_line_text}...\" ")
         {content_w, length(lines)}
 
       _wrap ->

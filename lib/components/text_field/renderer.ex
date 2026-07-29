@@ -31,6 +31,7 @@ defmodule ScenicWidgets.TextField.Renderer do
   alias Scenic.Graph
   alias Scenic.Primitives
   alias ScenicWidgets.TextField.State
+  require Logger
 
   @doc """
   Initial render of the TextField component.
@@ -118,9 +119,8 @@ defmodule ScenicWidgets.TextField.Renderer do
     render_text_content_area(graph, state, 0, state.frame.size.width)
   end
 
-  defp render_gutter_and_content(graph, %State{show_line_numbers: true, line_number_width: gutter_width, lines: lines} = state) do
+  defp render_gutter_and_content(graph, %State{show_line_numbers: true, line_number_width: gutter_width} = state) do
     content_width = state.frame.size.width - gutter_width
-    IO.puts("🎨 Rendering gutter: width=#{gutter_width}, lines=#{length(lines)}, content_width=#{content_width}")
 
     graph
     |> render_line_number_gutter(state, gutter_width)
@@ -233,8 +233,6 @@ defmodule ScenicWidgets.TextField.Renderer do
       thumb_height = max(thumb_height_ratio * scale, 20)
       thumb_y = thumb_y_ratio * scale
 
-      # IO.puts("📜 V-scrollbar: track_x=#{track_x}, track_height=#{track_height}, frame_height=#{frame_height}")
-
       graph
       |> Primitives.rrect({scrollbar_width, track_height, 4},
         id: :scrollbar_y_track,
@@ -269,8 +267,6 @@ defmodule ScenicWidgets.TextField.Renderer do
       scale = track_width / scroll.viewport_width
       thumb_width = max(thumb_width_ratio * scale, 20)
       thumb_x = thumb_x_ratio * scale
-
-      # IO.puts("📜 H-scrollbar: track_y=#{track_y} (frame_height=#{frame_height}), track_width=#{track_width}")
 
       graph
       |> Primitives.rrect({track_width, scrollbar_width, 4},
@@ -578,7 +574,6 @@ defmodule ScenicWidgets.TextField.Renderer do
     {frame_height} = {frame.size.height}
 
     {frame_width, _} = frame.size.box
-    IO.puts("📜 TextField.render_scrollbars_inner: gutter=#{gutter_offset}, content_width=#{content_width}, frame_width=#{frame_width}, frame_height=#{frame_height}")
 
     # Render scrollbars directly (not via ScrollRenderer) for debugging
     # Vertical scrollbar on the right edge of content area
@@ -595,8 +590,6 @@ defmodule ScenicWidgets.TextField.Renderer do
       scale = track_height / scroll.viewport_height
       thumb_height = max(thumb_height_ratio * scale, 20)  # Minimum thumb size
       thumb_y = thumb_y_ratio * scale
-
-      IO.puts("📜 Vertical scrollbar: track_x=#{track_x}, track_height=#{track_height}, thumb_height=#{thumb_height}")
 
       # DEBUG: Try hardcoded position at bottom-right corner
       # If this appears at top-left, there's a coordinate transform issue
@@ -643,8 +636,6 @@ defmodule ScenicWidgets.TextField.Renderer do
       thumb_width = max(thumb_width_ratio * scale, 20)
       thumb_x = thumb_x_ratio * scale
 
-      IO.puts("📜 Horizontal scrollbar: track_x=#{track_x}, track_y=#{track_y}, track_width=#{track_width}, thumb_width=#{thumb_width}")
-
       graph
       # Track
       |> Primitives.rrect({track_width, scrollbar_width, 4},
@@ -675,8 +666,6 @@ defmodule ScenicWidgets.TextField.Renderer do
     content_frame = %{frame |
       size: Dimensions.new({content_width, frame.size.height})
     }
-
-    IO.puts("📜 TextField.render_scrollbars: gutter_offset=#{gutter_offset}, content_width=#{content_width}, frame=#{frame.size.width}x#{frame.size.height}")
 
     # Render scrollbars in a group translated by gutter offset
     graph

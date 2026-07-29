@@ -63,7 +63,9 @@ defmodule ScenicWidgets.TextField do
   **Examples:** QuillEx editor buffers with undo/redo managed by buffer.
 
   ```elixir
-  %{frame: frame, input_mode: :buffer_backed, buffer_controller: pid, buffer_topic: topic}
+  %{frame: frame, input_mode: :buffer_backed,
+    buffer_controller: pid_or_via_tuple,     # GenServer.cast target for actions
+    buffer_source: :my_buffer_source}        # Scenic.PubSub source of state snapshots
   ```
 
   ## Line Modes
@@ -142,22 +144,17 @@ defmodule ScenicWidgets.TextField do
     # Create initial state
     state = State.new(data)
 
-    # For buffer_backed mode, subscribe to buffer updates and fetch initial state
-    state = if state.input_mode == :buffer_backed and state.buffer_topic do
-      # Subscribe to buffer PubSub updates
-      IO.puts("🔔 TextField init: subscribing to buffer_topic=#{inspect(state.buffer_topic)}")
-      if Code.ensure_loaded?(Quillex.Utils.PubSub) do
-        result = Quillex.Utils.PubSub.subscribe(topic: state.buffer_topic)
-        IO.puts("🔔 TextField init: subscribe result=#{inspect(result)}")
-      else
-        IO.puts("⚠️ TextField init: Quillex.Utils.PubSub NOT loaded!")
-      end
+    # For buffer_backed mode, hydrate from the buffer's retained Scenic.PubSub
+    # snapshot (instant ETS read — no blocking GenServer call) and subscribe
+    # for pushes. Subscribing also delivers the current retained value, so a
+    # publish racing this init cannot be missed.
+    state = if state.input_mode == :buffer_backed and state.buffer_source do
+      state =
+        case Scenic.PubSub.get(state.buffer_source) do
+          nil ->
+            state
 
-      # Fetch initial state from buffer if controller is available
-      state = if state.buffer_controller do
-        case GenServer.call(state.buffer_controller, :get_state, 5000) do
-          {:ok, buf_state} ->
-            # Extract state from buffer
+          buf_state ->
             cursor = case buf_state.cursors do
               [%{line: l, col: c} | _] -> {l, c}
               _ -> {1, 1}
@@ -176,12 +173,9 @@ defmodule ScenicWidgets.TextField do
               undo_stack: [],
               redo_stack: []
             }
-          _ ->
-            state
         end
-      else
-        state
-      end
+
+      Scenic.PubSub.subscribe(state.buffer_source)
       state
     else
       state
@@ -266,12 +260,6 @@ defmodule ScenicWidgets.TextField do
     state = scene.assigns.state
 
     action = Reducer.input_to_buffer_action(state, input)
-    # Debug: log shift+arrow inputs
-    case input do
-      {:key, {:key_left, _, mods}} when mods != [] -> IO.puts("🔑 DEBUG: Shift+Left input=#{inspect(input)} -> action=#{inspect(action)}")
-      {:key, {:key_right, _, mods}} when mods != [] -> IO.puts("🔑 DEBUG: Shift+Right input=#{inspect(input)} -> action=#{inspect(action)}")
-      _ -> :ok
-    end
 
     case action do
       nil ->
@@ -284,12 +272,13 @@ defmodule ScenicWidgets.TextField do
         {:noreply, scene}
 
       {:clipboard_cut, text} ->
-        # Cut: copy to clipboard and send delete action to buffer
+        # Cut: copy to clipboard, clear selection immediately, and send delete action to buffer
         copy_to_system_clipboard(text)
+        new_state = %{state | selection: nil, text_drag: nil, text_drag_start: nil}
         if state.buffer_controller do
           GenServer.cast(state.buffer_controller, {:action, [{:delete, :selection}]})
         end
-        {:noreply, scene}
+        update_scene(scene, state, new_state)
 
       {:clipboard_paste} ->
         # Paste: get clipboard text and send insert action to buffer
@@ -297,7 +286,12 @@ defmodule ScenicWidgets.TextField do
         if state.buffer_controller && clipboard_text != "" do
           GenServer.cast(state.buffer_controller, {:action, [{:insert, clipboard_text, :at_cursor}]})
         end
-        {:noreply, scene}
+        if state.selection != nil do
+          new_state = %{state | selection: nil}
+          update_scene(scene, state, new_state)
+        else
+          {:noreply, scene}
+        end
 
       {:local_update, new_state} ->
         # Some updates (like focus, scrollbar drag) are handled locally
@@ -327,6 +321,11 @@ defmodule ScenicWidgets.TextField do
       {:find_requested, id} ->
         # Emit find_requested event to parent scene
         send_parent_event(scene, {:find_requested, id})
+        {:noreply, scene}
+
+      {:replace_mode_requested, id} ->
+        # Emit replace_mode_requested event to parent scene (Ctrl+H)
+        send_parent_event(scene, {:replace_mode_requested, id})
         {:noreply, scene}
 
       :save ->
@@ -374,7 +373,6 @@ defmodule ScenicWidgets.TextField do
         update_scene(scene, state, final_state)
 
       {:event, event_data, new_state} ->
-        IO.puts("📤 TextField: Sending event to parent: #{inspect(event_data)}")
         send_parent_event(scene, event_data)
         update_scene(scene, state, new_state)
     end
@@ -508,16 +506,28 @@ defmodule ScenicWidgets.TextField do
   end
 
   @doc """
+  Handle buffer state snapshots pushed by the buffer's Scenic.PubSub source
+  (buffer_backed mode). Delegates to the :buf_state_changes update path.
+  """
+  def handle_info({{Scenic.PubSub, :data}, {source, buf_state, _ts}}, scene) do
+    if source == scene.assigns.state.buffer_source do
+      handle_info({:buf_state_changes, buf_state}, scene)
+    else
+      {:noreply, scene}
+    end
+  end
+
+  # Scenic.PubSub lifecycle notifications — deliberately specific clauses, a
+  # catch-all on {{Scenic.PubSub, _}, _} would swallow :data updates.
+  def handle_info({{Scenic.PubSub, :registered}, _}, scene), do: {:noreply, scene}
+  def handle_info({{Scenic.PubSub, :unregistered}, _}, scene), do: {:noreply, scene}
+
+  @doc """
   Handle buffer state updates (for buffer_backed mode).
   When Buffer.Process broadcasts state changes, update TextField to match.
   """
   def handle_info({:buf_state_changes, buf_state}, scene) do
     state = scene.assigns.state
-
-    # Debug: log selection updates
-    if buf_state.selection != nil do
-      IO.puts("📥 TextField received buf_state_changes: selection=#{inspect(buf_state.selection)}")
-    end
 
     # Only process if we're in buffer_backed mode
     if state.input_mode == :buffer_backed do
@@ -527,12 +537,19 @@ defmodule ScenicWidgets.TextField do
         _ -> state.cursor
       end
 
-      # Convert selection from buffer format %{start: ..., end: ...} to TextField format {{line, col}, {line, col}}
+      # Convert selection from buffer format %{start: ..., end: ...} to TextField format {{line, col}, {line, col}}.
+      # Buffer mutators may store selection in two different map formats:
+      #   - %{start: %{line: l, col: c}, end: ...}  (cursor struct format)
+      #   - %{start: {l, c}, end: {l, c}}            (buffer_mutator.ex tuple format)
+      # Both must be normalised to the {{line, col}, {line, col}} tuple that
+      # get_selected_text/1 and delete_selection/1 expect.
       selection = case buf_state.selection do
         %{start: %{line: sl, col: sc}, end: %{line: el, col: ec}} ->
           {{sl, sc}, {el, ec}}
+        %{start: {sl, sc}, end: {el, ec}} ->
+          {{sl, sc}, {el, ec}}
         nil -> nil
-        other -> other  # Pass through if already in tuple format
+        other -> other  # Already in {{line, col}, {line, col}} tuple format
       end
 
       # Get new search state
@@ -565,7 +582,6 @@ defmodule ScenicWidgets.TextField do
       if new_search_query != nil do
         old_count = length(old_matches)
         new_count = length(new_matches)
-        IO.puts("📊 Match count check: query=#{inspect(new_search_query)}, old=#{old_count}, new=#{new_count}")
         if old_count != new_count do
           send_parent_event(scene, {:search_complete, state.id, new_search_query, new_count})
         end
@@ -597,14 +613,21 @@ defmodule ScenicWidgets.TextField do
     handle_input(input, nil, scene)
   end
 
+  @doc """
+  Handle direct buffer state push from parent scene.
+  Delegates to handle_info to reuse the PubSub update path.
+
+  Called by `dispatch_to_active_buffer/2` in the root scene after a
+  synchronous buffer action — allows the root scene to push state
+  directly to the TextField without waiting for a PubSub broadcast.
+  """
+  def handle_cast({:state_change, buf_state}, scene) do
+    handle_info({:buf_state_changes, buf_state}, scene)
+  end
+
   # ===== HELPER FUNCTIONS =====
 
   defp update_scene(scene, old_state, new_state) do
-    if old_state.focused != new_state.focused do
-      # IO.puts("🔍 FOCUS CHANGED in update_scene: #{old_state.focused} -> #{new_state.focused}")
-      # IO.puts("🔍 Stacktrace: #{inspect(Process.info(self(), :current_stacktrace), limit: 5)}")
-    end
-
     graph = Renderer.update_render(scene.assigns.graph, old_state, new_state)
 
     scene =

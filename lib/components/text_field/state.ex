@@ -7,6 +7,7 @@ defmodule ScenicWidgets.TextField.State do
   """
 
   use Widgex.Scrollable
+  require Logger
 
   defstruct [
     # Core
@@ -42,8 +43,8 @@ defmodule ScenicWidgets.TextField.State do
     :colors,                   # %{text:, background:, cursor:, line_numbers:, border:, focused_border:}
 
     # Buffer-backed mode (when input_mode == :buffer_backed)
-    :buffer_controller,        # PID of Buffer.Process (for buffer_backed mode)
-    :buffer_topic,             # PubSub topic for buffer updates (e.g., {:buffers, uuid})
+    :buffer_controller,        # Buffer store process: pid or via-tuple (GenServer.cast target)
+    :buffer_source,            # Scenic.PubSub source atom publishing buffer state snapshots
 
     # Interaction
     :editable,                 # Boolean (allow editing)
@@ -127,7 +128,6 @@ defmodule ScenicWidgets.TextField.State do
       # Use font size approximation since we don't have full state yet
       digit_width = trunc(font.size * 0.6)
       width = trunc(digits_to_show * digit_width) + 20
-      IO.puts("📐 Gutter: #{line_count} lines, #{digit_count} digits, digit_width=#{digit_width}, total_width=#{width}")
       width
     else
       0
@@ -157,12 +157,6 @@ defmodule ScenicWidgets.TextField.State do
     content_width = calculate_content_width(lines, font, content_frame, wrap_mode)
     content_height = calculate_content_height(lines, font, content_frame, wrap_mode)
 
-    # Debug: show scroll initialization values
-    viewport_w = content_frame.size.width
-    viewport_h = content_frame.size.height
-    max_scroll_x = max(0, content_width - viewport_w)
-    IO.puts("🔧 ScrollInit: viewport=#{viewport_w}x#{viewport_h}, content=#{content_width}x#{content_height}, max_scroll_x=#{max_scroll_x}")
-
     %__MODULE__{
       frame: frame,
       lines: lines,
@@ -187,7 +181,7 @@ defmodule ScenicWidgets.TextField.State do
 
       # Buffer-backed mode
       buffer_controller: Map.get(data, :buffer_controller),
-      buffer_topic: Map.get(data, :buffer_topic),
+      buffer_source: Map.get(data, :buffer_source),
 
       # Interaction
       editable: Map.get(data, :editable, true),
@@ -347,7 +341,7 @@ defmodule ScenicWidgets.TextField.State do
     case wrap_mode do
       :none ->
         # Measure actual longest line using FontMetrics if available
-        {max_line_width, longest_line_num, longest_line_chars} = lines
+        {max_line_width, _longest_line_num, _longest_line_chars} = lines
           |> Enum.with_index(1)
           |> Enum.map(fn {line, idx} ->
             width = case font do
@@ -362,11 +356,6 @@ defmodule ScenicWidgets.TextField.State do
           |> Enum.max_by(fn {w, _, _} -> w end, fn -> {0, 0, 0} end)
 
         content_w = max(frame.size.width, max_line_width + 40)
-
-        # Get the actual line content for debug
-        longest_line_text = Enum.at(lines, longest_line_num - 1, "") |> String.slice(0, 60)
-        IO.puts("📏 Initial content_width: line #{longest_line_num} (#{longest_line_chars} chars)=#{max_line_width}px, frame=#{frame.size.width}, content_w=#{content_w}")
-        IO.puts("   └─ \"#{longest_line_text}...\" ")
 
         content_w
       _ ->

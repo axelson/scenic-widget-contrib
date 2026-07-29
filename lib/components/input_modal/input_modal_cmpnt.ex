@@ -75,9 +75,12 @@ defmodule Flamelex.GUI.Component.InputModal do
       |> assign(input: "")
       |> push_graph(graph)
 
-    Registry.register(Quillex.BufferRegistry, {args.id, __MODULE__}, nil)
-
-    # Flamelex.Lib.Utils.PubSub.subscribe(topic: :radix_state_change)
+    # Optionally register in an app-provided Registry so the host app can
+    # look this modal up by id (pass registry: MyApp.Registry in args)
+    case Map.get(args, :registry) do
+      nil -> :ok
+      registry -> Registry.register(registry, {args.id, __MODULE__}, nil)
+    end
 
     {:ok, init_scene}
   end
@@ -159,8 +162,6 @@ defmodule Flamelex.GUI.Component.InputModal do
     # modal_y = (frame.size.height - modal_height) / 2
     modal_frame = modal_frame(frame)
 
-    # IO.inspect(modal_frame, label: "MF")
-    # IO.inspect(frame, label: "F")
     modal_width = modal_frame.size.width
     modal_height = modal_frame.size.height
     modal_x = modal_frame.pin.x
@@ -262,7 +263,6 @@ defmodule Flamelex.GUI.Component.InputModal do
   def handle_event({:click, :save_button}, _from, scene) do
     # Send the input to the parent as the user clicked "Save"
     # send(state.parent_pid, {:modal_save, state.input})
-    # IO.puts("CLICKED SAVE #{scene.assigns.input}")
     # TODO make a better job of referencing a specific buffer
     cast_parent(scene, {:modal_save, scene.assigns.input})
     {:noreply, scene}
