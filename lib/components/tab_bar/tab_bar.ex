@@ -103,7 +103,8 @@ defmodule ScenicWidgets.TabBar do
     # Request input for mouse interaction
     request_input(scene, [:cursor_pos, :cursor_button, :cursor_scroll])
 
-    Logger.debug("TabBar initialized with #{length(state.tabs)} tabs")
+    # Register semantic elements so ScenicMCP click_element can find individual tabs
+    register_semantic_elements(scene, state)
 
     {:ok, scene}
   end
@@ -125,9 +126,14 @@ defmodule ScenicWidgets.TabBar do
         send_parent_event(scene, {:tab_selected, tab_id})
         update_scene(scene, state, new_state)
 
-      {:tab_closed, tab_id, new_state} ->
+      {:tab_closed, tab_id, _new_state} ->
+        # Don't apply the reducer's optimistic tab removal — the parent owns the
+        # authoritative buffer list and may decide NOT to close (e.g. show an
+        # "unsaved changes" dialog). Let the parent drive the visual close via
+        # its own state update (which triggers a rebuild) or via an explicit
+        # `put({:close_tab, tab_id}, ...)` message.
         send_parent_event(scene, {:tab_closed, tab_id})
-        update_scene(scene, state, new_state)
+        {:noreply, scene}
     end
   end
 
@@ -141,6 +147,8 @@ defmodule ScenicWidgets.TabBar do
         scene = scene
           |> assign(state: new_state, graph: graph)
           |> push_graph(graph)
+        # Re-register after tab list change
+        register_semantic_elements(scene, new_state)
         {:noreply, scene}
     end
   end
@@ -182,6 +190,15 @@ defmodule ScenicWidgets.TabBar do
     scene = scene
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
+    # Re-register if tabs, scroll, or selection changed.
+    # selected_id must be included because the aggregate entry written by
+    # register_tab_bar_aggregate/3 carries the selected_id, and tests poll
+    # get_selected_tab_label() after direct tab clicks routed through handle_input.
+    if old_state.tabs != new_state.tabs or
+       old_state.scroll_offset != new_state.scroll_offset or
+       old_state.selected_id != new_state.selected_id do
+      register_semantic_elements(scene, new_state)
+    end
     {:noreply, scene}
   end
 
@@ -190,6 +207,101 @@ defmodule ScenicWidgets.TabBar do
     scene = scene
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
+    # Re-register when tabs or selection changes (tab positions may have shifted)
+    register_semantic_elements(scene, new_state)
     {:noreply, scene}
+  end
+
+  # ===========================================================================
+  # Semantic Registration (for ScenicMCP click_element support)
+  # ===========================================================================
+  #
+  # Registers each tab and its close button with pre-computed screen bounds
+  # in the semantic ETS table, enabling ScenicMCP's click_element/1 to click
+  # tabs by their semantic ID ("tab_bar_<uuid>" and "tab_bar_close_<uuid>").
+  #
+  # Follows the same pattern as IconMenu.register_semantic_elements/2.
+
+  defp register_semantic_elements(scene, %State{} = state) do
+    viewport = scene.viewport
+
+    # Only register when semantic infrastructure is available
+    unless viewport.semantic_table && viewport.semantic_enabled do
+      :ok
+    else
+      scene_name = scene.assigns[:id] || :tab_bar
+
+      # Get the tab bar's top-left screen position from its frame
+      {bar_x, bar_y} = state.frame.pin.point
+
+      # Register aggregate tab bar metadata so SemanticHelpers.find_tab_bar/1 can
+      # read tab_count, tabs (with labels), and selected_id.
+      # The Scenic.Semantic.Compiler.Entry struct has no custom fields, so we
+      # store the rich metadata as a plain map under a dedicated key.
+      register_tab_bar_aggregate(viewport, scene_name, state)
+
+      Enum.each(state.tabs, fn tab ->
+        case State.get_tab_bounds(state, tab.id) do
+          {tab_x, _tab_y, tab_w, tab_h} ->
+            # Register the tab body as a clickable element
+            tab_semantic_id = "tab_bar_#{tab.id}"
+            register_tab_element(viewport, scene_name, tab_semantic_id, :tab,
+              bar_x + tab_x, bar_y, tab_w, tab_h)
+
+            # Register the close button separately if this tab is closeable
+            if tab.closeable do
+              theme = state.theme
+              close_size = theme.close_button_size
+              close_margin = theme.close_button_margin
+              close_local_x = tab_x + tab_w - close_size - close_margin
+              close_local_y = (tab_h - close_size) / 2
+              close_semantic_id = "tab_bar_close_#{tab.id}"
+              register_tab_element(viewport, scene_name, close_semantic_id, :tab_close,
+                bar_x + close_local_x, bar_y + close_local_y, close_size, close_size)
+            end
+
+          nil ->
+            :ok
+        end
+      end)
+    end
+  end
+
+  # Write aggregate tab bar info (tab_count, tabs with labels, selected_id) to ETS.
+  # Stored as a plain map (not a %Scenic.Semantic.Compiler.Entry{}) so the full
+  # metadata survives — the Entry struct has no fields for custom data.
+  defp register_tab_bar_aggregate(viewport, scene_name, %State{} = state) do
+    tab_bar_data = %{
+      tab_count: length(state.tabs),
+      selected_id: state.selected_id,
+      tabs: Enum.map(state.tabs, fn tab ->
+        %{
+          id: tab.id,
+          label: tab.label,
+          selected: tab.id == state.selected_id,
+          closeable: tab.closeable
+        }
+      end)
+    }
+
+    :ets.insert(viewport.semantic_table, {{scene_name, :tab_bar_aggregate}, tab_bar_data})
+  end
+
+  defp register_tab_element(viewport, scene_name, id, type, x, y, w, h) do
+    entry = %Scenic.Semantic.Compiler.Entry{
+      id: id,
+      type: type,
+      local_bounds: %{left: x, top: y, width: w, height: h},
+      screen_bounds: %{left: x, top: y, width: w, height: h},
+      clickable: true,
+      focusable: false,
+      label: nil,
+      role: :button,
+      value: nil,
+      hidden: false,
+      z_index: 5
+    }
+    :ets.insert(viewport.semantic_table, {{scene_name, id}, entry})
+    :ets.insert(viewport.semantic_index, {id, {scene_name, id}})
   end
 end

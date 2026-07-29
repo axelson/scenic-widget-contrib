@@ -80,6 +80,9 @@ defmodule ScenicWidgets.TabBar.Renderer do
     truncated_label = truncate_label(tab.label, text_max_width, theme.font_size)
 
     # Build the tab group
+    # Use string ID so ScenicMCP click_element("tab_bar_<uuid>") can find this element
+    tab_semantic_id = "tab_bar_#{tab.id}"
+
     graph
     |> Primitives.group(
       fn g ->
@@ -108,7 +111,8 @@ defmodule ScenicWidgets.TabBar.Renderer do
         # Close button (if closeable)
         |> maybe_build_close_button(tab, state)
       end,
-      id: {:tab, tab.id},
+      id: tab_semantic_id,
+      semantic: %{type: :tab, tab_id: tab.id},
       translate: {logical_x - offset, 0}  # Apply scroll offset to position
     )
   end
@@ -127,6 +131,9 @@ defmodule ScenicWidgets.TabBar.Renderer do
     y = (tab_height - size) / 2
 
     # Draw X shape
+    # Use string ID so ScenicMCP click_element("tab_bar_close_<uuid>") can find this element
+    close_semantic_id = "tab_bar_close_#{tab.id}"
+
     padding = 4
     graph
     |> Primitives.group(
@@ -151,7 +158,8 @@ defmodule ScenicWidgets.TabBar.Renderer do
           stroke: {1.5, color}
         )
       end,
-      id: {:close_button, tab.id},
+      id: close_semantic_id,
+      semantic: %{type: :tab_close, tab_id: tab.id},
       translate: {x, y}
     )
   end
@@ -189,7 +197,7 @@ defmodule ScenicWidgets.TabBar.Renderer do
       {base_x, _y, _w, _h} = State.get_tab_bounds(new_state, tab.id)
       logical_x = base_x + offset
 
-      Graph.modify(acc, {:tab, tab.id}, fn p ->
+      Graph.modify(acc, "tab_bar_#{tab.id}", fn p ->
         Primitives.update_opts(p, translate: {logical_x - offset, 0})
       end)
     end)
