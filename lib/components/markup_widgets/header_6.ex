@@ -13,7 +13,7 @@ defmodule ScenicWidgets.Markup.Header6 do
         # |> Widgex.Frame.draw_guidewires(f, color: :pink)
         |> Scenic.Primitives.text(text,
           font_size: @font_size,
-          font: :ibm_plex_mono,
+          font: :roboto_mono,
           fill: :black,
           translate: {@left_margin, (f.size.height - @font_size) / 2 + @font_size},
           text_align: :left

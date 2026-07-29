@@ -95,7 +95,7 @@ defmodule ScenicWidgets.SpareParts.LukesDropDown do
 
   @default_direction :down
 
-  @default_font :ibm_plex_mono
+  @default_font :roboto_mono
   @default_font_size 20
 
   @drop_click_window_ms 400

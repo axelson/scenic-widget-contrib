@@ -45,7 +45,7 @@ defmodule ScenicWidgets.TidbitColumn.Renderer do
     cond do
       # Items changed - full re-render
       old_state.items != new_state.items ->
-        initial_render(Graph.build(font: :ibm_plex_mono), new_state)
+        initial_render(Graph.build(font: :roboto_mono), new_state)
 
       # Scroll changed
       scroll_changed?(old_state.scroll, new_state.scroll) ->
@@ -109,7 +109,7 @@ defmodule ScenicWidgets.TidbitColumn.Renderer do
           item.title,
           id: title_id,
           fill: theme.text,
-          font: :ibm_plex_mono,
+          font: :roboto_mono,
           font_size: 16,
           translate: {12, 24}
         )
@@ -117,7 +117,7 @@ defmodule ScenicWidgets.TidbitColumn.Renderer do
         |> Primitives.text(
           truncate(item.preview, 50),
           fill: theme.text_secondary,
-          font: :ibm_plex_mono,
+          font: :roboto_mono,
           font_size: 12,
           translate: {12, 48}
         )

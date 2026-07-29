@@ -373,7 +373,7 @@ defmodule ScenicWidgets.TextField.State do
   end
 
   defp default_font do
-    %{name: :ibm_plex_mono, size: 20, metrics: nil}
+    %{name: :roboto_mono, size: 20, metrics: nil}
   end
 
   @doc """

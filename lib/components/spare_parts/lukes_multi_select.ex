@@ -10,7 +10,7 @@ defmodule ScenicWidgets.SpareParts.LukesMultiSelect do
   require Logger
 
   @default_direction :down
-  @default_font :ibm_plex_mono
+  @default_font :roboto_mono
   @default_font_size 20
   @border_width 2
   @checkbox_size 16

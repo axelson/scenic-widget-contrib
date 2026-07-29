@@ -11,7 +11,8 @@ defmodule ScenicWidgets.FilePicker.State do
   alias Widgex.Frame
 
   @item_height 28
-  @default_start_path File.cwd!()  # Start in current working directory
+# (default start path is resolved at runtime in new/1 — a module attribute
+  # would bake in the directory `mix compile` happened to run in)
 
   defstruct [
     :frame,
@@ -58,7 +59,7 @@ defmodule ScenicWidgets.FilePicker.State do
     * `:filename` - Initial filename for save mode (default: "")
   """
   def new(%{frame: %Frame{} = frame} = opts) do
-    start_path = Map.get(opts, :start_path, @default_start_path)
+    start_path = Map.get(opts, :start_path) || File.cwd!()
     show_hidden = Map.get(opts, :show_hidden, false)
     filter = Map.get(opts, :filter, nil)
     mode = Map.get(opts, :mode, :open)

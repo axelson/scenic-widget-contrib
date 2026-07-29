@@ -295,7 +295,9 @@ defmodule ScenicWidgets.ConfirmDialog do
     Enum.any?(buttons, fn {a, _} -> a == action end)
   end
 
+  # A %Widgex.Frame{} matches the first clause (its :size has width/height).
+  # No fabricated fallback — an unrecognised frame shape is a caller bug and
+  # should crash here, not mis-centre the dialog against an invented 800x600.
   defp viewport_size(%{size: %{width: w, height: h}}), do: {w, h}
-  defp viewport_size(%Widgex.Frame{} = frame),          do: {frame.rect.w, frame.rect.h}
-  defp viewport_size(_),                                do: {800, 600}
+  defp viewport_size({w, h}) when is_number(w) and is_number(h), do: {w, h}
 end
