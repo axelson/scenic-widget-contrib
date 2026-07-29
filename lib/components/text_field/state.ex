@@ -33,7 +33,7 @@ defmodule ScenicWidgets.TextField.State do
     # :external      - TextField does NOT handle input. Parent app routes input
     #                  through its own system (Fluxus/Redux) and updates buffer.
     #                  Use for apps with global shortcuts (Flamelex, Vim-mode).
-    # :buffer_backed - TextField handles input but syncs state with Buffer.Process.
+    # :store_backed - TextField handles input but syncs state with Buffer.Process.
     #                  Use when you want direct input but external state management.
     :input_mode,
     :show_line_numbers,        # Boolean
@@ -42,9 +42,9 @@ defmodule ScenicWidgets.TextField.State do
     :font,                     # %{name: atom, size: int, metrics: FontMetrics | nil}
     :colors,                   # %{text:, background:, cursor:, line_numbers:, border:, focused_border:}
 
-    # Buffer-backed mode (when input_mode == :buffer_backed)
-    :buffer_controller,        # Buffer store process: pid or via-tuple (GenServer.cast target)
-    :buffer_source,            # Scenic.PubSub source atom publishing buffer state snapshots
+    # Buffer-backed mode (when input_mode == :store_backed)
+    :dispatch,        # Buffer store process: pid or via-tuple (GenServer.cast target)
+    :source,            # Scenic.PubSub source atom publishing buffer state snapshots
 
     # Interaction
     :editable,                 # Boolean (allow editing)
@@ -114,6 +114,8 @@ defmodule ScenicWidgets.TextField.State do
   def new(%{frame: %Widgex.Frame{} = frame} = data) do
     alias Widgex.Structs.Dimensions
 
+    data = normalize_legacy_store_params(data)
+
     font_config = Map.get(data, :font) || default_font()
     font = ensure_font_metrics(font_config)
     lines = parse_initial_text(data)
@@ -180,8 +182,8 @@ defmodule ScenicWidgets.TextField.State do
       colors: Map.get(data, :colors) || default_colors(),
 
       # Buffer-backed mode
-      buffer_controller: Map.get(data, :buffer_controller),
-      buffer_source: Map.get(data, :buffer_source),
+      dispatch: Map.get(data, :dispatch),
+      source: Map.get(data, :source),
 
       # Interaction
       editable: Map.get(data, :editable, true),
@@ -370,6 +372,28 @@ defmodule ScenicWidgets.TextField.State do
   defp parse_initial_text(_) do
     # Default to empty
     [""]
+  end
+
+  # Accept the pre-rename store params from older callers:
+  # buffer_source -> source, buffer_controller -> dispatch,
+  # input_mode: :buffer_backed -> :store_backed
+  defp normalize_legacy_store_params(data) do
+    data =
+      case Map.get(data, :input_mode) do
+        :buffer_backed -> Map.put(data, :input_mode, :store_backed)
+        _ -> data
+      end
+
+    data
+    |> rename_key(:buffer_source, :source)
+    |> rename_key(:buffer_controller, :dispatch)
+  end
+
+  defp rename_key(data, old, new) do
+    case Map.fetch(data, old) do
+      {:ok, value} -> data |> Map.delete(old) |> Map.put_new(new, value)
+      :error -> data
+    end
   end
 
   defp default_font do

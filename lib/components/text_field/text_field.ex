@@ -51,22 +51,54 @@ defmodule ScenicWidgets.TextField do
 
   **Flow in external mode:**
   ```
-  Keyboard → RootScene → Fluxus/Redux → Buffer.Process → PubSub → TextField (render only)
+  Keyboard → RootScene → Fluxus/Redux → store → PubSub → TextField (render only)
   ```
 
-  ### `:buffer_backed`
+  ### `:store_backed`
 
-  TextField syncs with a Buffer.Process for state management.
-  Similar to `:direct` but delegates state to an external buffer.
+  TextField is a pure view over an external *store*: it captures raw input,
+  translates it to semantic actions, dispatches them, and re-renders from the
+  store's published snapshots. It holds no document state of its own (no local
+  undo stacks) — render is a function of the snapshot.
 
-  **Use when:** You want TextField to handle input but persist to a buffer process.
-  **Examples:** QuillEx editor buffers with undo/redo managed by buffer.
+  **Use when:** Document state lives outside the widget — an editor buffer
+  process, a form store, anything that can publish snapshots.
 
   ```elixir
-  %{frame: frame, input_mode: :buffer_backed,
-    buffer_controller: pid_or_via_tuple,     # GenServer.cast target for actions
-    buffer_source: :my_buffer_source}        # Scenic.PubSub source of state snapshots
+  %{frame: frame, input_mode: :store_backed,
+    source: :my_source,             # Scenic.PubSub source publishing snapshots
+    dispatch: pid_or_via_tuple}     # GenServer.cast target for actions
   ```
+
+  #### The store contract
+
+  This is the entire coupling between the widget (frontend) and the store
+  (backend). Raw input never crosses this line — only semantic actions out,
+  and snapshots in.
+
+  **Snapshots** — whatever `source` publishes (and `Scenic.PubSub.get/1`
+  returns) must be a map/struct with:
+
+  - `data` — list of line strings
+  - `cursors` — list of `%{line: pos_integer, col: pos_integer}` (first is used)
+  - `selection` — `%{start: %{line:, col:}, end: %{line:, col:}}`,
+    `%{start: {l, c}, end: {l, c}}`, or `nil`
+  - optional: `search_query`, `search_matches`, `search_current_index`
+
+  **Actions** — the widget casts `{:action, [action]}` to `dispatch`, where
+  action is one of the editing vocabulary, e.g.:
+
+  - `{:insert, text, :at_cursor}` / `{:delete, :selection}` /
+    `{:delete, :before_cursor}` / `{:delete, :after_cursor}`
+  - `{:set_cursor, {line, col}}` / `{:move_cursor, direction}`
+  - `{:select, ...}` / `:select_all` / `:clear_selection`
+  - `:undo` / `:redo`
+  - `{:search, query}` / `:find_next` / `:find_prev` / `:clear_search`
+  - `{:replace, text}` / `{:replace_all, text}`
+
+  Any store that speaks this contract can back a TextField; the widget knows
+  nothing about how the store is implemented. The reference implementation is
+  quillex's per-buffer store process.
 
   ## Line Modes
 
@@ -97,7 +129,7 @@ defmodule ScenicWidgets.TextField do
         id: :command_bar
       )
 
-  ## Events (direct/buffer_backed modes only)
+  ## Events (direct/store_backed modes only)
 
   - `{:text_changed, id, full_text}` - Text content changed
   - `{:focus_gained, id}` - TextField gained focus
@@ -144,13 +176,13 @@ defmodule ScenicWidgets.TextField do
     # Create initial state
     state = State.new(data)
 
-    # For buffer_backed mode, hydrate from the buffer's retained Scenic.PubSub
+    # For store_backed mode, hydrate from the store's retained Scenic.PubSub
     # snapshot (instant ETS read — no blocking GenServer call) and subscribe
     # for pushes. Subscribing also delivers the current retained value, so a
     # publish racing this init cannot be missed.
-    state = if state.input_mode == :buffer_backed and state.buffer_source do
+    state = if state.input_mode == :store_backed and state.source do
       state =
-        case Scenic.PubSub.get(state.buffer_source) do
+        case Scenic.PubSub.get(state.source) do
           nil ->
             state
 
@@ -169,13 +201,13 @@ defmodule ScenicWidgets.TextField do
               lines: buf_state.data,
               cursor: cursor,
               selection: selection,
-              # In buffer_backed mode, we don't need local undo stacks
+              # In store_backed mode, we don't need local undo stacks
               undo_stack: [],
               redo_stack: []
             }
         end
 
-      Scenic.PubSub.subscribe(state.buffer_source)
+      Scenic.PubSub.subscribe(state.source)
       state
     else
       state
@@ -194,10 +226,10 @@ defmodule ScenicWidgets.TextField do
     # Update state with timer reference
     state = %{state | cursor_timer: timer}
 
-    # Request input for direct mode or buffer_backed mode
+    # Request input for direct mode or store_backed mode
     # Only request keyboard input if editable - otherwise just register for mouse/scroll
     # This prevents read-only TextFields from stealing keyboard input
-    if state.input_mode in [:direct, :buffer_backed] do
+    if state.input_mode in [:direct, :store_backed] do
       if state.editable do
         # Full input for editable fields
         request_input(scene, [:cursor_button, :cursor_pos, :key, :codepoint, :cursor_scroll])
@@ -246,17 +278,17 @@ defmodule ScenicWidgets.TextField do
   defp do_handle_input(input, scene) do
     state = scene.assigns.state
 
-    # For buffer_backed mode, route input to Buffer.Process
-    if state.input_mode == :buffer_backed do
-      handle_buffer_backed_input(input, scene)
+    # For store_backed mode, translate input to actions and dispatch to the store
+    if state.input_mode == :store_backed do
+      handle_store_backed_input(input, scene)
     else
       # Original direct mode handling
       handle_direct_mode_input(input, scene)
     end
   end
 
-  # Handle input for buffer_backed mode - send actions to Buffer.Process
-  defp handle_buffer_backed_input(input, scene) do
+  # Handle input for store_backed mode - dispatch semantic actions to the store
+  defp handle_store_backed_input(input, scene) do
     state = scene.assigns.state
 
     action = Reducer.input_to_buffer_action(state, input)
@@ -275,16 +307,16 @@ defmodule ScenicWidgets.TextField do
         # Cut: copy to clipboard, clear selection immediately, and send delete action to buffer
         copy_to_system_clipboard(text)
         new_state = %{state | selection: nil, text_drag: nil, text_drag_start: nil}
-        if state.buffer_controller do
-          GenServer.cast(state.buffer_controller, {:action, [{:delete, :selection}]})
+        if state.dispatch do
+          GenServer.cast(state.dispatch, {:action, [{:delete, :selection}]})
         end
         update_scene(scene, state, new_state)
 
       {:clipboard_paste} ->
         # Paste: get clipboard text and send insert action to buffer
         clipboard_text = paste_from_system_clipboard()
-        if state.buffer_controller && clipboard_text != "" do
-          GenServer.cast(state.buffer_controller, {:action, [{:insert, clipboard_text, :at_cursor}]})
+        if state.dispatch && clipboard_text != "" do
+          GenServer.cast(state.dispatch, {:action, [{:insert, clipboard_text, :at_cursor}]})
         end
         if state.selection != nil do
           new_state = %{state | selection: nil}
@@ -299,22 +331,22 @@ defmodule ScenicWidgets.TextField do
 
       {:click_move_cursor, new_state, action} ->
         # Click updates focus locally and sends cursor move to buffer
-        if state.buffer_controller do
-          GenServer.cast(state.buffer_controller, {:action, [action]})
+        if state.dispatch do
+          GenServer.cast(state.dispatch, {:action, [action]})
         end
         update_scene(scene, state, new_state)
 
       {:drag_select, new_state, action} ->
         # Drag selection updates cursor locally and sends selection to buffer
-        if state.buffer_controller do
-          GenServer.cast(state.buffer_controller, {:action, [action]})
+        if state.dispatch do
+          GenServer.cast(state.dispatch, {:action, [action]})
         end
         update_scene(scene, state, new_state)
 
       {:double_click_select, new_state, action} ->
         # Double-click word selection - send selection action to buffer
-        if state.buffer_controller do
-          GenServer.cast(state.buffer_controller, {:action, [action]})
+        if state.dispatch do
+          GenServer.cast(state.dispatch, {:action, [action]})
         end
         update_scene(scene, state, new_state)
 
@@ -335,8 +367,8 @@ defmodule ScenicWidgets.TextField do
 
       action when is_tuple(action) or is_atom(action) ->
         # Send action to buffer controller
-        if state.buffer_controller do
-          GenServer.cast(state.buffer_controller, {:action, [action]})
+        if state.dispatch do
+          GenServer.cast(state.dispatch, {:action, [action]})
         end
         {:noreply, scene}  # Wait for buffer broadcast to update
     end
@@ -383,14 +415,14 @@ defmodule ScenicWidgets.TextField do
   @doc """
   Handle action messages from parent scene.
   Actions are processed by the Reducer and may emit events.
-  In buffer_backed mode, actions are forwarded to Buffer.Process.
+  In store_backed mode, actions are forwarded to the store.
   """
   def handle_put({:action, action}, scene) do
     state = scene.assigns.state
 
-    if state.input_mode == :buffer_backed and state.buffer_controller do
-      # Forward action to Buffer.Process - wait for broadcast to update
-      GenServer.cast(state.buffer_controller, {:action, [action]})
+    if state.input_mode == :store_backed and state.dispatch do
+      # Forward action to the store - the published snapshot updates us
+      GenServer.cast(state.dispatch, {:action, [action]})
       {:noreply, scene}
     else
       # Direct mode - process locally
@@ -469,7 +501,7 @@ defmodule ScenicWidgets.TextField do
 
     # CRITICAL: When editable changes, update input registration
     # If becoming editable, request keyboard input; if becoming read-only, release it
-    if editable != state.editable and state.input_mode in [:direct, :buffer_backed] do
+    if editable != state.editable and state.input_mode in [:direct, :store_backed] do
       if editable do
         # Now editable - request keyboard input
         request_input(scene, [:cursor_button, :cursor_pos, :key, :codepoint, :cursor_scroll])
@@ -507,10 +539,10 @@ defmodule ScenicWidgets.TextField do
 
   @doc """
   Handle buffer state snapshots pushed by the buffer's Scenic.PubSub source
-  (buffer_backed mode). Delegates to the :buf_state_changes update path.
+  (store_backed mode). Delegates to the :buf_state_changes update path.
   """
   def handle_info({{Scenic.PubSub, :data}, {source, buf_state, _ts}}, scene) do
-    if source == scene.assigns.state.buffer_source do
+    if source == scene.assigns.state.source do
       handle_info({:buf_state_changes, buf_state}, scene)
     else
       {:noreply, scene}
@@ -523,14 +555,14 @@ defmodule ScenicWidgets.TextField do
   def handle_info({{Scenic.PubSub, :unregistered}, _}, scene), do: {:noreply, scene}
 
   @doc """
-  Handle buffer state updates (for buffer_backed mode).
-  When Buffer.Process broadcasts state changes, update TextField to match.
+  Handle buffer state updates (for store_backed mode).
+  When the store publishes a new snapshot, update TextField to match.
   """
   def handle_info({:buf_state_changes, buf_state}, scene) do
     state = scene.assigns.state
 
-    # Only process if we're in buffer_backed mode
-    if state.input_mode == :buffer_backed do
+    # Only process if we're in store_backed mode
+    if state.input_mode == :store_backed do
       # Extract cursor from buffer state
       cursor = case buf_state.cursors do
         [%{line: l, col: c} | _] -> {l, c}

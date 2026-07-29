@@ -533,7 +533,7 @@ defmodule ScenicWidgets.TextField.Reducer do
   # ===========================================================================
 
   @doc """
-  Convert raw Scenic input events to buffer actions for buffer_backed mode.
+  Convert raw Scenic input events to buffer actions for store_backed mode.
 
   Returns:
   - nil - No action (unhandled input)
@@ -615,11 +615,11 @@ defmodule ScenicWidgets.TextField.Reducer do
     :select_all
   end
 
-  # Ctrl+C - Copy. In buffer_backed mode the buffer controller is the source of
-  # truth for the selection shape; TextField's local `selection` mirror can lag
-  # behind a mouse-drag by one broadcast. Route the action through unconditionally
-  # and let `Quillex.Buffer.Process.Reducer.process/2 {:copy, :selection}` no-op
-  # when the buffer itself has no selection. See quillex bug 001.
+  # Ctrl+C - Copy. In store_backed mode the store is the source of truth for
+  # the selection shape; TextField's local `selection` mirror can lag behind a
+  # mouse-drag by one publish. Route the action through unconditionally — the
+  # store's reducer no-ops {:copy, :selection} when it has no selection.
+  # (Regression origin: a host editor's mouse-drag + Ctrl+X data-loss bug.)
   def input_to_buffer_action(%State{focused: true}, {:key, {:key_c, 1, [:ctrl]}}) do
     {:copy, :selection}
   end
@@ -660,7 +660,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:replace_mode_requested, state.id}
   end
 
-  # ===== SCROLLBAR DRAG (buffer_backed mode) =====
+  # ===== SCROLLBAR DRAG (store_backed mode) =====
 
   # Mouse button release - end scrollbar drag
   def input_to_buffer_action(%State{scrollbar_drag: drag} = state, {:cursor_button, {:btn_left, 0, _, _pos}}) when drag != nil do
@@ -716,14 +716,14 @@ defmodule ScenicWidgets.TextField.Reducer do
 
       nil ->
         # Not on scrollbar - handle focus, cursor positioning, double-click, and text drag.
-        # In :buffer_backed mode the TextField receives every click in the
+        # In :store_backed mode the TextField receives every click in the
         # viewport (request_input is non-positional), so a click that visually
         # targets a sibling overlay (e.g. an IconMenu dropdown rendered above
         # the buffer pane) still arrives here with point_inside? = true. Drop
         # such clicks before they translate to a buffer cursor mutation.
-        # See docs/claude_notes/cursor_preservation_diagnosis_2026_05_02.md.
+        # (Regression origin: a host editor bug where a dropdown click corrupted the cursor.)
         if State.point_inside?(state, coords) and
-             not buffer_backed_overlay_click?(state, coords) do
+             not store_backed_overlay_click?(state, coords) do
           # Convert click position to cursor line/col
           {line, col} = State.click_to_cursor(state, coords)
           click_pos = {line, col}
@@ -819,7 +819,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  # Shift key tracking for shift+scroll horizontal scrolling (buffer_backed mode)
+  # Shift key tracking for shift+scroll horizontal scrolling (store_backed mode)
   def input_to_buffer_action(%State{scroll: scroll} = state, {:key, {:key_leftshift, 1, _}}) do
     {:local_update, %{state | scroll: set_scroll_shift(scroll, true)}}
   end
@@ -841,12 +841,12 @@ defmodule ScenicWidgets.TextField.Reducer do
     nil
   end
 
-  # In :buffer_backed mode, treat clicks whose local coordinates land far past
+  # In :store_backed mode, treat clicks whose local coordinates land far past
   # the rendered text content of the clicked line as belonging to a sibling
   # overlay (e.g. IconMenu dropdown). See click handler comment above.
   # Tolerance of 4× font size past the line text width permits the usual
   # "click past end of line → place cursor at EOL" affordance.
-  defp buffer_backed_overlay_click?(%State{input_mode: :buffer_backed} = state, {x, y}) do
+  defp store_backed_overlay_click?(%State{input_mode: :store_backed} = state, {x, y}) do
     line_height = State.line_height(state)
     text_padding = 10
     gutter_width = if state.show_line_numbers, do: state.line_number_width, else: 0
@@ -873,7 +873,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  defp buffer_backed_overlay_click?(_state, _coords), do: false
+  defp store_backed_overlay_click?(_state, _coords), do: false
 
   # ===== SEARCH HELPER =====
 
