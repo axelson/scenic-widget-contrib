@@ -54,7 +54,7 @@
 #   end
 # end
 
-defmodule Flamelex.GUI.Component.InputModal do
+defmodule ScenicWidgets.InputModal do
   use Scenic.Component
   use ScenicWidgets.ScenicEventsDefinitions
 

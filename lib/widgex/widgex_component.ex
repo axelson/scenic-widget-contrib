@@ -377,7 +377,10 @@ defmodule Widgex.Component do
 
         ii = {:cursor_scroll, {adjusted_scroll_delta, cursor_coords}}
 
-        QuillEx.Fluxus.user_input(%{input: ii, component_id: scene.assigns.state.widgex.id})
+        # Forward the synthesized scroll input to the component's own
+        # handle_input — the host app decides what scrolling means; this
+        # library must not dispatch into any app's state layer.
+        send(self(), {:widgex_input, ii})
 
         new_scene =
           scene

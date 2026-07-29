@@ -1640,9 +1640,16 @@ defmodule WidgetWorkbench.Scene do
   end
 
   def handle_event({:click, :close_workbench_button}, _from, scene) do
-    # Logger.info("Close Workbench button clicked!")
-    # switch back to Flamelex
-    {:ok, _} = ViewPort.set_root(scene.viewport, Flamelex.GUI.RootScene, nil)
+    # Return to the host app's root scene, if one was configured, e.g.
+    #   config :scenic_widget_contrib, :workbench_return_scene, MyApp.RootScene
+    case Application.get_env(:scenic_widget_contrib, :workbench_return_scene) do
+      nil ->
+        Logger.info("close_workbench: no :workbench_return_scene configured, staying put")
+
+      return_scene ->
+        {:ok, _} = ViewPort.set_root(scene.viewport, return_scene, nil)
+    end
+
     {:noreply, scene}
   end
 
