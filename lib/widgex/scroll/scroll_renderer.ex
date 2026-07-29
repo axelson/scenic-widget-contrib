@@ -109,8 +109,6 @@ defmodule Widgex.Scroll.ScrollRenderer do
     {r, g, b} = Keyword.get(opts, :color, @scrollbar_color)
     opacity = scroll.scrollbar_opacity
 
-    # IO.puts("📜 render_scrollbars: frame=#{width}x#{height}, opacity=#{opacity}, scrollable_y=#{ScrollState.scrollable_y?(scroll)}, scrollable_x=#{ScrollState.scrollable_x?(scroll)}")
-
     group_id = Keyword.get(opts, :group_id, :default)
 
     graph

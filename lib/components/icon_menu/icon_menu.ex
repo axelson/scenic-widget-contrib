@@ -98,8 +98,6 @@ defmodule ScenicWidgets.IconMenu do
     # Register semantic elements for MCP automation
     register_semantic_elements(scene, state)
 
-    Logger.debug("IconMenu initialized with #{length(state.menus)} menus")
-
     {:ok, scene}
   end
 
@@ -192,7 +190,6 @@ defmodule ScenicWidgets.IconMenu do
 
     # Only register if semantic tables are available
     unless viewport.semantic_table && viewport.semantic_enabled do
-      Logger.debug("IconMenu semantic registration skipped - tables not available")
       :ok
     else
       # Register each menu icon button using the same positioning as rendering
@@ -210,8 +207,6 @@ defmodule ScenicWidgets.IconMenu do
         # Register the icon button (convert local to screen coordinates)
         register_button(viewport, scene_name, semantic_id, menu.icon,
           offset_x + button_x, offset_y + button_y, button_size, button_size)
-
-        Logger.debug("✅ Registered IconMenu button '#{menu.icon}' with ID #{inspect(semantic_id)}")
 
         # Register menu items using the pre-calculated dropdown bounds
         case Map.get(state.dropdown_bounds, menu.id) do
@@ -233,7 +228,6 @@ defmodule ScenicWidgets.IconMenu do
         end
       end)
 
-      Logger.debug("✅ IconMenu semantic registration complete")
       :ok
     end
   end

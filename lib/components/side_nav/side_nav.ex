@@ -1,5 +1,4 @@
 defmodule ScenicWidgets.SideNav do
-  IO.puts("⚡⚡⚡ SideNav module being compiled/loaded! ⚡⚡⚡")
 
   @moduledoc """
   A hierarchical sidebar navigation component following HexDocs style.
@@ -58,11 +57,8 @@ defmodule ScenicWidgets.SideNav do
   alias ScenicWidgets.SideNav.{State, Renderizer, Reducer, Api, Item}
   alias Scenic.Graph
 
-  # Override add_to_graph to add logging
+  # Override add_to_graph for custom initialization
   def add_to_graph(graph, data, opts \\ []) do
-    IO.puts("🎯🎯🎯 SideNav.add_to_graph called!")
-    IO.puts("   data: #{inspect(data)}")
-    IO.puts("   opts: #{inspect(opts)}")
     # Call the default implementation provided by `use Scenic.Component`
     super(graph, data, opts)
   end
@@ -86,13 +82,11 @@ defmodule ScenicWidgets.SideNav do
 
   @impl Scenic.Component
   def init(scene, data, _opts) do
-    IO.puts("🎯🎯🎯 SideNav.init called!!!")
     Logger.info("🎯 SideNav component initializing!")
 
     # Initialize component state
     state = State.new(data)
 
-    IO.puts("   State created with #{map_size(state.item_bounds)} item bounds")
     Logger.info("   State created with #{map_size(state.item_bounds)} item bounds")
 
     # Initial render
@@ -103,10 +97,11 @@ defmodule ScenicWidgets.SideNav do
       |> assign(state: state, graph: graph)
       |> push_graph(graph)
 
-    # Request input for keyboard and mouse interactions
-    # Note: scroll input is routed from parent scene, not requested directly
-    # Primitives with input: style do hit-testing, but scene must request the input types
-    request_input(scene, [:key, :cursor_button, :cursor_pos])
+    # Request input for keyboard only.
+    # Mouse clicks and cursor_pos are handled via primitives with `input: [...]` style,
+    # which uses Scenic's hit-testing. Requesting :cursor_button here would cause
+    # double-delivery when the parent scene also requests it.
+    request_input(scene, [:key])
 
     Logger.info("   Graph pushed, now calling register_semantic_elements...")
     # Register semantic elements for MCP interaction
@@ -239,7 +234,6 @@ defmodule ScenicWidgets.SideNav do
     should_debounce = last_click != nil and (now - last_click) < 100
 
     if should_debounce do
-      Logger.debug("🔽 SideNav chevron click debounced")
       {:noreply, scene}
     else
       Logger.info("🔽 SideNav chevron clicked: #{item_id}")
@@ -278,7 +272,6 @@ defmodule ScenicWidgets.SideNav do
     should_debounce = last_click != nil and (now - last_click) < 100
 
     if should_debounce do
-      Logger.debug("🖱️ SideNav row click debounced")
       {:noreply, scene}
     else
       handle_row_click(scene, item_id, now)

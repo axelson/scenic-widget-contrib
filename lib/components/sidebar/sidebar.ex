@@ -1,7 +1,8 @@
 defmodule ScenicWidgets.Sidebar do
   use Scenic.Component
+  require Logger
   alias Scenic.{Graph, Primitives}
-  
+
   @impl Scenic.Component
   def validate(%{frame: frame, items: items} = data) 
       when is_list(items) do
@@ -22,8 +23,6 @@ defmodule ScenicWidgets.Sidebar do
   
   @impl Scenic.Scene
   def init(scene, %{frame: frame, items: items}, _opts) do
-    IO.puts("\n🚀 Sidebar init called with #{length(items)} items")
-    
     state = %{
       frame: frame,
       items: items,
@@ -40,7 +39,6 @@ defmodule ScenicWidgets.Sidebar do
     
     # Request input for mouse clicks - this returns :ok, not the scene
     request_input(scene, [:cursor_button, :cursor_pos])
-    IO.puts("📌 Sidebar requested input for cursor_button and cursor_pos")
     
     {:ok, scene}
   end
@@ -52,11 +50,6 @@ defmodule ScenicWidgets.Sidebar do
       %Widgex.Structs.Dimensions{width: w, height: h} -> {w, h}
       {w, h} -> {w, h}
     end
-    
-    IO.puts("Sidebar render - width: #{width}, height: #{height}")
-    IO.puts("  File should be at y=0-32")
-    IO.puts("  Edit should be at y=32-64")
-    IO.puts("  View should be at y=64-96")
     
     Graph.build()
     |> Primitives.group(
@@ -78,14 +71,11 @@ defmodule ScenicWidgets.Sidebar do
   end
   
   defp render_items(graph, items, state, depth, y, path) do
-    IO.puts("Rendering #{length(items)} items at depth #{depth}, y=#{y}")
     {final_graph, final_y} = Enum.reduce(items, {graph, y}, fn item, {g, y_pos} ->
       current_path = path ++ [item.id]
       has_children = item[:children] && item.children != []
       expanded = MapSet.member?(state.expanded_nodes, item.id)
       x = depth * state.indent_width
-      
-      IO.puts("  Item #{item.label} at x=#{x}, y=#{y_pos}")
       
       # Render item group with expand icon and text
       updated_graph = g
@@ -154,62 +144,47 @@ defmodule ScenicWidgets.Sidebar do
     end
   end
   
-  # Debug: catch ALL input events
   @impl Scenic.Scene  
   def handle_input(event, context, scene) do
-    IO.puts("\n📥 Sidebar input: #{inspect(event)}, context: #{inspect(context)}")
     handle_input_internal(event, context, scene)
   end
   
   # Handle mouse clicks on sidebar items
-  defp handle_input_internal({:cursor_button, {:btn_left, 0, _, coords}}, ctx, scene) do
-    IO.puts("\n🎯 Sidebar received BUTTON PRESS at #{inspect(coords)}, context: #{inspect(ctx)}")
-    
-    # Check if click is on an item or expand icon
+  defp handle_input_internal({:cursor_button, {:btn_left, 0, _, _coords}}, ctx, scene) do
     # Handle both direct IDs and wrapped in context map
     case ctx do
       # Direct ID patterns
       {:expand_icon, path} ->
-        IO.puts("Click on expand icon: #{inspect(path)}")
         handle_expand_click(scene, path)
         
       {:sidebar_item, path} ->
-        IO.puts("Click on sidebar item: #{inspect(path)}")
         handle_item_click(scene, path)
         
       {:item_bg, path} ->
-        IO.puts("Click on item background: #{inspect(path)}")
         handle_item_click(scene, path)
         
       :sidebar_bg ->
-        IO.puts("Click on sidebar background")
         {:noreply, scene}
         
       # Wrapped in map with :id key
       %{id: {:expand_icon, path}} ->
-        IO.puts("Click on expand icon (wrapped): #{inspect(path)}")
         handle_expand_click(scene, path)
         
       %{id: {:sidebar_item, path}} ->
-        IO.puts("Click on sidebar item (wrapped): #{inspect(path)}")
         handle_item_click(scene, path)
         
       %{id: {:item_bg, path}} ->
-        IO.puts("Click on item background (wrapped): #{inspect(path)}")
         handle_item_click(scene, path)
         
       %{id: :sidebar_bg} ->
-        IO.puts("Click on sidebar background (wrapped)")
         {:noreply, scene}
         
       _ ->
-        IO.puts("Click on non-interactive area: #{inspect(ctx)}")
         {:noreply, scene}
     end
   end
   
   defp handle_input_internal(input, ctx, scene) do
-    IO.puts("Sidebar: Unhandled input: #{inspect(input)}, context: #{inspect(ctx)}")
     {:noreply, scene}
   end
   

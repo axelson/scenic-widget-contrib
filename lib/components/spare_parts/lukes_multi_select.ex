@@ -304,7 +304,6 @@ defmodule ScenicWidgets.SpareParts.LukesMultiSelect do
   def handle_input(_, _, scene), do: {:noreply, scene}
 
   def handle_cast({:set_scroll, _coords}, scene) do
-    IO.puts "GETTING SET SCROLL BUT ignoring it"
     {:noreply, scene}
   end
   # --------------------------------------------------------

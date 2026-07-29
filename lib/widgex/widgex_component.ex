@@ -333,8 +333,6 @@ defmodule Widgex.Component do
         adjusted_x_delta = x_delta * horizontal_scroll_ratio
         adjusted_y_delta = y_delta * vertical_scroll_ratio
 
-        # IO.inspect(scroll_delta, label: "DF")
-
         # # TODO need to figure out what % of movement through the textbox this delta scroll is & adjust
         # %{width: complete_width, height: complete_height} = full_text_bounds(scene.assigns.graph)
 
@@ -372,8 +370,6 @@ defmodule Widgex.Component do
         # #   # y_delta / scene.assigns.frame.size.height * complete_height
         # # }
 
-        # IO.inspect(adjusted_delta, label: "AD")
-
         # Introduce a factor to slow down the scroll relative to the cursor movement
         # Adjust this value to find the right speed
         factor = 1.75
@@ -399,8 +395,6 @@ defmodule Widgex.Component do
         # [
         #   %Scenic.Primitive{data: box_size}
         # ] = Scenic.Graph.get(scene.assigns.graph, scroll_box)
-
-        # IO.inspect(primitive)
 
         # Graph.modify(graph, :rect, fn(p) ->
         #   update_opts(p, rotate: 0.5)
@@ -490,7 +484,6 @@ defmodule Widgex.Component do
             scene
           )
           when scroll_box in @scrollbar_content_boxes do
-        IO.puts("CLICKCKCK }")
         # bounds = Scenic.Graph.bounds(scene.assigns.graph)
 
         # if click_coords |> ScenicWidgets.Utils.inside?(bounds) do
@@ -509,8 +502,6 @@ defmodule Widgex.Component do
             scene
           )
           when scroll_box in @scrollbar_content_boxes do
-        IO.puts("Unnnnnn CLICKCKCK }")
-
         {:noreply, scene |> assign(scrollbar_clicked?: false)}
       end
 
@@ -520,7 +511,6 @@ defmodule Widgex.Component do
             scene
           )
           when scroll_box in @scrollbar_content_boxes do
-        IO.puts("IGNLIGL }")
         # bounds = Scenic.Graph.bounds(scene.assigns.graph)
 
         # if click_coords |> ScenicWidgets.Utils.inside?(bounds) do

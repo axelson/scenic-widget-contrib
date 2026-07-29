@@ -102,14 +102,11 @@ defmodule Widgex.Scroll.ScrollState do
       :both -> content_height > viewport_height or content_width > viewport_width
     end
 
-    # IO.puts("📜 ScrollState.new: content=#{content_width}x#{content_height}, viewport=#{viewport_width}x#{viewport_height}, direction=#{direction}, initially_visible=#{initially_visible}, is_scrollable=#{is_scrollable}")
-
     {visible, opacity} = if initially_visible and is_scrollable do
       {true, 255}
     else
       {false, 0}
     end
-    # IO.puts("📜 ScrollState.new: visible=#{visible}, opacity=#{opacity}")
 
     %__MODULE__{
       offset_x: 0,

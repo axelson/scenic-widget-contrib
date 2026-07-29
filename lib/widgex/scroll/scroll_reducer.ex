@@ -61,15 +61,13 @@ defmodule Widgex.Scroll.ScrollReducer do
       when dir in [:horizontal, :both] do
     # Shift held - swap axes (vertical becomes horizontal)
     scroll_amount = (delta_y + delta_x) * scroll.scroll_speed
-    IO.puts("🔄 SHIFT+SCROLL: shift_held=true, dir=#{dir}, dx=#{delta_x}, dy=#{delta_y}, scroll_speed=#{scroll.scroll_speed}, scroll_amount=#{scroll_amount}, content_width=#{scroll.content_width}, viewport_width=#{scroll.viewport_width}")
     scroll
     |> scroll_by(scroll_amount, 0)
     |> show_scrollbars()
   end
 
-  def handle_wheel_smart(%ScrollState{shift_held: shift, direction: dir} = scroll, delta_x, delta_y) do
+  def handle_wheel_smart(%ScrollState{} = scroll, delta_x, delta_y) do
     # Normal scrolling
-    IO.puts("🔄 SCROLL: shift_held=#{shift}, dir=#{dir}, dx=#{delta_x}, dy=#{delta_y}")
     handle_wheel_2d(scroll, delta_x, delta_y)
   end
 
@@ -79,7 +77,6 @@ defmodule Widgex.Scroll.ScrollReducer do
   """
   @spec set_shift_held(ScrollState.t(), boolean()) :: ScrollState.t()
   def set_shift_held(%ScrollState{} = scroll, held) do
-    IO.puts("⇧ SHIFT KEY: held=#{held}")
     %{scroll | shift_held: held}
   end
 
@@ -101,13 +98,11 @@ defmodule Widgex.Scroll.ScrollReducer do
   end
 
   def scroll_by(%ScrollState{direction: :both} = scroll, dx, dy) do
-    new_scroll = %{scroll |
+    %{scroll |
       offset_x: scroll.offset_x + dx,
       offset_y: scroll.offset_y + dy
     }
     |> ScrollState.clamp()
-    IO.puts("📍 scroll_by: old_x=#{scroll.offset_x}, dx=#{dx}, new_x=#{new_scroll.offset_x}, max_x=#{ScrollState.max_offset_x(scroll)}")
-    new_scroll
   end
 
   @doc """

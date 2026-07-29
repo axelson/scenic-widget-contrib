@@ -128,8 +128,7 @@ defmodule WidgetWorkbench.Components.Modal do
     update_input_text(scene, input_value)
   end
 
-  def handle_input(input, _context, scene) do
-    # IO.puts("Unhandled input: #{inspect(input)}")
+  def handle_input(_input, _context, scene) do
     {:noreply, scene}
   end
 

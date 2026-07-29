@@ -34,7 +34,6 @@ defmodule ScenicWidgets.MenuBar.MenuMapMaker do
          # so that we can at least see the results on the CLI even it
          # we can't use them.
          apply(module, exported_fn, [])
-         |> IO.inspect(label: "#{Atom.to_string(exported_fn)}")
        end}
     end)
   end

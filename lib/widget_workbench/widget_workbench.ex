@@ -185,22 +185,18 @@ defmodule WidgetWorkbench do
 
       # Get absolute path to ensure we're watching the right directory
       watch_dir = Path.expand("lib/widget_workbench")
-      IO.puts("🔍 Watching directory: #{watch_dir}")
-      IO.puts("🔍 Directory exists: #{File.dir?(watch_dir)}")
-
       # Start file system watcher with absolute path
       {:ok, watcher_pid} = FileSystem.start_link(dirs: [watch_dir])
       Process.register(watcher_pid, :widget_workbench_file_watcher)
 
-      IO.puts("🔍 Watcher PID: #{inspect(watcher_pid)}")
-
       # Start the reloader process (it will subscribe to the watcher)
-      {:ok, reloader_pid} = WidgetWorkbench.AutoReloader.start_link()
+      {:ok, _reloader_pid} = WidgetWorkbench.AutoReloader.start_link()
 
-      IO.puts("🔍 Reloader PID: #{inspect(reloader_pid)}")
       IO.puts("🔥 Auto-reload enabled for Widget Workbench!")
     rescue
-      e -> IO.puts("Warning: Auto-reload failed to start: #{inspect(e)}")
+      e ->
+        require Logger
+        Logger.warning("Auto-reload failed to start: #{inspect(e)}")
     end
   end
 end
@@ -216,14 +212,10 @@ defmodule WidgetWorkbench.AutoReloader do
     # Subscribe to file system events
     case Process.whereis(:widget_workbench_file_watcher) do
       nil ->
-        IO.puts("❌ No file watcher found!")
         {:ok, %{last_reload: 0}}
 
       watcher_pid ->
-        IO.puts("🔍 Found watcher PID: #{inspect(watcher_pid)}")
-        result = FileSystem.subscribe(watcher_pid)
-        IO.puts("🔍 Subscribe result: #{inspect(result)}")
-        IO.puts("📎 Auto-reloader subscribed to file events")
+        FileSystem.subscribe(watcher_pid)
         {:ok, %{last_reload: 0}}
     end
   end

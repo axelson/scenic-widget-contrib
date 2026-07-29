@@ -78,8 +78,6 @@ defmodule ScenicWidgets.TidbitTile do
     # Request input for mouse interaction
     request_input(scene, [:cursor_pos, :cursor_button])
 
-    Logger.debug("TidbitTile initialized: #{state.title}")
-
     {:ok, scene}
   end
 

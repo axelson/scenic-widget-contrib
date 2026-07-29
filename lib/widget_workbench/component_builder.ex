@@ -41,12 +41,13 @@ defmodule WidgetWorkbench.ComponentBuilder do
     ]
 
     # Create each file with its content
+    require Logger
     Enum.each(files, fn {file_path, content} ->
       if File.exists?(file_path) do
-        IO.puts("File already exists: #{file_path}")
+        Logger.warning("File already exists: #{file_path}")
       else
         File.write!(file_path, content)
-        IO.puts("Created file: #{file_path}")
+        Logger.info("Created file: #{file_path}")
       end
     end)
 

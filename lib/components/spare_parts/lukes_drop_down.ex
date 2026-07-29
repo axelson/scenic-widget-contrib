@@ -472,7 +472,6 @@ defmodule ScenicWidgets.SpareParts.LukesDropDown do
       |> assign(down: true, graph: graph, drop_time: :os.system_time(:milli_seconds))
       |> push_graph(graph)
 
-    # IO.inspect(scene, label: "Press IN")
     {:noreply, scene}
   end
 

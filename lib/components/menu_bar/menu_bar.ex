@@ -132,17 +132,14 @@ defmodule ScenicWidgets.MenuBar do
 
   # Convert menu items to ensure they're in the correct {id, label} or {id, label, action} format
   defp convert_menu_items(items) when is_list(items) do
-    Logger.debug("convert_menu_items called with #{length(items)} items")
     Enum.map(items, fn item ->
       result = case item do
         # Already in 3-tuple format with action
         {id, label, action} when is_binary(id) and is_binary(label) and is_function(action, 0) ->
-          Logger.debug("  - Already 3-tuple: {#{inspect(id)}, #{inspect(label)}, <fn>}")
           item
 
         # Already in 2-tuple format {id, label}
         {id, label} when is_binary(id) and is_binary(label) ->
-          Logger.debug("  - Already 2-tuple: {#{inspect(id)}, #{inspect(label)}}")
           item
 
         # 2-tuple format with function: {label, function} -> {id, label, function}
@@ -153,12 +150,10 @@ defmodule ScenicWidgets.MenuBar do
                |> String.downcase()
                |> String.replace(~r/[^a-z0-9]+/, "_")
                |> String.trim("_")
-          Logger.debug("  - Converting {#{inspect(label)}, <fn>} -> {#{inspect(id)}, #{inspect(label)}, <fn>}")
           {id, label, action}
 
         # Sub-menu: recursively convert items
         {:sub_menu, label, sub_items} ->
-          Logger.debug("  - Sub-menu: #{inspect(label)} with #{length(sub_items)} items")
           {:sub_menu, label, convert_menu_items(sub_items)}
 
         # Pass through anything else unchanged
@@ -408,7 +403,6 @@ defmodule ScenicWidgets.MenuBar do
 
     # Only register if semantic tables are available
     unless viewport.semantic_table && viewport.semantic_enabled do
-      Logger.debug("MenuBar semantic registration skipped - tables not available")
       :ok
     else
       # Register each menu header button as a clickable semantic element

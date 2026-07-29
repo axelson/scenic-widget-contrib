@@ -284,12 +284,8 @@ defmodule ScenicWidgets.FilePicker.State do
 
   # List directory contents, returning sorted entries (directories first)
   defp list_directory(path, show_hidden, filter) do
-    Logger.debug("FilePicker listing directory: #{path}, show_hidden: #{show_hidden}, filter: #{inspect(filter)}")
-
     case File.ls(path) do
       {:ok, names} ->
-        Logger.debug("Found #{length(names)} raw entries")
-
         entries = names
         |> Enum.filter(fn name ->
           show_hidden || not String.starts_with?(name, ".")
@@ -314,10 +310,6 @@ defmodule ScenicWidgets.FilePicker.State do
           # Sort: directories first, then alphabetically
           {if(entry.type == :directory, do: 0, else: 1), String.downcase(entry.name)}
         end)
-
-        dirs = Enum.count(entries, & &1.type == :directory)
-        files = Enum.count(entries, & &1.type == :file)
-        Logger.debug("After filtering: #{dirs} directories, #{files} files")
 
         entries
 

@@ -183,8 +183,6 @@ defmodule WidgetWorkbench.ComponentGenerator do
         # request_input returns :ok, not scene - don't pipeline it
         request_input(scene, [:cursor_pos, :cursor_button])
 
-        Logger.debug("#{module_name} initialized: \#{inspect(state)}")
-
         {:ok, scene}
       end
 

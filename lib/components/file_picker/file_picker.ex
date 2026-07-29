@@ -108,23 +108,18 @@ defmodule ScenicWidgets.FilePicker do
 
   # Handle mouse click on file list or overlay
   def handle_input({:cursor_button, {:btn_left, 1, _mods, coords}}, _context, scene) do
-    Logger.debug("FilePicker click at #{inspect(coords)}")
-
     cond do
       # Check if click is on the overlay (outside modal) - cancel
       click_on_overlay?(scene.assigns.state, coords) ->
-        Logger.debug("Click on overlay - cancelling")
         handle_reducer_result(scene, {:action, :cancel})
 
       # Check if click is on any button
       button = click_on_button?(scene.assigns.state, coords) ->
-        Logger.debug("Click on button: #{inspect(button)}")
         handle_reducer_result(scene, Reducer.process_event(button, scene.assigns.state))
 
       # Check if click is within the file list area
       match?({:ok, _}, click_in_list_area?(scene.assigns.state, coords)) ->
         {:ok, local_coords} = click_in_list_area?(scene.assigns.state, coords)
-        Logger.debug("Click in list area at local coords #{inspect(local_coords)}")
 
         # Check for double-click (activate on double-click)
         now = System.monotonic_time(:millisecond)
@@ -138,7 +133,6 @@ defmodule ScenicWidgets.FilePicker do
           |> assign(last_click_coords: coords)
 
         if is_double_click do
-          Logger.debug("Double-click detected, activating")
           handle_reducer_result(scene, Reducer.process_double_click(scene.assigns.state, local_coords))
         else
           handle_reducer_result(scene, Reducer.process_click(scene.assigns.state, local_coords))
@@ -146,13 +140,11 @@ defmodule ScenicWidgets.FilePicker do
 
       true ->
         # Click somewhere else in modal (header/footer area)
-        Logger.debug("Click in modal but outside list area")
         {:noreply, scene}
     end
   end
 
-  def handle_input(input, _context, scene) do
-    Logger.debug("FilePicker unhandled input: #{inspect(input)}")
+  def handle_input(_input, _context, scene) do
     {:noreply, scene}
   end
 
