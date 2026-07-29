@@ -82,12 +82,12 @@ defmodule ScenicWidgets.SideNav do
 
   @impl Scenic.Component
   def init(scene, data, _opts) do
-    Logger.info("🎯 SideNav component initializing!")
+    Logger.debug("🎯 SideNav component initializing!")
 
     # Initialize component state
     state = State.new(data)
 
-    Logger.info("   State created with #{map_size(state.item_bounds)} item bounds")
+    Logger.debug("   State created with #{map_size(state.item_bounds)} item bounds")
 
     # Initial render
     graph = Renderizer.initial_render(Graph.build(), state)
@@ -103,11 +103,11 @@ defmodule ScenicWidgets.SideNav do
     # double-delivery when the parent scene also requests it.
     request_input(scene, [:key])
 
-    Logger.info("   Graph pushed, now calling register_semantic_elements...")
+    Logger.debug("   Graph pushed, now calling register_semantic_elements...")
     # Register semantic elements for MCP interaction
     register_semantic_elements(scene, state)
 
-    Logger.info("✅ SideNav initialized successfully")
+    Logger.debug("✅ SideNav initialized successfully")
 
     {:ok, scene}
   end
@@ -236,7 +236,7 @@ defmodule ScenicWidgets.SideNav do
     if should_debounce do
       {:noreply, scene}
     else
-      Logger.info("🔽 SideNav chevron clicked: #{item_id}")
+      Logger.debug("🔽 SideNav chevron clicked: #{item_id}")
       state = scene.assigns.state
 
       # Toggle expansion state
@@ -280,16 +280,16 @@ defmodule ScenicWidgets.SideNav do
 
   # Actual row click handling (after debounce check)
   defp handle_row_click(scene, item_id, now) do
-    Logger.info("🖱️ SideNav row clicked: #{item_id}")
+    Logger.debug("🖱️ SideNav row clicked: #{item_id}")
     state = scene.assigns.state
 
     # Find the item to determine its type
     item = Item.find_by_id(state.tree, item_id)
-    Logger.info("   Found item: #{inspect(item != nil)}, has_children: #{inspect(item && Item.has_children?(item))}")
+    Logger.debug("   Found item: #{inspect(item != nil)}, has_children: #{inspect(item && Item.has_children?(item))}")
 
     # If it's a group with children, toggle expansion instead of navigating
     if item && Item.has_children?(item) do
-      Logger.info("   📂 Group item - toggling expansion")
+      Logger.debug("   📂 Group item - toggling expansion")
       new_state = State.toggle_expanded(state, item_id)
 
       # Send expand/collapse event to parent (informational only)
@@ -309,16 +309,16 @@ defmodule ScenicWidgets.SideNav do
       # Leaf item - navigate
       action = Item.get_action(item)
 
-      Logger.info("📍 ITEM CLICKED: #{item_id}")
-      Logger.info("   📤 Sending parent message: {:sidebar, :navigate, #{inspect(item_id)}}")
+      Logger.debug("📍 ITEM CLICKED: #{item_id}")
+      Logger.debug("   📤 Sending parent message: {:sidebar, :navigate, #{inspect(item_id)}}")
       send_parent_event(scene, {:sidebar, :navigate, item_id})
 
       # Execute action callback if present (OPTIONAL)
       if action do
-        Logger.info("   🔥 Executing action callback for #{item_id}")
+        Logger.debug("   🔥 Executing action callback for #{item_id}")
         action.()
       else
-        Logger.info("   ℹ️  No action callback - parent message only")
+        Logger.debug("   ℹ️  No action callback - parent message only")
       end
 
       # Set as active and focused
@@ -336,10 +336,10 @@ defmodule ScenicWidgets.SideNav do
 
   # Click not on any recognized element - log for debugging
   def handle_input({:cursor_button, {:btn_left, 1, [], coords}}, context, scene) do
-    Logger.info("🔴 SideNav cursor_button NOT MATCHED - context: #{inspect(context)}, coords: #{inspect(coords)}")
+    Logger.debug("🔴 SideNav cursor_button NOT MATCHED - context: #{inspect(context)}, coords: #{inspect(coords)}")
     # Log tree info for debugging
     state = scene.assigns.state
-    Logger.info("   Tree items: #{inspect(Enum.map(state.tree, fn item -> {ScenicWidgets.SideNav.Item.get_id(item), ScenicWidgets.SideNav.Item.has_children?(item)} end))}")
+    Logger.debug("   Tree items: #{inspect(Enum.map(state.tree, fn item -> {ScenicWidgets.SideNav.Item.get_id(item), ScenicWidgets.SideNav.Item.has_children?(item)} end))}")
     {:noreply, scene}
   end
 
@@ -434,11 +434,11 @@ defmodule ScenicWidgets.SideNav do
     # Get the component's screen position from frame.pin
     {offset_x, offset_y} = state.frame.pin.point
 
-    Logger.info("🔍 SideNav attempting semantic registration...")
-    Logger.info("   Viewport has semantic_table? #{inspect(!!viewport.semantic_table)}")
-    Logger.info("   Semantic enabled? #{inspect(viewport.semantic_enabled)}")
-    Logger.info("   Component offset: (#{offset_x}, #{offset_y})")
-    Logger.info("   Item bounds count: #{inspect(map_size(state.item_bounds))}")
+    Logger.debug("🔍 SideNav attempting semantic registration...")
+    Logger.debug("   Viewport has semantic_table? #{inspect(!!viewport.semantic_table)}")
+    Logger.debug("   Semantic enabled? #{inspect(viewport.semantic_enabled)}")
+    Logger.debug("   Component offset: (#{offset_x}, #{offset_y})")
+    Logger.debug("   Item bounds count: #{inspect(map_size(state.item_bounds))}")
 
     # Only register if semantic tables are available
     if viewport.semantic_table && viewport.semantic_enabled do
@@ -486,7 +486,7 @@ defmodule ScenicWidgets.SideNav do
             }
             :ets.insert(viewport.semantic_table, {{scene_name, chevron_id}, chevron_entry})
             :ets.insert(viewport.semantic_index, {chevron_id, {scene_name, chevron_id}})
-            Logger.info("     ✅ Registered chevron: #{chevron_id} at screen (#{screen_left}, #{screen_top})")
+            Logger.debug("     ✅ Registered chevron: #{chevron_id} at screen (#{screen_left}, #{screen_top})")
           end
 
           # Register item text
@@ -522,7 +522,7 @@ defmodule ScenicWidgets.SideNav do
         end
       end)
 
-      Logger.info("✅ SideNav semantic registration complete!")
+      Logger.debug("✅ SideNav semantic registration complete!")
     else
       Logger.warning("⚠️  SideNav semantic registration skipped - semantic tables not available")
     end

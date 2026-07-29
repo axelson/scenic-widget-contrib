@@ -167,8 +167,8 @@ defmodule ScenicWidgets.MenuBar do
 
   @impl Scenic.Component
   def init(scene, data, _opts) do
-    # Logger.info("🎯 ScenicWidgets.MenuBar component initializing (regular MenuBar, NOT Enhanced)")
-    # Logger.info("MenuBar init called with data: #{inspect(data)}")
+    # Logger.debug("🎯 ScenicWidgets.MenuBar component initializing (regular MenuBar, NOT Enhanced)")
+    # Logger.debug("MenuBar init called with data: #{inspect(data)}")
 
     # Initialize component state
     state = State.new(data)
@@ -188,7 +188,7 @@ defmodule ScenicWidgets.MenuBar do
     # Register semantic elements for MCP interaction
     register_semantic_elements(scene, state)
 
-    # Logger.info("MenuBar initialized successfully")
+    # Logger.debug("MenuBar initialized successfully")
 
     {:ok, scene}
 
@@ -293,7 +293,7 @@ defmodule ScenicWidgets.MenuBar do
     if new_state != state do
       # Handle input capture if menu closed due to cursor leaving area
       if state.active_menu != nil and new_state.active_menu == nil do
-        Logger.info("🎯 MenuBar: cursor_pos caused menu close at coords #{inspect(coords)}")
+        Logger.debug("🎯 MenuBar: cursor_pos caused menu close at coords #{inspect(coords)}")
         release_input(scene)
       end
 
@@ -308,13 +308,13 @@ defmodule ScenicWidgets.MenuBar do
   end
 
   def handle_input({:cursor_button, {:btn_left, 1, [], coords}}, _context, scene) do
-    Logger.info("🎯 MenuBar: click at #{inspect(coords)}, active_menu=#{inspect(scene.assigns.state.active_menu)}")
+    Logger.debug("🎯 MenuBar: click at #{inspect(coords)}, active_menu=#{inspect(scene.assigns.state.active_menu)}")
     state = scene.assigns.state
     old_active_menu = state.active_menu
 
     case Reducer.handle_click(state, coords) do
       {:menu_item_clicked, item_id, new_state} ->
-        Logger.info("🎯 MenuBar: menu item clicked: #{inspect(item_id)}")
+        Logger.debug("🎯 MenuBar: menu item clicked: #{inspect(item_id)}")
         # Menu closed - release input capture
         if old_active_menu != nil do
           release_input(scene)
@@ -331,7 +331,7 @@ defmodule ScenicWidgets.MenuBar do
         {:noreply, scene}
 
       {:noop, new_state} ->
-        Logger.info("🎯 MenuBar: noop, old_active=#{inspect(old_active_menu)}, new_active=#{inspect(new_state.active_menu)}")
+        Logger.debug("🎯 MenuBar: noop, old_active=#{inspect(old_active_menu)}, new_active=#{inspect(new_state.active_menu)}")
         # Handle input capture transitions
         scene = handle_input_capture_transition(scene, old_active_menu, new_state.active_menu)
 
@@ -346,14 +346,14 @@ defmodule ScenicWidgets.MenuBar do
   # Handle capture/release based on menu open/close transitions
   defp handle_input_capture_transition(scene, nil, new_menu) when not is_nil(new_menu) do
     # Menu opened - capture input so clicks go to us, not underlying components
-    Logger.info("🎯 MenuBar: Capturing input for dropdown #{inspect(new_menu)}")
+    Logger.debug("🎯 MenuBar: Capturing input for dropdown #{inspect(new_menu)}")
     :ok = capture_input(scene, [:cursor_button, :cursor_pos])
     scene
   end
 
   defp handle_input_capture_transition(scene, old_menu, nil) when not is_nil(old_menu) do
     # Menu closed - release input capture
-    Logger.info("🎯 MenuBar: Releasing input capture (menu #{inspect(old_menu)} closed)")
+    Logger.debug("🎯 MenuBar: Releasing input capture (menu #{inspect(old_menu)} closed)")
     :ok = release_input(scene)
     scene
   end
@@ -448,7 +448,7 @@ defmodule ScenicWidgets.MenuBar do
         end)
       end)
 
-      Logger.info("✅ MenuBar semantic registration complete")
+      Logger.debug("✅ MenuBar semantic registration complete")
       :ok
     end
   end

@@ -19,7 +19,7 @@ defmodule ScenicWidgets.Sidebar do
       :invalid_input
     end
   end
-  def validate(_), do: :invalid_input
+  def validate(data), do: {:error, "Sidebar requires a map with :frame and :items. Got: #{inspect(data)}"}
   
   @impl Scenic.Scene
   def init(scene, %{frame: frame, items: items}, _opts) do

@@ -243,7 +243,7 @@ defmodule ScenicWidgets.SideNav.Item do
                     # Action callback - logs when clicked
                     action: fn ->
                       require Logger
-                      Logger.info("🎯 ACTION CALLBACK: Installation leaf clicked!")
+                      Logger.debug("🎯 ACTION CALLBACK: Installation leaf clicked!")
                     end
                   },
                   %__MODULE__{
@@ -260,7 +260,7 @@ defmodule ScenicWidgets.SideNav.Item do
                     url: "/docs/guides/getting-started/first-app",
                     action: fn ->
                       require Logger
-                      Logger.info("🎯 ACTION CALLBACK: First App leaf clicked!")
+                      Logger.debug("🎯 ACTION CALLBACK: First App leaf clicked!")
                     end
                   }
                 ]
@@ -283,7 +283,7 @@ defmodule ScenicWidgets.SideNav.Item do
                     url: "/docs/guides/advanced/testing",
                     action: fn ->
                       require Logger
-                      Logger.info("🎯 ACTION CALLBACK: Testing leaf clicked!")
+                      Logger.debug("🎯 ACTION CALLBACK: Testing leaf clicked!")
                     end
                   }
                 ]
@@ -339,7 +339,7 @@ defmodule ScenicWidgets.SideNav.Item do
                     url: "/examples/advanced/components/buttons",
                     action: fn ->
                       require Logger
-                      Logger.info("🎯 ACTION CALLBACK: Buttons example clicked!")
+                      Logger.debug("🎯 ACTION CALLBACK: Buttons example clicked!")
                     end
                   },
                   %__MODULE__{
