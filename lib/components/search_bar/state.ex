@@ -28,7 +28,12 @@ defmodule ScenicWidgets.SearchBar.State do
     :cursor_pos,            # Cursor position in query string
     :font,                  # Font settings
     :theme,                 # Color theme
-    :replace_on_next_input  # If true, next input clears query (mimics select-all)
+    :replace_on_next_input, # If true, next input clears query (mimics select-all)
+    # Replace mode fields
+    replace_mode: false,    # Whether replace row is visible
+    replace_query: "",      # Current replacement text
+    replace_cursor_pos: 0,  # Cursor position in replace string
+    focused_field: :search  # Which field has focus: :search or :replace
   ]
 
   @type t :: %__MODULE__{
@@ -41,7 +46,11 @@ defmodule ScenicWidgets.SearchBar.State do
     cursor_pos: non_neg_integer(),
     font: map(),
     theme: map(),
-    replace_on_next_input: boolean()
+    replace_on_next_input: boolean(),
+    replace_mode: boolean(),
+    replace_query: String.t(),
+    replace_cursor_pos: non_neg_integer(),
+    focused_field: :search | :replace
   }
 
   @doc """
@@ -85,9 +94,55 @@ defmodule ScenicWidgets.SearchBar.State do
       cursor_pos: String.length(opts[:query] || ""),
       font: Map.merge(default_font, opts[:font] || %{}),
       theme: Map.merge(default_theme, opts[:theme] || %{}),
-      replace_on_next_input: false
+      replace_on_next_input: false,
+      replace_mode: opts[:replace_mode] || false,
+      replace_query: "",
+      replace_cursor_pos: 0,
+      focused_field: :search
     }
   end
+
+  @doc """
+  Enable replace mode (show the replace row).
+  """
+  def enable_replace_mode(%__MODULE__{} = state) do
+    %{state | replace_mode: true}
+  end
+
+  @doc """
+  Toggle focus between search and replace fields (Tab key).
+  """
+  def toggle_focus(%__MODULE__{focused_field: :search} = state) do
+    %{state | focused_field: :replace}
+  end
+  def toggle_focus(%__MODULE__{focused_field: :replace} = state) do
+    %{state | focused_field: :search}
+  end
+
+  @doc """
+  Insert a character into whichever field is currently focused.
+  """
+  def insert_char_to_focused(%__MODULE__{focused_field: :search} = state, char) do
+    insert_char(state, char)
+  end
+  def insert_char_to_focused(%__MODULE__{focused_field: :replace, replace_query: rq, replace_cursor_pos: pos} = state, char) do
+    {before, after_cursor} = String.split_at(rq, pos)
+    new_query = before <> char <> after_cursor
+    %{state | replace_query: new_query, replace_cursor_pos: pos + String.length(char)}
+  end
+
+  @doc """
+  Delete character before cursor in the focused field.
+  """
+  def delete_before_cursor_focused(%__MODULE__{focused_field: :search} = state) do
+    delete_before_cursor(state)
+  end
+  def delete_before_cursor_focused(%__MODULE__{focused_field: :replace, replace_query: rq, replace_cursor_pos: pos} = state) when pos > 0 do
+    graphemes = String.graphemes(rq)
+    new_graphemes = List.delete_at(graphemes, pos - 1)
+    %{state | replace_query: Enum.join(new_graphemes), replace_cursor_pos: pos - 1}
+  end
+  def delete_before_cursor_focused(%__MODULE__{} = state), do: state
 
   @doc """
   Updates the match count display.

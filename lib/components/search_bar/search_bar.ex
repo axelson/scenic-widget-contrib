@@ -88,7 +88,8 @@ defmodule ScenicWidgets.SearchBar do
       frame: data.frame,
       query: data[:query] || "",
       font: data[:font],
-      theme: data[:theme]
+      theme: data[:theme],
+      replace_mode: data[:replace_mode] || false
     })
 
     graph = Renderer.render(state)
@@ -102,6 +103,11 @@ defmodule ScenicWidgets.SearchBar do
 
     # Request keyboard and mouse input
     request_input(init_scene, [:key, :codepoint, :cursor_button, :cursor_pos])
+
+    # Register semantic elements if replace mode is active
+    if state.replace_mode do
+      register_replace_semantic_elements(init_scene, state, data.frame)
+    end
 
     {:ok, init_scene}
   end
@@ -159,9 +165,8 @@ defmodule ScenicWidgets.SearchBar do
     {:noreply, new_scene}
   end
 
-  # Handle text input (codepoints)
-  def handle_input({:codepoint, {char, _}}, _context, scene) when char != "" do
-    state = State.insert_char(scene.assigns.state, char)
+  def handle_put(:enable_replace_mode, scene) do
+    state = State.enable_replace_mode(scene.assigns.state)
     graph = Renderer.render(state)
 
     new_scene =
@@ -170,16 +175,61 @@ defmodule ScenicWidgets.SearchBar do
       |> assign(graph: graph)
       |> push_graph(graph)
 
-    # Emit query changed event
-    cast_parent(new_scene, {:search_query_changed, state.id, state.query})
+    register_replace_semantic_elements(new_scene, state, state.frame)
 
     {:noreply, new_scene}
   end
 
-  # Handle Enter - next match
+  # Handle text input (codepoints)
+  def handle_input({:codepoint, {char, _}}, _context, scene) when char != "" do
+    state = if scene.assigns.state.replace_mode do
+      State.insert_char_to_focused(scene.assigns.state, char)
+    else
+      State.insert_char(scene.assigns.state, char)
+    end
+    graph = Renderer.render(state)
+
+    new_scene =
+      scene
+      |> assign(state: state)
+      |> assign(graph: graph)
+      |> push_graph(graph)
+
+    # Only emit query changed when focused on search field
+    if state.focused_field == :search do
+      cast_parent(new_scene, {:search_query_changed, state.id, state.query})
+    end
+
+    {:noreply, new_scene}
+  end
+
+  # Handle Tab - switch focus between search and replace fields (when in replace mode)
+  def handle_input({:key, {:key_tab, @key_pressed, _}}, _context, scene) do
+    state = scene.assigns.state
+    if state.replace_mode do
+      new_state = State.toggle_focus(state)
+      graph = Renderer.render(new_state)
+      new_scene =
+        scene
+        |> assign(state: new_state)
+        |> assign(graph: graph)
+        |> push_graph(graph)
+      {:noreply, new_scene}
+    else
+      {:noreply, scene}
+    end
+  end
+
+  # Handle Enter in replace mode (focused on replace field) - trigger replace
   def handle_input({:key, {:key_enter, @key_pressed, []}}, _context, scene) do
-    cast_parent(scene, {:search_next, scene.assigns.state.id})
-    {:noreply, scene}
+    state = scene.assigns.state
+    if state.replace_mode and state.focused_field == :replace do
+      cast_parent(scene, {:replace_requested, state.id, state.replace_query})
+      {:noreply, scene}
+    else
+      cast_parent(scene, {:search_next, state.id})
+      {:noreply, scene}
+    end
   end
 
   # Handle Shift+Enter - previous match
@@ -196,7 +246,11 @@ defmodule ScenicWidgets.SearchBar do
 
   # Handle Backspace
   def handle_input({:key, {:key_backspace, @key_pressed, _}}, _context, scene) do
-    state = State.delete_before_cursor(scene.assigns.state)
+    state = if scene.assigns.state.replace_mode do
+      State.delete_before_cursor_focused(scene.assigns.state)
+    else
+      State.delete_before_cursor(scene.assigns.state)
+    end
     graph = Renderer.render(state)
 
     new_scene =
@@ -205,7 +259,9 @@ defmodule ScenicWidgets.SearchBar do
       |> assign(graph: graph)
       |> push_graph(graph)
 
-    cast_parent(new_scene, {:search_query_changed, state.id, state.query})
+    if state.focused_field == :search do
+      cast_parent(new_scene, {:search_query_changed, state.id, state.query})
+    end
     {:noreply, new_scene}
   end
 
@@ -291,14 +347,26 @@ defmodule ScenicWidgets.SearchBar do
   end
 
   # Handle clicks on different areas
-  defp handle_click(scene, {click_x, _click_y}) do
-    %{frame: frame} = scene.assigns.state
+  defp handle_click(scene, {click_x, click_y}) do
+    state = scene.assigns.state
+    %{frame: frame} = state
     # Handle both tuple and Dimensions struct for size
     width = case frame.size do
       %{width: w} -> w
       {w, _h} -> w
     end
 
+    bar_height = 36
+
+    # Check if click is in the replace row (y >= bar_height) when in replace mode
+    if state.replace_mode and click_y >= bar_height do
+      handle_replace_row_click(scene, click_x, width)
+    else
+      handle_search_row_click(scene, click_x, width)
+    end
+  end
+
+  defp handle_search_row_click(scene, click_x, width) do
     button_width = 32
     match_count_width = 60
     nav_start_x = width - (button_width * 2) - match_count_width
@@ -319,7 +387,40 @@ defmodule ScenicWidgets.SearchBar do
         cast_parent(scene, {:search_next, scene.assigns.state.id})
         {:noreply, scene}
 
-      # Input field area - focus it
+      # Input field area - focus search
+      true ->
+        new_state = %{scene.assigns.state | focused_field: :search}
+        graph = Renderer.render(new_state)
+        new_scene = scene |> assign(state: new_state) |> assign(graph: graph) |> push_graph(graph)
+        {:noreply, new_scene}
+    end
+  end
+
+  defp handle_replace_row_click(scene, click_x, width) do
+    state = scene.assigns.state
+    replace_btn_width = 70
+    all_btn_width = 40
+    input_x = 32 + 8  # button_width + input_padding
+    nav_start_x = width - replace_btn_width - all_btn_width - 8
+
+    cond do
+      # Replace button
+      click_x >= nav_start_x and click_x < nav_start_x + replace_btn_width ->
+        cast_parent(scene, {:replace_requested, state.id, state.replace_query})
+        {:noreply, scene}
+
+      # All button
+      click_x >= nav_start_x + replace_btn_width ->
+        cast_parent(scene, {:replace_all_requested, state.id, state.replace_query})
+        {:noreply, scene}
+
+      # Replace input field area - focus replace
+      click_x >= input_x ->
+        new_state = %{state | focused_field: :replace}
+        graph = Renderer.render(new_state)
+        new_scene = scene |> assign(state: new_state) |> assign(graph: graph) |> push_graph(graph)
+        {:noreply, new_scene}
+
       true ->
         {:noreply, scene}
     end
@@ -343,5 +444,69 @@ defmodule ScenicWidgets.SearchBar do
 
   def handle_event(_event, _from, scene) do
     {:noreply, scene}
+  end
+
+  # ===========================================================================
+  # Semantic Registration
+  # ===========================================================================
+
+  defp register_replace_semantic_elements(scene, %State{}, frame) do
+    viewport = scene.viewport
+    unless viewport.semantic_table && viewport.semantic_enabled do
+      :ok
+    else
+      scene_name = scene.assigns[:id] || :search_bar
+
+      # Get frame dimensions
+      width = case frame.size do
+        %{width: w} -> w
+        {w, _h} -> w
+      end
+      {pin_x, pin_y} = case frame.pin do
+        %{point: {x, y}} -> {x, y}
+        {x, y} -> {x, y}
+        _ -> {0, 0}
+      end
+
+      bar_height = 36
+      replace_btn_width = 70
+      all_btn_width = 40
+      nav_start_x = width - replace_btn_width - all_btn_width - 8
+
+      # Register "Replace All" button
+      all_btn_x = pin_x + nav_start_x + replace_btn_width + 2
+      all_btn_y = pin_y + bar_height + 2
+      register_semantic_element(viewport, scene_name, :replace_all_btn_bg, "All",
+        all_btn_x, all_btn_y, all_btn_width, bar_height - 4)
+
+      # Register "Replace" button
+      replace_btn_x = pin_x + nav_start_x
+      replace_btn_y = pin_y + bar_height + 2
+      register_semantic_element(viewport, scene_name, :replace_btn_bg, "Replace",
+        replace_btn_x, replace_btn_y, replace_btn_width, bar_height - 4)
+
+      :ok
+    end
+  end
+
+  defp register_semantic_element(viewport, scene_name, id, label, x, y, w, h) do
+    entry = %Scenic.Semantic.Compiler.Entry{
+      id: id,
+      type: :button,
+      module: nil,
+      parent_id: nil,
+      children: [],
+      local_bounds: %{left: x, top: y, width: w, height: h},
+      screen_bounds: %{left: x, top: y, width: w, height: h},
+      clickable: true,
+      focusable: false,
+      label: label,
+      role: :button,
+      value: nil,
+      hidden: false,
+      z_index: 5
+    }
+    :ets.insert(viewport.semantic_table, {{scene_name, id}, entry})
+    :ets.insert(viewport.semantic_index, {id, {scene_name, id}})
   end
 end
