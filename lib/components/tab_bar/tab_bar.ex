@@ -177,6 +177,45 @@ defmodule ScenicWidgets.TabBar do
     end
   end
 
+  @doc """
+  Replace the whole tab set (and selection) in place.
+
+  This is the update path for hosts that treat the tab list as derived
+  state (e.g. published store snapshots): message the surviving component
+  instead of delete+recreating it — recreation churn under rapid successive
+  updates can kill a TabBar instance mid-init.
+  """
+  def handle_put({:set_tabs, tabs, selected_id}, scene) do
+    state = scene.assigns.state
+    new_state = %{state | tabs: State.normalize_tabs(tabs), selected_id: selected_id}
+    # tab_widths is a layout cache derived from tabs — recompute or
+    # get_tab_bounds returns nil and rendering crashes
+    new_state = %{new_state | tab_widths: State.calculate_tab_widths(new_state)}
+
+    cond do
+      new_state.tabs == state.tabs and new_state.selected_id == state.selected_id ->
+        {:noreply, scene}
+
+      new_state.tabs == state.tabs ->
+        # Same tab set, different selection — surgical update path
+        update_scene_tuple(scene, state, new_state)
+
+      true ->
+        # Tab set changed: update_render is surgical (it cannot add/remove tab
+        # primitives), so rebuild our own graph — primitives only, the
+        # component instance survives (same pattern as {:add_tab, _})
+        graph = Renderer.initial_render(Graph.build(), new_state)
+
+        scene =
+          scene
+          |> assign(state: new_state, graph: graph)
+          |> push_graph(graph)
+
+        register_semantic_elements(scene, new_state)
+        {:noreply, scene}
+    end
+  end
+
   def handle_put(_msg, scene) do
     {:noreply, scene}
   end
