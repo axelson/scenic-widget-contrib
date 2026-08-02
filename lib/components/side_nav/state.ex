@@ -295,6 +295,8 @@ defmodule ScenicWidgets.SideNav.State do
   Set the active (selected) item.
   Automatically expands ancestors to make it visible.
   """
+  def set_active(%__MODULE__{} = state, nil), do: %{state | active_id: nil}
+
   def set_active(%__MODULE__{} = state, item_id) do
     # Find all ancestors and expand them
     ancestors = find_ancestors(state.tree, item_id, [])
