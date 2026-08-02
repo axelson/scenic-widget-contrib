@@ -60,12 +60,11 @@ defmodule ScenicWidgets.IconMenu.Reducer do
             {:noop, %{state | hovered_item: item_id, hovered_menu: state.active_menu}}
 
           {false, _} ->
-            # Outside dropdown - check if should close
-            if State.point_outside_menu_area?(state, coords) do
-              {:noop, %{state | active_menu: nil, hovered_menu: nil, hovered_item: nil}}
-            else
-              {:noop, %{state | hovered_item: nil}}
-            end
+            # Pointer motion alone never dismisses an open menu. This avoids
+            # stale/out-of-order cursor samples closing a menu immediately
+            # after a semantic or real click; click-away and Escape remain the
+            # authoritative dismissal gestures.
+            {:noop, %{state | hovered_item: nil}}
         end
 
       # Cursor outside menu area
