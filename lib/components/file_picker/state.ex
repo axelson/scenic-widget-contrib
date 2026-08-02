@@ -11,7 +11,7 @@ defmodule ScenicWidgets.FilePicker.State do
   alias Widgex.Frame
 
   @item_height 28
-# (default start path is resolved at runtime in new/1 — a module attribute
+  # (default start path is resolved at runtime in new/1 — a module attribute
   # would bake in the directory `mix compile` happened to run in)
 
   defstruct [
@@ -22,31 +22,36 @@ defmodule ScenicWidgets.FilePicker.State do
     :scroll,
     :show_hidden,
     :filter,
+    :font,
     # Save mode fields
-    mode: :open,           # :open or :save
-    filename: "",          # Filename being typed in save mode
-    filename_cursor: 0     # Cursor position in filename input
+    # :open or :save
+    mode: :open,
+    # Filename being typed in save mode
+    filename: "",
+    # Cursor position in filename input
+    filename_cursor: 0
   ]
 
   @type entry :: %{
-    name: String.t(),
-    path: String.t(),
-    type: :directory | :file,
-    size: non_neg_integer() | nil
-  }
+          name: String.t(),
+          path: String.t(),
+          type: :directory | :file,
+          size: non_neg_integer() | nil
+        }
 
   @type t :: %__MODULE__{
-    frame: Frame.t(),
-    current_path: String.t(),
-    entries: [entry()],
-    selected_index: non_neg_integer(),
-    scroll: Widgex.Scroll.ScrollState.t(),
-    show_hidden: boolean(),
-    filter: String.t() | nil,
-    mode: :open | :save,
-    filename: String.t(),
-    filename_cursor: non_neg_integer()
-  }
+          frame: Frame.t(),
+          current_path: String.t(),
+          entries: [entry()],
+          selected_index: non_neg_integer(),
+          scroll: Widgex.Scroll.ScrollState.t(),
+          show_hidden: boolean(),
+          filter: String.t() | nil,
+          font: map() | nil,
+          mode: :open | :save,
+          filename: String.t(),
+          filename_cursor: non_neg_integer()
+        }
 
   @doc """
   Create new FilePicker state.
@@ -80,6 +85,7 @@ defmodule ScenicWidgets.FilePicker.State do
       scroll: init_scroll(list_frame, content_height: content_height),
       show_hidden: show_hidden,
       filter: filter,
+      font: Map.get(opts, :font),
       mode: mode,
       filename: filename,
       filename_cursor: filename_cursor
@@ -96,11 +102,12 @@ defmodule ScenicWidgets.FilePicker.State do
         content_height = length(entries) * @item_height
         lf = list_frame(state.frame, state.mode)
 
-        %{state |
-          current_path: path,
-          entries: entries,
-          selected_index: 0,
-          scroll: init_scroll(lf, content_height: content_height)
+        %{
+          state
+          | current_path: path,
+            entries: entries,
+            selected_index: 0,
+            scroll: init_scroll(lf, content_height: content_height)
         }
 
       false ->
@@ -113,6 +120,7 @@ defmodule ScenicWidgets.FilePicker.State do
   """
   def navigate_up(%__MODULE__{current_path: current_path} = state) do
     parent = Path.dirname(current_path)
+
     if parent != current_path do
       navigate_to(state, parent)
     else
@@ -125,6 +133,7 @@ defmodule ScenicWidgets.FilePicker.State do
   """
   def select_next(%__MODULE__{entries: entries, selected_index: idx} = state) do
     new_idx = min(idx + 1, length(entries) - 1)
+
     state
     |> Map.put(:selected_index, new_idx)
     |> ensure_selected_visible()
@@ -135,6 +144,7 @@ defmodule ScenicWidgets.FilePicker.State do
   """
   def select_prev(%__MODULE__{selected_index: idx} = state) do
     new_idx = max(idx - 1, 0)
+
     state
     |> Map.put(:selected_index, new_idx)
     |> ensure_selected_visible()
@@ -287,30 +297,33 @@ defmodule ScenicWidgets.FilePicker.State do
   defp list_directory(path, show_hidden, filter) do
     case File.ls(path) do
       {:ok, names} ->
-        entries = names
-        |> Enum.filter(fn name ->
-          show_hidden || not String.starts_with?(name, ".")
-        end)
-        |> Enum.map(fn name ->
-          full_path = Path.join(path, name)
-          type = if File.dir?(full_path), do: :directory, else: :file
-          size = case File.stat(full_path) do
-            {:ok, %{size: s}} -> s
-            _ -> nil
-          end
+        entries =
+          names
+          |> Enum.filter(fn name ->
+            show_hidden || not String.starts_with?(name, ".")
+          end)
+          |> Enum.map(fn name ->
+            full_path = Path.join(path, name)
+            type = if File.dir?(full_path), do: :directory, else: :file
 
-          %{name: name, path: full_path, type: type, size: size}
-        end)
-        |> Enum.filter(fn entry ->
-          # Apply file filter (directories always pass)
-          entry.type == :directory ||
-            filter == nil ||
-            String.ends_with?(entry.name, filter)
-        end)
-        |> Enum.sort_by(fn entry ->
-          # Sort: directories first, then alphabetically
-          {if(entry.type == :directory, do: 0, else: 1), String.downcase(entry.name)}
-        end)
+            size =
+              case File.stat(full_path) do
+                {:ok, %{size: s}} -> s
+                _ -> nil
+              end
+
+            %{name: name, path: full_path, type: type, size: size}
+          end)
+          |> Enum.filter(fn entry ->
+            # Apply file filter (directories always pass)
+            entry.type == :directory ||
+              filter == nil ||
+              String.ends_with?(entry.name, filter)
+          end)
+          |> Enum.sort_by(fn entry ->
+            # Sort: directories first, then alphabetically
+            {if(entry.type == :directory, do: 0, else: 1), String.downcase(entry.name)}
+          end)
 
         entries
 

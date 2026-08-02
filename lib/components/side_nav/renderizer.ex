@@ -12,7 +12,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
   - Scrollable viewport via Widgex.Scrollable
   """
 
-  use Widgex.Scrollable, direction: :vertical
+  use Widgex.Scrollable, direction: :both
 
   alias Scenic.Graph
   alias Scenic.Primitives
@@ -40,10 +40,15 @@ defmodule ScenicWidgets.SideNav.Renderizer do
           stroke: {1, border_color}
         )
         # Scrollable content area using Widgex.Scrollable macro
-        |> scrollable_group(state.scroll, state.frame, fn scroll_g ->
-          scroll_g
-          |> render_tree(state.tree, state, 0)
-        end, id: :sidebar_scroll_group)
+        |> scrollable_group(
+          state.scroll,
+          state.frame,
+          fn scroll_g ->
+            scroll_g
+            |> render_tree(state.tree, state, 0)
+          end,
+          id: :sidebar_scroll_group
+        )
         # Scrollbars on top
         |> render_scrollbars(state.scroll, state.frame)
       end,
@@ -70,8 +75,8 @@ defmodule ScenicWidgets.SideNav.Renderizer do
 
       # Hover/focus/active changed - update individual item styling
       old_state.hovered_id != new_state.hovered_id ||
-      old_state.focused_id != new_state.focused_id ||
-      old_state.active_id != new_state.active_id ->
+        old_state.focused_id != new_state.focused_id ||
+          old_state.active_id != new_state.active_id ->
         update_item_states(graph, old_state, new_state)
 
       # No visual changes
@@ -127,7 +132,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       row_width = state.frame.size.width
 
       # X positions within the row (relative to row start)
-      indent_x = theme.padding_left + (depth * theme.indent)
+      indent_x = theme.padding_left + depth * theme.indent
       chevron_area_width = theme.chevron_size + theme.chevron_margin
       text_x = indent_x + chevron_area_width
 
@@ -135,11 +140,12 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       v_center = row_height / 2
 
       # Determine colors based on state
-      {bg_fill, text_fill} = cond do
-        is_active -> {theme.active_bg, theme.text}
-        is_hovered -> {theme.hover_bg, theme.text}
-        true -> {theme.background, theme.text}
-      end
+      {bg_fill, text_fill} =
+        cond do
+          is_active -> {theme.active_bg, theme.text}
+          is_hovered -> {theme.hover_bg, theme.text}
+          true -> {theme.background, theme.text}
+        end
 
       # Build semantic IDs
       row_id = String.to_atom("row_#{item_id}")
@@ -184,7 +190,15 @@ defmodule ScenicWidgets.SideNav.Renderizer do
           |> then(fn g2 ->
             if has_children do
               chevron_y = v_center - theme.chevron_size / 2
-              render_chevron_visual(g2, indent_x, chevron_y, theme.chevron_size, is_expanded, theme.chevron)
+
+              render_chevron_visual(
+                g2,
+                indent_x,
+                chevron_y,
+                theme.chevron_size,
+                is_expanded,
+                theme.chevron
+              )
             else
               g2
             end
@@ -225,21 +239,22 @@ defmodule ScenicWidgets.SideNav.Renderizer do
     cy = y + size / 2
 
     # Triangle points
-    points = if is_expanded do
-      # Pointing down
-      [
-        {cx - size * 0.35, cy - size * 0.15},
-        {cx + size * 0.35, cy - size * 0.15},
-        {cx, cy + size * 0.3}
-      ]
-    else
-      # Pointing right
-      [
-        {cx - size * 0.15, cy - size * 0.35},
-        {cx - size * 0.15, cy + size * 0.35},
-        {cx + size * 0.3, cy}
-      ]
-    end
+    points =
+      if is_expanded do
+        # Pointing down
+        [
+          {cx - size * 0.35, cy - size * 0.15},
+          {cx + size * 0.35, cy - size * 0.15},
+          {cx, cy + size * 0.3}
+        ]
+      else
+        # Pointing right
+        [
+          {cx - size * 0.15, cy - size * 0.35},
+          {cx - size * 0.15, cy + size * 0.35},
+          {cx + size * 0.3, cy}
+        ]
+      end
 
     graph
     |> Primitives.triangle(List.to_tuple(points), fill: color)
@@ -265,7 +280,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       old_state.active_id,
       new_state.active_id
     ]
-    |> Enum.filter(& &1 != nil)
+    |> Enum.filter(&(&1 != nil))
     |> Enum.uniq()
   end
 
@@ -276,40 +291,43 @@ defmodule ScenicWidgets.SideNav.Renderizer do
 
     theme = state.theme
 
-    {bg_fill, text_fill} = cond do
-      is_active ->
-        {theme.active_bg, theme.text}
+    {bg_fill, text_fill} =
+      cond do
+        is_active ->
+          {theme.active_bg, theme.text}
 
-      is_hovered ->
-        {theme.hover_bg, theme.text}
+        is_hovered ->
+          {theme.hover_bg, theme.text}
 
-      true ->
-        {theme.background, theme.text}
-    end
+        true ->
+          {theme.background, theme.text}
+      end
 
     # Build semantic IDs (must match those in render_item)
     bg_id = String.to_atom("item_bg_#{item_id}")
     text_id = String.to_atom("item_text_#{item_id}")
 
     # Try to update background
-    graph = try do
-      graph
-      |> Graph.modify(bg_id, fn primitive ->
-        Scenic.Primitive.put_style(primitive, :fill, bg_fill)
-      end)
-    rescue
-      _ -> graph
-    end
+    graph =
+      try do
+        graph
+        |> Graph.modify(bg_id, fn primitive ->
+          Scenic.Primitive.put_style(primitive, :fill, bg_fill)
+        end)
+      rescue
+        _ -> graph
+      end
 
     # Try to update text color
-    graph = try do
-      graph
-      |> Graph.modify(text_id, fn primitive ->
-        Scenic.Primitive.put_style(primitive, :fill, text_fill)
-      end)
-    rescue
-      _ -> graph
-    end
+    graph =
+      try do
+        graph
+        |> Graph.modify(text_id, fn primitive ->
+          Scenic.Primitive.put_style(primitive, :fill, text_fill)
+        end)
+      rescue
+        _ -> graph
+      end
 
     graph
   end

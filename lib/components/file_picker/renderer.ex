@@ -56,8 +56,10 @@ defmodule ScenicWidgets.FilePicker.Renderer do
     path_changed = old_state.current_path != new_state.current_path
     selection_changed = old_state.selected_index != new_state.selected_index
     scroll_changed = scroll_changed?(old_state.scroll, new_state.scroll)
-    filename_changed = old_state.filename != new_state.filename or
-                       old_state.filename_cursor != new_state.filename_cursor
+
+    filename_changed =
+      old_state.filename != new_state.filename or
+        old_state.filename_cursor != new_state.filename_cursor
 
     cond do
       path_changed ->
@@ -93,30 +95,27 @@ defmodule ScenicWidgets.FilePicker.Renderer do
     modal_x = (frame_width - modal_width) / 2
     modal_y = (frame_height - modal_height) / 2
 
-    modal_frame = Frame.new(
-      pin: {modal_x, modal_y},
-      size: {modal_width, modal_height}
-    )
+    modal_frame =
+      Frame.new(
+        pin: {modal_x, modal_y},
+        size: {modal_width, modal_height}
+      )
 
     footer_height = if mode == :save, do: @footer_height_save, else: @footer_height_open
     list_height = modal_height - @header_height - footer_height
-    list_frame = Frame.new(
-      pin: {0, 0},
-      size: {modal_width - @padding * 2, list_height}
-    )
+
+    list_frame =
+      Frame.new(
+        pin: {0, 0},
+        size: {modal_width - @padding * 2, list_height}
+      )
 
     {modal_frame, list_frame}
   end
 
   # Render semi-transparent overlay
   defp render_overlay(graph, %Frame{} = frame) do
-    {width, height} = frame.size.box
-
-    graph
-    |> Primitives.rect({width, height},
-      id: :overlay,
-      fill: @bg_overlay
-    )
+    ScenicWidgets.ModalShell.overlay(graph, frame, :overlay, fill: @bg_overlay)
   end
 
   # Render modal background
@@ -169,20 +168,26 @@ defmodule ScenicWidgets.FilePicker.Renderer do
     list_y = modal_y + @header_height
 
     graph
-    |> Primitives.group(fn g ->
-      g
-      # List background
-      |> Primitives.rect({list_width, list_height},
-        fill: @list_bg,
-        stroke: {1, {200, 200, 200}}
-      )
-      # Scrollable file list content
-      |> scrollable_group(state.scroll, list_frame, fn list_g ->
-        render_entries(list_g, state)
-      end, id: :file_list_content)
-      # Scrollbars
-      |> render_scrollbars(state.scroll, list_frame)
-    end,
+    |> Primitives.group(
+      fn g ->
+        g
+        # List background
+        |> Primitives.rect({list_width, list_height},
+          fill: @list_bg,
+          stroke: {1, {200, 200, 200}}
+        )
+        # Scrollable file list content
+        |> scrollable_group(
+          state.scroll,
+          list_frame,
+          fn list_g ->
+            render_entries(list_g, state)
+          end,
+          id: :file_list_content
+        )
+        # Scrollbars
+        |> render_scrollbars(state.scroll, list_frame)
+      end,
       id: :file_list_group,
       translate: {list_x, list_y}
     )
@@ -201,36 +206,38 @@ defmodule ScenicWidgets.FilePicker.Renderer do
   defp render_entry(graph, entry, idx, selected) do
     y = idx * @item_height
 
-    {bg_color, text_color} = if selected do
-      {@selected_bg, @selected_text}
-    else
-      {:transparent, if(entry.type == :directory, do: @folder_color, else: @file_color)}
-    end
+    {bg_color, text_color} =
+      if selected do
+        {@selected_bg, @selected_text}
+      else
+        {:transparent, if(entry.type == :directory, do: @folder_color, else: @file_color)}
+      end
 
     icon = if entry.type == :directory, do: "[D]", else: "   "
 
     graph
-    |> Primitives.group(fn g ->
-      g
-      # Selection background
-      |> Primitives.rect({600, @item_height},
-        id: :"entry_bg_#{idx}",
-        fill: bg_color
-      )
-      # Icon
-      |> Primitives.text(icon,
-        font_size: 14,
-        fill: text_color,
-        translate: {8, 18}
-      )
-      # Name
-      |> Primitives.text(entry.name,
-        id: :"entry_text_#{idx}",
-        font_size: 14,
-        fill: text_color,
-        translate: {40, 18}
-      )
-    end,
+    |> Primitives.group(
+      fn g ->
+        g
+        # Selection background
+        |> Primitives.rect({600, @item_height},
+          id: :"entry_bg_#{idx}",
+          fill: bg_color
+        )
+        # Icon
+        |> Primitives.text(icon,
+          font_size: 14,
+          fill: text_color,
+          translate: {8, 18}
+        )
+        # Name
+        |> Primitives.text(entry.name,
+          id: :"entry_text_#{idx}",
+          font_size: 14,
+          fill: text_color,
+          translate: {40, 18}
+        )
+      end,
       id: :"entry_#{idx}",
       translate: {0, y}
     )
@@ -287,92 +294,53 @@ defmodule ScenicWidgets.FilePicker.Renderer do
   end
 
   # Render the filename text input
-  defp render_filename_input(graph, {input_x, input_y}, width, %State{filename: filename, filename_cursor: cursor}) do
-    # Calculate cursor x position based on text before cursor
-    text_before_cursor = String.slice(filename, 0, cursor)
-    # Rough estimate: ~8 pixels per character for monospace
-    cursor_x = String.length(text_before_cursor) * 8 + 8
-
-    graph
-    |> Primitives.group(fn g ->
-      g
-      # Input background
-      |> Primitives.rect({width, @input_height},
-        id: :filename_input_bg,
-        fill: :white,
-        stroke: {1, {150, 150, 150}}
-      )
-      # Filename text
-      |> Primitives.text(filename,
-        id: :filename_text,
-        font_size: 14,
-        fill: :black,
-        translate: {8, 21}
-      )
-      # Cursor (blinking would require animation, just show static)
-      |> Primitives.line({{cursor_x, 4}, {cursor_x, @input_height - 4}},
-        id: :filename_cursor,
-        stroke: {2, :black}
-      )
-    end,
-      id: :filename_input_group,
-      translate: {input_x, input_y}
+  defp render_filename_input(graph, {input_x, input_y}, width, %State{
+         filename: filename,
+         font: font
+       }) do
+    ScenicWidgets.TextField.add_to_graph(
+      graph,
+      %{
+        id: :filename_input,
+        frame: Frame.new(pin: {input_x, input_y}, size: {width, @input_height}),
+        initial_text: filename,
+        mode: :single_line,
+        input_mode: :direct,
+        show_line_numbers: false,
+        font: font
+      },
+      id: :filename_input
     )
   end
 
   # Update filename input when typing
-  defp update_filename_input(graph, modal_frame, %State{filename: filename, filename_cursor: cursor}) do
-    {width, height} = modal_frame.size.box
-    {x, y} = modal_frame.pin.point
-    footer_y = y + height - @footer_height_save
-    input_width = width - @padding * 2
-
-    # Calculate cursor position
-    text_before_cursor = String.slice(filename, 0, cursor)
-    cursor_x = String.length(text_before_cursor) * 8 + 8
-
-    graph
-    |> Graph.modify(:filename_text, fn prim ->
-      Scenic.Primitive.put(prim, filename)
-    end)
-    |> Graph.modify(:filename_cursor, fn prim ->
-      Scenic.Primitive.put(prim, {{cursor_x, 4}, {cursor_x, @input_height - 4}})
-    end)
-  rescue
-    # If elements don't exist, do full re-render of footer
-    _ ->
-      graph
-      |> Graph.delete(:footer_bg)
-      |> Graph.delete(:filename_label)
-      |> Graph.delete(:filename_input_group)
-      |> Graph.delete(:cancel_button)
-      |> Graph.delete(:save_button)
-      |> render_footer(modal_frame, %State{mode: :save, filename: filename, filename_cursor: cursor})
-  end
+  defp update_filename_input(graph, _modal_frame, _state), do: graph
 
   # Custom button renderer using primitives
   defp render_button(graph, label, id, {bx, by}, {bw, bh}, style \\ :default) do
-    {bg_color, text_color, border_color} = case style do
-      :primary -> {{66, 133, 244}, :white, {55, 120, 220}}
-      _ -> {{220, 220, 220}, {50, 50, 50}, {180, 180, 180}}
-    end
+    {bg_color, text_color, border_color} =
+      case style do
+        :primary -> {{66, 133, 244}, :white, {55, 120, 220}}
+        _ -> {{220, 220, 220}, {50, 50, 50}, {180, 180, 180}}
+      end
 
     graph
-    |> Primitives.group(fn g ->
-      g
-      # Button background
-      |> Primitives.rrect({bw, bh, 4},
-        fill: bg_color,
-        stroke: {2, border_color}
-      )
-      # Button label
-      |> Primitives.text(label,
-        font_size: 14,
-        fill: text_color,
-        text_align: :center,
-        translate: {bw / 2, bh / 2 + 5}
-      )
-    end,
+    |> Primitives.group(
+      fn g ->
+        g
+        # Button background
+        |> Primitives.rrect({bw, bh, 4},
+          fill: bg_color,
+          stroke: {2, border_color}
+        )
+        # Button label
+        |> Primitives.text(label,
+          font_size: 14,
+          fill: text_color,
+          text_align: :center,
+          translate: {bw / 2, bh / 2 + 5}
+        )
+      end,
       id: id,
       translate: {bx, by}
     )
@@ -398,12 +366,14 @@ defmodule ScenicWidgets.FilePicker.Renderer do
   end
 
   defp maybe_update_entry_style(graph, _idx, nil, _selected), do: graph
+
   defp maybe_update_entry_style(graph, idx, entry, selected) do
-    {bg_color, text_color} = if selected do
-      {@selected_bg, @selected_text}
-    else
-      {:transparent, if(entry.type == :directory, do: @folder_color, else: @file_color)}
-    end
+    {bg_color, text_color} =
+      if selected do
+        {@selected_bg, @selected_text}
+      else
+        {:transparent, if(entry.type == :directory, do: @folder_color, else: @file_color)}
+      end
 
     graph
     |> Graph.modify(:"entry_bg_#{idx}", fn prim ->

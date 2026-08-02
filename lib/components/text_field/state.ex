@@ -11,20 +11,30 @@ defmodule ScenicWidgets.TextField.State do
 
   defstruct [
     # Core
-    :frame,                    # Widgex.Frame for positioning/sizing
-    :lines,                    # List of strings: ["line 1", "line 2", ...]
-    :cursor,                   # {line, col} tuple (1-indexed)
-    :id,                       # Component ID (for events)
+    # Widgex.Frame for positioning/sizing
+    :frame,
+    # List of strings: ["line 1", "line 2", ...]
+    :lines,
+    # {line, col} tuple (1-indexed)
+    :cursor,
+    # Component ID (for events)
+    :id,
 
     # Display
-    :focused,                  # Boolean, whether component has focus
-    :focus_time,               # System.monotonic_time when focus was gained (for debouncing)
-    :cursor_visible,           # Boolean, for blink animation
-    :cursor_timer,             # Erlang timer reference
-    :cursor_mode,              # :cursor (thin line) | :block (full char) | :hidden
+    # Boolean, whether component has focus
+    :focused,
+    # System.monotonic_time when focus was gained (for debouncing)
+    :focus_time,
+    # Boolean, for blink animation
+    :cursor_visible,
+    # Erlang timer reference
+    :cursor_timer,
+    # :cursor (thin line) | :block (full char) | :hidden
+    :cursor_mode,
 
     # Configuration
-    :mode,                     # :single_line | :multi_line
+    # :single_line | :multi_line
+    :mode,
 
     # Input Mode - CRITICAL for correct input routing!
     # :direct        - TextField requests and handles all keyboard input directly.
@@ -36,64 +46,104 @@ defmodule ScenicWidgets.TextField.State do
     # :store_backed - TextField handles input but syncs state with Buffer.Process.
     #                  Use when you want direct input but external state management.
     :input_mode,
-    :show_line_numbers,        # Boolean
-    :line_number_width,        # Pixels (default 40)
-    :tab_width,                # Number of spaces per tab (default 4)
-    :font,                     # %{name: atom, size: int, metrics: FontMetrics | nil}
-    :colors,                   # %{text:, background:, cursor:, line_numbers:, border:, focused_border:}
-    :border_sides,             # Which edges get the 1px border line (default all four)
-    :overlay_open,             # Host says an overlay (menu/dialog) owns the pointer — ignore clicks
+    # Boolean
+    :show_line_numbers,
+    # Pixels (default 40)
+    :line_number_width,
+    # Number of spaces per tab (default 4)
+    :tab_width,
+    # %{name: atom, size: int, metrics: FontMetrics | nil}
+    :font,
+    # %{text:, background:, cursor:, line_numbers:, border:, focused_border:}
+    :colors,
+    # Which edges get the 1px border line (default all four)
+    :border_sides,
+    # Host says an overlay (menu/dialog) owns the pointer — ignore clicks
+    :overlay_open,
 
     # Buffer-backed mode (when input_mode == :store_backed)
-    :dispatch,        # Buffer store process: pid or via-tuple (GenServer.cast target)
-    :source,            # Scenic.PubSub source atom publishing buffer state snapshots
-    :buffer_id,       # UUID of the document currently shown — used to detect buffer SWITCHES
+    # Buffer store process: pid or via-tuple (GenServer.cast target)
+    :dispatch,
+    # Scenic.PubSub source atom publishing buffer state snapshots
+    :source,
+    # UUID of the document currently shown — used to detect buffer SWITCHES
+    :buffer_id,
 
     # Interaction
-    :editable,                 # Boolean (allow editing)
-    :selectable,               # Boolean (allow text selection)
+    # Boolean (allow editing)
+    :editable,
+    # Boolean (allow text selection)
+    :selectable,
 
     # Text Wrapping & Scrolling
-    :wrap_mode,                # :none | :word | :char
-    :scroll,                   # Widgex.Scroll.ScrollState (replaces manual scroll offsets)
-    :height_mode,              # :auto | {:fixed_lines, n} | {:fixed_pixels, n}
-    :max_visible_lines,        # Calculated from frame height and height_mode
-    :viewport_buffer_lines,    # Number of lines to render outside viewport (default 5)
+    # :none | :word | :char
+    :wrap_mode,
+    # Widgex.Scroll.ScrollState (replaces manual scroll offsets)
+    :scroll,
+    # :auto | {:fixed_lines, n} | {:fixed_pixels, n}
+    :height_mode,
+    # Calculated from frame height and height_mode
+    :max_visible_lines,
+    # Number of lines to render outside viewport (default 5)
+    :viewport_buffer_lines,
+    # MapSet of folded source-line headers (view state)
+    :folds,
 
     # Legacy scroll fields (deprecated - use :scroll instead)
-    :scroll_mode,              # :none | :vertical | :horizontal | :both (for backwards compat)
-    :vertical_scroll_offset,   # Vertical scroll in pixels (for backwards compat)
-    :horizontal_scroll_offset, # Horizontal scroll in pixels (for backwards compat)
+    # :none | :vertical | :horizontal | :both (for backwards compat)
+    :scroll_mode,
+    # Vertical scroll in pixels (for backwards compat)
+    :vertical_scroll_offset,
+    # Horizontal scroll in pixels (for backwards compat)
+    :horizontal_scroll_offset,
 
     # Advanced (future)
-    :selection,                # {start, end} for text selection
-    :max_lines,                # Limit lines (nil = unlimited)
-    :cursor_blink_rate,        # Milliseconds
-    :show_scrollbars,          # Boolean
-    :scrollbar_width,          # Pixels
+    # {start, end} for text selection
+    :selection,
+    # Limit lines (nil = unlimited)
+    :max_lines,
+    # Milliseconds
+    :cursor_blink_rate,
+    # Boolean
+    :show_scrollbars,
+    # Pixels
+    :scrollbar_width,
 
     # Scrollbar drag state
-    :scrollbar_drag,           # Which scrollbar is being dragged: :x | :y | nil
-    :scrollbar_drag_start,     # {x, y} mouse position when drag started
-    :scrollbar_drag_offset,    # Starting scroll offset when drag started
+    # Which scrollbar is being dragged: :x | :y | nil
+    :scrollbar_drag,
+    # {x, y} mouse position when drag started
+    :scrollbar_drag_start,
+    # Starting scroll offset when drag started
+    :scrollbar_drag_offset,
 
     # Text selection drag state (for click-and-drag selection)
-    :text_drag,                # true when dragging to select text, nil otherwise
-    :text_drag_start,          # {line, col} where text drag started
+    # true when dragging to select text, nil otherwise
+    :text_drag,
+    # {line, col} where text drag started
+    :text_drag_start,
 
     # Double-click detection
-    :last_click_time,          # System.monotonic_time(:millisecond) of last click
-    :last_click_pos,           # {line, col} of last click for double-click detection
+    # System.monotonic_time(:millisecond) of last click
+    :last_click_time,
+    # {line, col} of last click for double-click detection
+    :last_click_pos,
 
     # Search state
-    :search_query,             # Current search string (nil = not searching)
-    :search_matches,           # List of {line, col, match_text} tuples
-    :search_current_index,     # Index into search_matches (0-based)
+    # Current search string (nil = not searching)
+    :search_query,
+    # List of {line, col, match_text} tuples
+    :search_matches,
+    # Index into search_matches (0-based)
+    :search_current_index,
 
     # Undo/Redo state
-    :undo_stack,               # List of {lines, cursor} snapshots (most recent first)
-    :redo_stack,               # List of {lines, cursor} snapshots (most recent first)
-    :undo_max_size             # Maximum undo stack size (default 100)
+    # List of {lines, cursor} snapshots (most recent first)
+    :undo_stack,
+    # List of {lines, cursor} snapshots (most recent first)
+    :redo_stack,
+    # Maximum undo stack size (default 100)
+    :undo_max_size
   ]
 
   @type t :: %__MODULE__{}
@@ -130,22 +180,23 @@ defmodule ScenicWidgets.TextField.State do
 
     # Calculate the content frame (excluding line numbers if shown)
     # IMPORTANT: Must create a proper Dimensions struct so .box is correct
-    content_frame = if show_line_numbers do
-      content_width = frame.size.width - line_number_width
-      %{frame |
-        size: Dimensions.new({content_width, frame.size.height})
-      }
-    else
-      frame
-    end
+    content_frame =
+      if show_line_numbers do
+        content_width = frame.size.width - line_number_width
+        %{frame | size: Dimensions.new({content_width, frame.size.height})}
+      else
+        frame
+      end
 
     # Determine scroll direction based on wrap mode:
     # - :word or :char wrap → vertical only (content wraps horizontally)
     # - :none → both directions (no wrapping, need horizontal scroll)
-    scroll_direction = case wrap_mode do
-      :none -> :both
-      _ -> :vertical  # :word or :char
-    end
+    scroll_direction =
+      case wrap_mode do
+        :none -> :both
+        # :word or :char
+        _ -> :vertical
+      end
 
     # Calculate initial content size
     # For wrapped modes, content_height depends on display line count, not source line count
@@ -160,7 +211,8 @@ defmodule ScenicWidgets.TextField.State do
 
       # Display
       focused: Map.get(data, :focused, false),
-      focus_time: if(Map.get(data, :focused, false), do: System.monotonic_time(:millisecond), else: nil),
+      focus_time:
+        if(Map.get(data, :focused, false), do: System.monotonic_time(:millisecond), else: nil),
       cursor_visible: true,
       cursor_timer: nil,
       cursor_mode: Map.get(data, :cursor_mode, :cursor),
@@ -187,15 +239,17 @@ defmodule ScenicWidgets.TextField.State do
 
       # Text Wrapping & Scrolling
       wrap_mode: wrap_mode,
-      scroll: init_scroll(content_frame,
-        direction: scroll_direction,
-        content_height: content_height,
-        content_width: content_width,
-        initially_visible: Map.get(data, :show_scrollbars, true)
-      ),
+      scroll:
+        init_scroll(content_frame,
+          direction: scroll_direction,
+          content_height: content_height,
+          content_width: content_width,
+          initially_visible: Map.get(data, :show_scrollbars, true)
+        ),
       height_mode: Map.get(data, :height_mode, :auto),
       max_visible_lines: calculate_max_lines(frame, font),
       viewport_buffer_lines: Map.get(data, :viewport_buffer_lines, 5),
+      folds: Map.get(data, :folds, MapSet.new()) |> normalize_folds(),
 
       # Legacy fields (for backwards compatibility during transition)
       scroll_mode: Map.get(data, :scroll_mode, :both),
@@ -227,6 +281,10 @@ defmodule ScenicWidgets.TextField.State do
     # If first_visible_line is provided, adjust scroll to show that line at the top
     |> maybe_restore_scroll_position(data, content_frame)
   end
+
+  defp normalize_folds(%MapSet{} = folds), do: folds
+  defp normalize_folds(folds) when is_list(folds), do: MapSet.new(folds)
+  defp normalize_folds(_), do: MapSet.new()
 
   # Restore scroll position to show first_visible_line at the top of viewport
   defp maybe_restore_scroll_position(state, data, content_frame) do
@@ -266,7 +324,8 @@ defmodule ScenicWidgets.TextField.State do
         max_width = content_frame.size.width - 40
 
         # Sum up display lines for lines 1 to (target_line - 1)
-        display_lines_before = state.lines
+        display_lines_before =
+          state.lines
           |> Enum.take(target_line - 1)
           |> Enum.map(fn line -> count_wrapped_lines_init(line, state.font, max_width) end)
           |> Enum.sum()
@@ -280,19 +339,21 @@ defmodule ScenicWidgets.TextField.State do
     # Add half line height of bottom padding so last line isn't jammed against frame edge
     bottom_padding = div(line_height, 2)
 
-    display_line_count = case wrap_mode do
-      :none ->
-        # No wrapping: each source line is one display line
-        length(lines)
+    display_line_count =
+      case wrap_mode do
+        :none ->
+          # No wrapping: each source line is one display line
+          length(lines)
 
-      _wrap ->
-        # Word/char wrapping: each source line may wrap into multiple display lines
-        # Account for padding and scrollbar in available width
-        max_width = frame.size.width - 40
-        lines
-        |> Enum.map(fn line -> count_wrapped_lines_init(line, font, max_width) end)
-        |> Enum.sum()
-    end
+        _wrap ->
+          # Word/char wrapping: each source line may wrap into multiple display lines
+          # Account for padding and scrollbar in available width
+          max_width = frame.size.width - 40
+
+          lines
+          |> Enum.map(fn line -> count_wrapped_lines_init(line, font, max_width) end)
+          |> Enum.sum()
+      end
 
     display_line_count * line_height + bottom_padding
   end
@@ -309,17 +370,21 @@ defmodule ScenicWidgets.TextField.State do
       words = String.split(line, " ")
       space_width = measure_string_width(" ", font)
 
-      {line_count, _current_width} = Enum.reduce(words, {1, 0}, fn word, {lines, current_w} ->
-        word_width = measure_string_width(word, font)
-        test_width = if current_w == 0, do: word_width, else: current_w + space_width + word_width
+      {line_count, _current_width} =
+        Enum.reduce(words, {1, 0}, fn word, {lines, current_w} ->
+          word_width = measure_string_width(word, font)
 
-        if test_width <= max_width do
-          {lines, test_width}
-        else
-          # Word doesn't fit, start new line
-          {lines + 1, word_width}
-        end
-      end)
+          test_width =
+            if current_w == 0, do: word_width, else: current_w + space_width + word_width
+
+          if test_width <= max_width do
+            {lines, test_width}
+          else
+            # Word doesn't fit, start new line
+            {lines + 1, word_width}
+          end
+        end)
+
       line_count
     end
   end
@@ -329,6 +394,7 @@ defmodule ScenicWidgets.TextField.State do
     case font do
       %{metrics: %FontMetrics{} = metrics, size: size} ->
         FontMetrics.width(str, size, metrics)
+
       %{size: size} ->
         # Fallback to monospace approximation
         String.length(str) * trunc(size * 0.6)
@@ -339,16 +405,20 @@ defmodule ScenicWidgets.TextField.State do
     case wrap_mode do
       :none ->
         # Measure actual longest line using FontMetrics if available
-        {max_line_width, _longest_line_num, _longest_line_chars} = lines
+        {max_line_width, _longest_line_num, _longest_line_chars} =
+          lines
           |> Enum.with_index(1)
           |> Enum.map(fn {line, idx} ->
-            width = case font do
-              %{metrics: %FontMetrics{} = metrics, size: size} ->
-                FontMetrics.width(line, size, metrics)
-              %{size: size} ->
-                # Fallback to monospace approximation
-                String.length(line) * trunc(size * 0.6)
-            end
+            width =
+              case font do
+                %{metrics: %FontMetrics{} = metrics, size: size} ->
+                  FontMetrics.width(line, size, metrics)
+
+                %{size: size} ->
+                  # Fallback to monospace approximation
+                  String.length(line) * trunc(size * 0.6)
+              end
+
             {width, idx, String.length(line)}
           end)
           |> Enum.max_by(fn {w, _, _} -> w end, fn -> {0, 0, 0} end)
@@ -356,6 +426,7 @@ defmodule ScenicWidgets.TextField.State do
         content_w = max(frame.size.width, max_line_width + 40)
 
         content_w
+
       _ ->
         # Wrapped content fits within frame
         frame.size.width
@@ -365,6 +436,7 @@ defmodule ScenicWidgets.TextField.State do
   defp parse_initial_text(%{initial_text: text}) when is_bitstring(text) do
     String.split(text, "\n")
   end
+
   defp parse_initial_text(_) do
     # Default to empty
     [""]
@@ -407,14 +479,17 @@ defmodule ScenicWidgets.TextField.State do
   - `path` - Path to TTF file for loading metrics (optional)
   """
   def ensure_font_metrics(%{metrics: %FontMetrics{}} = font), do: font
+
   def ensure_font_metrics(%{path: path} = font) when is_binary(path) do
     case TruetypeMetrics.load(path) do
       {:ok, metrics} ->
         Map.put(font, :metrics, metrics)
+
       {:error, reason} ->
         raise "Failed to load font metrics from #{path}: #{inspect(reason)}"
     end
   end
+
   def ensure_font_metrics(%{name: name} = _font) do
     raise "FontMetrics not available for font #{inspect(name)}. Either provide pre-loaded metrics or a path to the TTF file."
   end
@@ -445,7 +520,7 @@ defmodule ScenicWidgets.TextField.State do
     # When component is added with translate, Scenic transforms input coords to local space
     # So we check against (0,0) origin, not frame.pin
     x >= 0 and x <= frame.size.width and
-    y >= 0 and y <= frame.size.height
+      y >= 0 and y <= frame.size.height
   end
 
   @doc """
@@ -476,13 +551,16 @@ defmodule ScenicWidgets.TextField.State do
   Get the X offset where text starts (accounting for line numbers).
   """
   def text_x_offset(%__MODULE__{show_line_numbers: false}), do: 10
-  def text_x_offset(%__MODULE__{show_line_numbers: true, line_number_width: width}), do: width + 10
+
+  def text_x_offset(%__MODULE__{show_line_numbers: true, line_number_width: width}),
+    do: width + 10
 
   @doc """
   Calculate the required gutter width for the current number of lines.
   Returns width in pixels that fits the largest line number plus padding.
   """
   def calculate_gutter_width(%__MODULE__{show_line_numbers: false}), do: 0
+
   def calculate_gutter_width(%__MODULE__{show_line_numbers: true, lines: lines} = state) do
     line_count = length(lines)
     digit_count = if line_count == 0, do: 1, else: trunc(:math.log10(max(1, line_count))) + 1
@@ -498,8 +576,10 @@ defmodule ScenicWidgets.TextField.State do
   Returns updated state if width changed, original state otherwise.
   """
   def maybe_update_gutter_width(%__MODULE__{show_line_numbers: false} = state), do: state
+
   def maybe_update_gutter_width(%__MODULE__{show_line_numbers: true} = state) do
     required_width = calculate_gutter_width(state)
+
     if required_width != state.line_number_width do
       %{state | line_number_width: required_width}
     else
@@ -514,6 +594,7 @@ defmodule ScenicWidgets.TextField.State do
   def char_width(%__MODULE__{font: %{metrics: %FontMetrics{} = metrics, size: size}}, char \\ "W") do
     FontMetrics.width(char, size, metrics)
   end
+
   def char_width(%__MODULE__{font: %{name: name}}, _char) do
     raise "FontMetrics not available for font #{inspect(name)}. TextField requires font metrics for accurate cursor positioning. Ensure the font has a corresponding .metrics file."
   end
@@ -529,9 +610,13 @@ defmodule ScenicWidgets.TextField.State do
   end
 
   # Raw string width without tab expansion (for internal use after tabs are expanded)
-  defp string_width_raw(%__MODULE__{font: %{metrics: %FontMetrics{} = metrics, size: size}}, string) do
+  defp string_width_raw(
+         %__MODULE__{font: %{metrics: %FontMetrics{} = metrics, size: size}},
+         string
+       ) do
     FontMetrics.width(string, size, metrics)
   end
+
   defp string_width_raw(%__MODULE__{font: %{name: name}}, _string) do
     raise "FontMetrics not available for font #{inspect(name)}. TextField requires font metrics for accurate cursor positioning. Ensure the font has a corresponding .metrics file."
   end
@@ -540,9 +625,11 @@ defmodule ScenicWidgets.TextField.State do
   Expand tab characters to spaces based on tab_width setting.
   Uses proper tab stops (columns that are multiples of tab_width).
   """
-  def expand_tabs(%__MODULE__{tab_width: tab_width}, string) when is_integer(tab_width) and tab_width > 0 do
+  def expand_tabs(%__MODULE__{tab_width: tab_width}, string)
+      when is_integer(tab_width) and tab_width > 0 do
     expand_tabs_at_column(string, 0, tab_width, [])
   end
+
   # Fallback if tab_width is nil or invalid - use default of 4
   def expand_tabs(%__MODULE__{}, string) do
     expand_tabs_at_column(string, 0, 4, [])
@@ -551,6 +638,7 @@ defmodule ScenicWidgets.TextField.State do
   defp expand_tabs_at_column("", _col, _tab_width, acc) do
     acc |> Enum.reverse() |> IO.iodata_to_binary()
   end
+
   defp expand_tabs_at_column(<<"\t", rest::binary>>, col, tab_width, acc) do
     # Calculate spaces to next tab stop
     spaces_needed = tab_width - rem(col, tab_width)
@@ -558,6 +646,7 @@ defmodule ScenicWidgets.TextField.State do
     spaces = String.duplicate(" ", spaces_needed)
     expand_tabs_at_column(rest, col + spaces_needed, tab_width, [spaces | acc])
   end
+
   defp expand_tabs_at_column(<<char::utf8, rest::binary>>, col, tab_width, acc) do
     expand_tabs_at_column(rest, col + 1, tab_width, [<<char::utf8>> | acc])
   end
@@ -644,7 +733,8 @@ defmodule ScenicWidgets.TextField.State do
 
   def click_to_cursor(%__MODULE__{scroll: scroll, lines: lines} = state, {click_x, click_y}) do
     line_height = line_height(state)
-    text_padding = 10  # Same as in renderer
+    # Same as in renderer
+    text_padding = 10
     gutter_width = if state.show_line_numbers, do: state.line_number_width, else: 0
 
     # Convert click to content coordinates (accounting for scroll and gutter).
@@ -659,7 +749,8 @@ defmodule ScenicWidgets.TextField.State do
     content_y = click_y + scroll.offset_y - 4
 
     # Calculate line number from Y coordinate
-    line = max(1, min(length(lines), div(max(trunc(content_y), 0), line_height) + 1))
+    display_line = max(1, div(max(trunc(content_y), 0), line_height) + 1)
+    line = ScenicWidgets.TextField.Renderer.display_to_source_line(state, display_line)
 
     # Get the text of the clicked line
     line_text = Enum.at(lines, line - 1, "")
@@ -674,6 +765,7 @@ defmodule ScenicWidgets.TextField.State do
   # Uses binary search-like approach for efficiency with FontMetrics
   defp x_to_column(state, line_text, x) when x <= 0, do: 1
   defp x_to_column(state, "", _x), do: 1
+
   defp x_to_column(state, line_text, x) do
     # Walk through characters and find where the click falls
     chars = String.graphemes(line_text)
@@ -681,6 +773,7 @@ defmodule ScenicWidgets.TextField.State do
   end
 
   defp find_column(_state, [], _x, _current_x, col), do: col
+
   defp find_column(state, [char | rest], x, current_x, col) do
     char_w = string_width(state, char)
     next_x = current_x + char_w
@@ -710,7 +803,8 @@ defmodule ScenicWidgets.TextField.State do
   """
   def word_at(lines, {line_num, col}) when is_list(lines) do
     line = Enum.at(lines, line_num - 1, "")
-    extract_word_at(line, col - 1)  # Convert to 0-indexed
+    # Convert to 0-indexed
+    extract_word_at(line, col - 1)
   end
 
   @doc """
@@ -720,18 +814,21 @@ defmodule ScenicWidgets.TextField.State do
   """
   def word_boundaries_at(%__MODULE__{lines: lines}, {line_num, col}) do
     line = Enum.at(lines, line_num - 1, "")
-    get_word_boundaries(line, col - 1)  # Convert to 0-indexed internally
+    # Convert to 0-indexed internally
+    get_word_boundaries(line, col - 1)
   end
 
   # Get word boundaries at a given 0-indexed position in a string
   # Returns {start_col, end_col} (1-indexed) or nil
   defp get_word_boundaries("", _pos), do: nil
+
   defp get_word_boundaries(line, pos) do
     graphemes = String.graphemes(line)
     pos = max(0, min(pos, length(graphemes) - 1))
 
     # Check if position is on a word character
     char_at_pos = Enum.at(graphemes, pos, "")
+
     unless word_char?(char_at_pos) do
       # Try one position to the left (cursor might be after word)
       if pos > 0 do
@@ -751,12 +848,14 @@ defmodule ScenicWidgets.TextField.State do
 
   # Extract word at a given 0-indexed position in a string
   defp extract_word_at("", _pos), do: nil
+
   defp extract_word_at(line, pos) do
     graphemes = String.graphemes(line)
     pos = max(0, min(pos, length(graphemes) - 1))
 
     # Check if position is on a word character
     char_at_pos = Enum.at(graphemes, pos, "")
+
     unless word_char?(char_at_pos) do
       # Try one position to the left (cursor might be after word)
       if pos > 0 do
@@ -774,12 +873,14 @@ defmodule ScenicWidgets.TextField.State do
   end
 
   defp find_word_start(graphemes, pos) when pos <= 0, do: 0
+
   defp find_word_start(graphemes, pos) do
     char = Enum.at(graphemes, pos - 1, "")
     if word_char?(char), do: find_word_start(graphemes, pos - 1), else: pos
   end
 
   defp find_word_end(graphemes, pos) when pos >= length(graphemes) - 1, do: length(graphemes) - 1
+
   defp find_word_end(graphemes, pos) do
     char = Enum.at(graphemes, pos + 1, "")
     if word_char?(char), do: find_word_end(graphemes, pos + 1), else: pos
@@ -793,6 +894,7 @@ defmodule ScenicWidgets.TextField.State do
   def font_ascent(%__MODULE__{font: %{metrics: %FontMetrics{} = metrics, size: size}}) do
     FontMetrics.ascent(size, metrics)
   end
+
   def font_ascent(%__MODULE__{font: %{size: size}}) do
     # Approximation: ~80% of font size
     trunc(size * 0.8)
@@ -809,7 +911,8 @@ defmodule ScenicWidgets.TextField.State do
 
   Single-line mode always renders its one line.
   """
-  def visible_display_range(%__MODULE__{mode: :single_line}, display_count), do: {1, display_count}
+  def visible_display_range(%__MODULE__{mode: :single_line}, display_count),
+    do: {1, display_count}
 
   def visible_display_range(%__MODULE__{} = state, display_count) do
     line_height = line_height(state)
@@ -835,19 +938,21 @@ defmodule ScenicWidgets.TextField.State do
   Calculate which lines should be rendered based on viewport and scroll position.
   Returns {render_start, render_end} tuple (1-indexed, inclusive).
   """
-  def visible_line_range(%__MODULE__{
-    lines: lines,
-    frame: frame,
-    vertical_scroll_offset: scroll_y,
-    viewport_buffer_lines: buffer_lines
-  } = state) do
+  def visible_line_range(
+        %__MODULE__{
+          lines: lines,
+          frame: frame,
+          vertical_scroll_offset: scroll_y,
+          viewport_buffer_lines: buffer_lines
+        } = state
+      ) do
     line_height = line_height(state)
     viewport_height = frame.size.height
     total_lines = length(lines)
 
     # Calculate visible range
     visible_start = max(1, div(-scroll_y, line_height) + 1)
-    visible_end = min(total_lines, div((-scroll_y + viewport_height), line_height) + 2)
+    visible_end = min(total_lines, div(-scroll_y + viewport_height, line_height) + 2)
 
     # Add buffer for smooth scrolling
     render_start = max(1, visible_start - buffer_lines)
@@ -869,11 +974,13 @@ defmodule ScenicWidgets.TextField.State do
   Automatically adjusts scroll offsets if the cursor is outside the visible area.
   Returns updated state with adjusted scroll offsets.
   """
-  def ensure_cursor_visible(%__MODULE__{
-    cursor: {line, col},
-    frame: frame,
-    scroll: scroll
-  } = state) do
+  def ensure_cursor_visible(
+        %__MODULE__{
+          cursor: {line, col},
+          frame: frame,
+          scroll: scroll
+        } = state
+      ) do
     line_height = line_height(state)
     viewport_height = frame.size.height
     viewport_width = frame.size.width
@@ -898,43 +1005,47 @@ defmodule ScenicWidgets.TextField.State do
 
     # Check vertical scrolling
     # scroll.offset_y is how much the content is scrolled DOWN (positive = scrolled down)
-    new_scroll_y = cond do
-      # Cursor is above viewport - scroll up to show it
-      cursor_y < scroll_y ->
-        cursor_y
+    new_scroll_y =
+      cond do
+        # Cursor is above viewport - scroll up to show it
+        cursor_y < scroll_y ->
+          cursor_y
 
-      # Cursor is below viewport - scroll down to show it
-      cursor_y + line_height > scroll_y + viewport_height ->
-        cursor_y + line_height - viewport_height
+        # Cursor is below viewport - scroll down to show it
+        cursor_y + line_height > scroll_y + viewport_height ->
+          cursor_y + line_height - viewport_height
 
-      # Cursor is visible vertically
-      true ->
-        scroll_y
-    end
+        # Cursor is visible vertically
+        true ->
+          scroll_y
+      end
 
     # Check horizontal scrolling
     text_offset = text_x_offset(state)
-    new_scroll_x = cond do
-      # Cursor is left of viewport - scroll left
-      cursor_x < scroll_x ->
-        cursor_x
 
-      # Cursor is right of viewport - scroll right
-      cursor_x + text_offset > scroll_x + viewport_width - 10 ->
-        cursor_x + text_offset - viewport_width + 10
+    new_scroll_x =
+      cond do
+        # Cursor is left of viewport - scroll left
+        cursor_x < scroll_x ->
+          cursor_x
 
-      # Cursor is visible horizontally
-      true ->
-        scroll_x
-    end
+        # Cursor is right of viewport - scroll right
+        cursor_x + text_offset > scroll_x + viewport_width - 10 ->
+          cursor_x + text_offset - viewport_width + 10
+
+        # Cursor is visible horizontally
+        true ->
+          scroll_x
+      end
 
     # Update both the scroll struct AND legacy fields for backward compatibility
     updated_scroll = %{scroll | offset_x: new_scroll_x, offset_y: new_scroll_y}
 
-    %{state |
-      scroll: updated_scroll,
-      vertical_scroll_offset: -new_scroll_y,
-      horizontal_scroll_offset: -new_scroll_x
+    %{
+      state
+      | scroll: updated_scroll,
+        vertical_scroll_offset: -new_scroll_y,
+        horizontal_scroll_offset: -new_scroll_x
     }
   end
 
@@ -942,13 +1053,17 @@ defmodule ScenicWidgets.TextField.State do
   Scroll the view by a delta amount.
   Positive values scroll down/right, negative values scroll up/left.
   """
-  def scroll(%__MODULE__{
-    vertical_scroll_offset: scroll_y,
-    horizontal_scroll_offset: scroll_x
-  } = state, {delta_x, delta_y}) do
-    %{state |
-      vertical_scroll_offset: scroll_y + delta_y,
-      horizontal_scroll_offset: scroll_x + delta_x
+  def scroll(
+        %__MODULE__{
+          vertical_scroll_offset: scroll_y,
+          horizontal_scroll_offset: scroll_x
+        } = state,
+        {delta_x, delta_y}
+      ) do
+    %{
+      state
+      | vertical_scroll_offset: scroll_y + delta_y,
+        horizontal_scroll_offset: scroll_x + delta_x
     }
   end
 
@@ -994,7 +1109,10 @@ defmodule ScenicWidgets.TextField.State do
     # Check horizontal scrollbar first (it's at the bottom)
     if ScrollState.scrollable_x?(scroll) do
       h_hit = check_h_scrollbar_hit(state, {x, y}, gutter_offset, content_width, frame_height)
-      if h_hit, do: h_hit, else: check_v_scrollbar_hit(state, {x, y}, gutter_offset, content_width, frame_height)
+
+      if h_hit,
+        do: h_hit,
+        else: check_v_scrollbar_hit(state, {x, y}, gutter_offset, content_width, frame_height)
     else
       check_v_scrollbar_hit(state, {x, y}, gutter_offset, content_width, frame_height)
     end
@@ -1009,11 +1127,12 @@ defmodule ScenicWidgets.TextField.State do
     track_width = content_width - @scrollbar_padding * 2
 
     # Account for vertical scrollbar
-    track_width = if ScrollState.scrollable_y?(scroll) do
-      track_width - @scrollbar_width - @scrollbar_padding
-    else
-      track_width
-    end
+    track_width =
+      if ScrollState.scrollable_y?(scroll) do
+        track_width - @scrollbar_width - @scrollbar_padding
+      else
+        track_width
+      end
 
     {thumb_x_ratio, thumb_width_ratio} = ScrollState.scrollbar_thumb(scroll, :x)
     scale = track_width / scroll.viewport_width
@@ -1022,7 +1141,7 @@ defmodule ScenicWidgets.TextField.State do
 
     # Check if click is on thumb
     if x >= thumb_x and x <= thumb_x + thumb_width and
-       y >= track_y and y <= track_y + @scrollbar_width do
+         y >= track_y and y <= track_y + @scrollbar_width do
       :x
     else
       nil
@@ -1040,11 +1159,12 @@ defmodule ScenicWidgets.TextField.State do
       track_height = frame_height - @scrollbar_padding * 2
 
       # Account for horizontal scrollbar
-      track_height = if ScrollState.scrollable_x?(scroll) do
-        track_height - @scrollbar_width - @scrollbar_padding
-      else
-        track_height
-      end
+      track_height =
+        if ScrollState.scrollable_x?(scroll) do
+          track_height - @scrollbar_width - @scrollbar_padding
+        else
+          track_height
+        end
 
       {thumb_y_ratio, thumb_height_ratio} = ScrollState.scrollbar_thumb(scroll, :y)
       scale = track_height / scroll.viewport_height
@@ -1053,7 +1173,7 @@ defmodule ScenicWidgets.TextField.State do
 
       # Check if click is on thumb
       if x >= track_x and x <= track_x + @scrollbar_width and
-         y >= thumb_y and y <= thumb_y + thumb_height do
+           y >= thumb_y and y <= thumb_y + thumb_height do
         :y
       else
         nil
@@ -1075,11 +1195,12 @@ defmodule ScenicWidgets.TextField.State do
     content_width = state.frame.size.width - gutter_offset
     track_width = content_width - @scrollbar_padding * 2
 
-    track_width = if ScrollState.scrollable_y?(scroll) do
-      track_width - @scrollbar_width - @scrollbar_padding
-    else
-      track_width
-    end
+    track_width =
+      if ScrollState.scrollable_y?(scroll) do
+        track_width - @scrollbar_width - @scrollbar_padding
+      else
+        track_width
+      end
 
     {gutter_offset + @scrollbar_padding, track_width, scroll.content_width, scroll.viewport_width}
   end
@@ -1091,11 +1212,12 @@ defmodule ScenicWidgets.TextField.State do
     frame_height = state.frame.size.height
     track_height = frame_height - @scrollbar_padding * 2
 
-    track_height = if ScrollState.scrollable_x?(scroll) do
-      track_height - @scrollbar_width - @scrollbar_padding
-    else
-      track_height
-    end
+    track_height =
+      if ScrollState.scrollable_x?(scroll) do
+        track_height - @scrollbar_width - @scrollbar_padding
+      else
+        track_height
+      end
 
     {@scrollbar_padding, track_height, scroll.content_height, scroll.viewport_height}
   end
@@ -1109,7 +1231,10 @@ defmodule ScenicWidgets.TextField.State do
   Call this BEFORE modifying lines/cursor, not after.
   Clears the redo stack (new changes invalidate redo history).
   """
-  def push_undo(%__MODULE__{lines: lines, cursor: cursor, undo_stack: stack, undo_max_size: max_size} = state) do
+  def push_undo(
+        %__MODULE__{lines: lines, cursor: cursor, undo_stack: stack, undo_max_size: max_size} =
+          state
+      ) do
     snapshot = {lines, cursor}
     new_stack = [snapshot | stack] |> Enum.take(max_size)
     %{state | undo_stack: new_stack, redo_stack: []}
@@ -1119,15 +1244,26 @@ defmodule ScenicWidgets.TextField.State do
   Undo the last change. Returns {:ok, new_state} or {:noop, state} if nothing to undo.
   """
   def undo(%__MODULE__{undo_stack: []} = state), do: {:noop, state}
-  def undo(%__MODULE__{undo_stack: [{prev_lines, prev_cursor} | rest], lines: curr_lines, cursor: curr_cursor, redo_stack: redo} = state) do
+
+  def undo(
+        %__MODULE__{
+          undo_stack: [{prev_lines, prev_cursor} | rest],
+          lines: curr_lines,
+          cursor: curr_cursor,
+          redo_stack: redo
+        } = state
+      ) do
     # Push current state onto redo stack before restoring
     redo_snapshot = {curr_lines, curr_cursor}
-    new_state = %{state |
-      lines: prev_lines,
-      cursor: prev_cursor,
-      undo_stack: rest,
-      redo_stack: [redo_snapshot | redo]
+
+    new_state = %{
+      state
+      | lines: prev_lines,
+        cursor: prev_cursor,
+        undo_stack: rest,
+        redo_stack: [redo_snapshot | redo]
     }
+
     {:ok, ensure_cursor_visible(new_state)}
   end
 
@@ -1135,15 +1271,26 @@ defmodule ScenicWidgets.TextField.State do
   Redo the last undone change. Returns {:ok, new_state} or {:noop, state} if nothing to redo.
   """
   def redo(%__MODULE__{redo_stack: []} = state), do: {:noop, state}
-  def redo(%__MODULE__{redo_stack: [{next_lines, next_cursor} | rest], lines: curr_lines, cursor: curr_cursor, undo_stack: undo} = state) do
+
+  def redo(
+        %__MODULE__{
+          redo_stack: [{next_lines, next_cursor} | rest],
+          lines: curr_lines,
+          cursor: curr_cursor,
+          undo_stack: undo
+        } = state
+      ) do
     # Push current state onto undo stack before restoring
     undo_snapshot = {curr_lines, curr_cursor}
-    new_state = %{state |
-      lines: next_lines,
-      cursor: next_cursor,
-      redo_stack: rest,
-      undo_stack: [undo_snapshot | undo]
+
+    new_state = %{
+      state
+      | lines: next_lines,
+        cursor: next_cursor,
+        redo_stack: rest,
+        undo_stack: [undo_snapshot | undo]
     }
+
     {:ok, ensure_cursor_visible(new_state)}
   end
 

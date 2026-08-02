@@ -42,7 +42,7 @@ defmodule ScenicWidgets.FilePicker do
   - `:filter` - File extension filter, e.g. ".txt" (default: nil = all files)
   """
 
-  use Scenic.Component, has_children: false
+  use Scenic.Component, has_children: true
   require Logger
 
   alias Scenic.Graph
@@ -78,12 +78,16 @@ defmodule ScenicWidgets.FilePicker do
 
     # Request input for keyboard navigation
     # In save mode, also request codepoint for typing filename
-    input_types = if state.mode == :save do
-      [:key, :codepoint, :cursor_scroll, :cursor_button]
-    else
-      [:key, :cursor_scroll, :cursor_button]
-    end
+    input_types =
+      if state.mode == :save do
+        [:cursor_scroll, :cursor_button]
+      else
+        [:key, :cursor_scroll, :cursor_button]
+      end
+
     request_input(scene, input_types)
+
+    if state.mode == :save, do: send(self(), :focus_filename)
 
     {:ok, scene}
   end
@@ -126,14 +130,18 @@ defmodule ScenicWidgets.FilePicker do
         last_click = Map.get(scene.assigns, :last_click_time, 0)
         last_coords = Map.get(scene.assigns, :last_click_coords, {0, 0})
 
-        is_double_click = (now - last_click) < 400 and coords_close?(coords, last_coords)
+        is_double_click = now - last_click < 400 and coords_close?(coords, last_coords)
 
-        scene = scene
+        scene =
+          scene
           |> assign(last_click_time: now)
           |> assign(last_click_coords: coords)
 
         if is_double_click do
-          handle_reducer_result(scene, Reducer.process_double_click(scene.assigns.state, local_coords))
+          handle_reducer_result(
+            scene,
+            Reducer.process_double_click(scene.assigns.state, local_coords)
+          )
         else
           handle_reducer_result(scene, Reducer.process_click(scene.assigns.state, local_coords))
         end
@@ -157,7 +165,26 @@ defmodule ScenicWidgets.FilePicker do
     handle_reducer_result(scene, Reducer.process_event(button_id, scene.assigns.state))
   end
 
+  def handle_event({:text_changed, :filename_input, text}, _from, scene) do
+    state = %{scene.assigns.state | filename: text, filename_cursor: String.length(text)}
+    {:noreply, assign(scene, state: state)}
+  end
+
+  def handle_event({:enter_pressed, :filename_input, text}, _from, scene) do
+    state = %{scene.assigns.state | filename: text, filename_cursor: String.length(text)}
+    handle_reducer_result(scene, Reducer.process_event(:save_button, state))
+  end
+
+  def handle_event({:escape_pressed, :filename_input}, _from, scene) do
+    handle_reducer_result(scene, {:action, :cancel})
+  end
+
   def handle_event(_event, _from, scene) do
+    {:noreply, scene}
+  end
+
+  def handle_info(:focus_filename, scene) do
+    Scenic.Scene.put_child(scene, :filename_input, :focus)
     {:noreply, scene}
   end
 
@@ -213,13 +240,14 @@ defmodule ScenicWidgets.FilePicker do
 
     # List area dimensions (inside modal)
     list_x = modal_x + 20
-    list_y = modal_y + header_height  # After header
+    # After header
+    list_y = modal_y + header_height
     list_width = modal_width - 40
     list_height = modal_height - header_height - footer_height
 
     # Check if click is within list bounds
     if click_x >= list_x and click_x <= list_x + list_width and
-       click_y >= list_y and click_y <= list_y + list_height do
+         click_y >= list_y and click_y <= list_y + list_height do
       # Return coordinates relative to list area
       {:ok, {click_x - list_x, click_y - list_y}}
     else
@@ -271,15 +299,17 @@ defmodule ScenicWidgets.FilePicker do
       # Up button in header
       {:up_button, modal_x + 15, modal_y + 12, 60, 36},
       # Cancel button in footer
-      {:cancel_button, modal_x + modal_width - 200, modal_y + modal_height - footer_height + button_y_offset, 85, 36},
+      {:cancel_button, modal_x + modal_width - 200,
+       modal_y + modal_height - footer_height + button_y_offset, 85, 36},
       # Open/Save button in footer
-      {action_button_id, modal_x + modal_width - 100, modal_y + modal_height - footer_height + button_y_offset, 85, 36}
+      {action_button_id, modal_x + modal_width - 100,
+       modal_y + modal_height - footer_height + button_y_offset, 85, 36}
     ]
 
     # Find which button (if any) was clicked
     Enum.find_value(buttons, fn {id, bx, by, bw, bh} ->
       if click_x >= bx and click_x <= bx + bw and
-         click_y >= by and click_y <= by + bh do
+           click_y >= by and click_y <= by + bh do
         id
       else
         nil

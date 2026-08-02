@@ -144,9 +144,12 @@ defmodule ScenicWidgets.TabBar do
     case Reducer.add_tab(state, tab) do
       {:tab_added, _tab_id, new_state} ->
         graph = Renderer.initial_render(Graph.build(), new_state)
-        scene = scene
+
+        scene =
+          scene
           |> assign(state: new_state, graph: graph)
           |> push_graph(graph)
+
         # Re-register after tab list change
         register_semantic_elements(scene, new_state)
         {:noreply, scene}
@@ -191,6 +194,7 @@ defmodule ScenicWidgets.TabBar do
     # tab_widths is a layout cache derived from tabs — recompute or
     # get_tab_bounds returns nil and rendering crashes
     new_state = %{new_state | tab_widths: State.calculate_tab_widths(new_state)}
+    new_state = State.ensure_selected_visible(new_state)
 
     cond do
       new_state.tabs == state.tabs and new_state.selected_id == state.selected_id ->
@@ -226,26 +230,33 @@ defmodule ScenicWidgets.TabBar do
 
   defp update_scene(scene, old_state, new_state) do
     graph = Renderer.update_render(scene.assigns.graph, old_state, new_state)
-    scene = scene
+
+    scene =
+      scene
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
+
     # Re-register if tabs, scroll, or selection changed.
     # selected_id must be included because the aggregate entry written by
     # register_tab_bar_aggregate/3 carries the selected_id, and tests poll
     # get_selected_tab_label() after direct tab clicks routed through handle_input.
     if old_state.tabs != new_state.tabs or
-       old_state.scroll_offset != new_state.scroll_offset or
-       old_state.selected_id != new_state.selected_id do
+         old_state.scroll_offset != new_state.scroll_offset or
+         old_state.selected_id != new_state.selected_id do
       register_semantic_elements(scene, new_state)
     end
+
     {:noreply, scene}
   end
 
   defp update_scene_tuple(scene, old_state, new_state) do
     graph = Renderer.update_render(scene.assigns.graph, old_state, new_state)
-    scene = scene
+
+    scene =
+      scene
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
+
     # Re-register when tabs or selection changes (tab positions may have shifted)
     register_semantic_elements(scene, new_state)
     {:noreply, scene}
@@ -284,8 +295,17 @@ defmodule ScenicWidgets.TabBar do
           {tab_x, _tab_y, tab_w, tab_h} ->
             # Register the tab body as a clickable element
             tab_semantic_id = "tab_bar_#{tab.id}"
-            register_tab_element(viewport, scene_name, tab_semantic_id, :tab,
-              bar_x + tab_x, bar_y, tab_w, tab_h)
+
+            register_tab_element(
+              viewport,
+              scene_name,
+              tab_semantic_id,
+              :tab,
+              bar_x + tab_x,
+              bar_y,
+              tab_w,
+              tab_h
+            )
 
             # Register the close button separately if this tab is closeable
             if tab.closeable do
@@ -295,8 +315,17 @@ defmodule ScenicWidgets.TabBar do
               close_local_x = tab_x + tab_w - close_size - close_margin
               close_local_y = (tab_h - close_size) / 2
               close_semantic_id = "tab_bar_close_#{tab.id}"
-              register_tab_element(viewport, scene_name, close_semantic_id, :tab_close,
-                bar_x + close_local_x, bar_y + close_local_y, close_size, close_size)
+
+              register_tab_element(
+                viewport,
+                scene_name,
+                close_semantic_id,
+                :tab_close,
+                bar_x + close_local_x,
+                bar_y + close_local_y,
+                close_size,
+                close_size
+              )
             end
 
           nil ->
@@ -313,14 +342,15 @@ defmodule ScenicWidgets.TabBar do
     tab_bar_data = %{
       tab_count: length(state.tabs),
       selected_id: state.selected_id,
-      tabs: Enum.map(state.tabs, fn tab ->
-        %{
-          id: tab.id,
-          label: tab.label,
-          selected: tab.id == state.selected_id,
-          closeable: tab.closeable
-        }
-      end)
+      tabs:
+        Enum.map(state.tabs, fn tab ->
+          %{
+            id: tab.id,
+            label: tab.label,
+            selected: tab.id == state.selected_id,
+            closeable: tab.closeable
+          }
+        end)
     }
 
     :ets.insert(viewport.semantic_table, {{scene_name, :tab_bar_aggregate}, tab_bar_data})
@@ -340,6 +370,7 @@ defmodule ScenicWidgets.TabBar do
       hidden: false,
       z_index: 5
     }
+
     :ets.insert(viewport.semantic_table, {{scene_name, id}, entry})
     :ets.insert(viewport.semantic_index, {id, {scene_name, id}})
   end

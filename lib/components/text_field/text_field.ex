@@ -80,7 +80,7 @@ defmodule ScenicWidgets.TextField do
   returns) must be a map/struct with:
 
   - `data` — list of line strings
-  - `cursors` — list of `%{line: pos_integer, col: pos_integer}` (first is used)
+  - `cursor` — `%{line: pos_integer, col: pos_integer}`
   - `selection` — `%{start: %{line:, col:}, end: %{line:, col:}}`,
     `%{start: {l, c}, end: {l, c}}`, or `nil`
   - optional: `search_query`, `search_matches`, `search_current_index`
@@ -180,48 +180,56 @@ defmodule ScenicWidgets.TextField do
     # snapshot (instant ETS read — no blocking GenServer call) and subscribe
     # for pushes. Subscribing also delivers the current retained value, so a
     # publish racing this init cannot be missed.
-    state = if state.input_mode == :store_backed and state.source do
-      state =
-        case Scenic.PubSub.get(state.source) do
-          nil ->
-            state
+    state =
+      if state.input_mode == :store_backed and state.source do
+        state =
+          case Scenic.PubSub.get(state.source) do
+            nil ->
+              state
 
-          buf_state ->
-            cursor = case buf_state.cursors do
-              [%{line: l, col: c} | _] -> {l, c}
-              _ -> {1, 1}
-            end
-            # Convert selection from buffer format %{start: ..., end: ...} to TextField format {start, end}
-            selection = case buf_state.selection do
-              %{start: start_pos, end: end_pos} -> {start_pos, end_pos}
-              nil -> nil
-              other -> other  # Pass through if already in tuple format
-            end
-            %{state |
-              lines: buf_state.data,
-              cursor: cursor,
-              selection: selection,
-              # In store_backed mode, we don't need local undo stacks
-              undo_stack: [],
-              redo_stack: []
-            }
-        end
+            buf_state ->
+              cursor =
+                case buf_state.cursor do
+                  %{line: l, col: c} -> {l, c}
+                  _ -> {1, 1}
+                end
 
-      Scenic.PubSub.subscribe(state.source)
-      state
-    else
-      state
-    end
+              # Convert selection from buffer format %{start: ..., end: ...} to TextField format {start, end}
+              selection =
+                case buf_state.selection do
+                  %{start: start_pos, end: end_pos} -> {start_pos, end_pos}
+                  nil -> nil
+                  # Pass through if already in tuple format
+                  other -> other
+                end
+
+              %{
+                state
+                | lines: buf_state.data,
+                  cursor: cursor,
+                  selection: selection,
+                  # In store_backed mode, we don't need local undo stacks
+                  undo_stack: [],
+                  redo_stack: []
+              }
+          end
+
+        Scenic.PubSub.subscribe(state.source)
+        state
+      else
+        state
+      end
 
     # Render initial graph
     graph = Renderer.initial_render(Graph.build(), state)
 
     # Start cursor blink timer (only if editable)
-    {:ok, timer} = if state.editable do
-      :timer.send_interval(state.cursor_blink_rate, :blink)
-    else
-      {:ok, nil}
-    end
+    {:ok, timer} =
+      if state.editable do
+        :timer.send_interval(state.cursor_blink_rate, :blink)
+      else
+        {:ok, nil}
+      end
 
     # Update state with timer reference
     state = %{state | cursor_timer: timer}
@@ -261,6 +269,27 @@ defmodule ScenicWidgets.TextField do
     # (e.g., buffer pane shouldn't receive input when search bar is open,
     #  read-only HyperCards shouldn't capture keyboard input)
     case input do
+      {:cursor_button, {:btn_left, 1, _mods, {x, y}}}
+      when state.show_line_numbers == true ->
+        local_x = x - state.frame.pin.x
+
+        if local_x >= 0 and local_x <= state.line_number_width do
+          local_y = y - state.frame.pin.y + state.scroll.offset_y
+          display_line = max(1, div(max(trunc(local_y), 0), State.line_height(state)) + 1)
+          source_line = Renderer.display_to_source_line(state, display_line)
+
+          case Reducer.process_action(state, {:toggle_fold, source_line}) do
+            {:event, event, new_state} ->
+              send_parent_event(scene, event)
+              update_scene(scene, state, Reducer.update_scroll_content_size(new_state))
+
+            {:noop, _} ->
+              {:noreply, scene}
+          end
+        else
+          do_handle_input(input, scene)
+        end
+
       # An overlay owns the keyboard — ignore ALL key input regardless of our
       # own focus flag. This is a second, independent guard: focus is granted
       # and revoked by asynchronous messages, so during the window in which an
@@ -343,17 +372,21 @@ defmodule ScenicWidgets.TextField do
         # Cut: copy to clipboard, clear selection immediately, and send delete action to buffer
         copy_to_system_clipboard(text)
         new_state = %{state | selection: nil, text_drag: nil, text_drag_start: nil}
+
         if state.dispatch do
           GenServer.cast(state.dispatch, {:action, [{:delete, :selection}]})
         end
+
         update_scene(scene, state, new_state)
 
       {:clipboard_paste} ->
         # Paste: get clipboard text and send insert action to buffer
         clipboard_text = paste_from_system_clipboard()
+
         if state.dispatch && clipboard_text != "" do
           GenServer.cast(state.dispatch, {:action, [{:insert, clipboard_text, :at_cursor}]})
         end
+
         if state.selection != nil do
           new_state = %{state | selection: nil}
           update_scene(scene, state, new_state)
@@ -363,6 +396,7 @@ defmodule ScenicWidgets.TextField do
 
       {:local_update, new_state} ->
         # Some updates (like focus, scrollbar drag) are handled locally
+        maybe_persist_view(state, new_state)
         update_scene(scene, state, new_state)
 
       {:click_move_cursor, new_state, action} ->
@@ -370,6 +404,7 @@ defmodule ScenicWidgets.TextField do
         if state.dispatch do
           GenServer.cast(state.dispatch, {:action, [action]})
         end
+
         update_scene(scene, state, new_state)
 
       {:drag_select, new_state, action} ->
@@ -377,6 +412,7 @@ defmodule ScenicWidgets.TextField do
         if state.dispatch do
           GenServer.cast(state.dispatch, {:action, [action]})
         end
+
         update_scene(scene, state, new_state)
 
       {:double_click_select, new_state, action} ->
@@ -384,6 +420,7 @@ defmodule ScenicWidgets.TextField do
         if state.dispatch do
           GenServer.cast(state.dispatch, {:action, [action]})
         end
+
         update_scene(scene, state, new_state)
 
       {:find_requested, id} ->
@@ -406,7 +443,9 @@ defmodule ScenicWidgets.TextField do
         if state.dispatch do
           GenServer.cast(state.dispatch, {:action, [action]})
         end
-        {:noreply, scene}  # Wait for buffer broadcast to update
+
+        # Wait for buffer broadcast to update
+        {:noreply, scene}
     end
   end
 
@@ -436,7 +475,10 @@ defmodule ScenicWidgets.TextField do
       {:event, {:clipboard_paste_requested, _id}, new_state} ->
         # Get text from system clipboard and paste it
         clipboard_text = paste_from_system_clipboard()
-        {:event, event_data, final_state} = Reducer.process_action(new_state, {:insert_text, clipboard_text})
+
+        {:event, event_data, final_state} =
+          Reducer.process_action(new_state, {:insert_text, clipboard_text})
+
         send_parent_event(scene, event_data)
         update_scene(scene, state, final_state)
 
@@ -479,10 +521,13 @@ defmodule ScenicWidgets.TextField do
     last_line = length(lines)
     last_col = String.length(List.last(lines) || "") + 1
 
-    state = %{scene.assigns.state |
-      lines: lines,
-      cursor: {last_line, last_col}  # Move cursor to end
+    state = %{
+      scene.assigns.state
+      | lines: lines,
+        # Move cursor to end
+        cursor: {last_line, last_col}
     }
+
     send_parent_event(scene, {:text_changed, scene.assigns.state.id, text})
     update_scene(scene, scene.assigns.state, state)
   end
@@ -534,13 +579,17 @@ defmodule ScenicWidgets.TextField do
     old_state = scene.assigns.state
 
     new_state =
-      Enum.reduce([:show_line_numbers, :wrap_mode, :tab_width, :frame, :colors, :font, :overlay_open], old_state, fn
-        key, acc ->
-          case Map.fetch(settings, key) do
-            {:ok, value} -> Map.put(acc, key, value)
-            :error -> acc
-          end
-      end)
+      Enum.reduce(
+        [:show_line_numbers, :wrap_mode, :tab_width, :frame, :colors, :font, :overlay_open],
+        old_state,
+        fn
+          key, acc ->
+            case Map.fetch(settings, key) do
+              {:ok, value} -> Map.put(acc, key, value)
+              :error -> acc
+            end
+        end
+      )
 
     # Recompute EVERY frame-derived value, in dependency order. Missing one
     # is subtle and severe: leaving the scroll's viewport dimensions stale
@@ -567,35 +616,40 @@ defmodule ScenicWidgets.TextField do
     state = scene.assigns.state
 
     # Handle cursor blink timer when editable changes
-    new_timer = if editable != state.editable do
-      if editable and state.cursor_timer == nil do
-        # Becoming editable - start blink timer
-        {:ok, timer} = :timer.send_interval(state.cursor_blink_rate, :blink)
-        timer
-      else if not editable and state.cursor_timer != nil do
-        # Becoming read-only - stop blink timer
-        :timer.cancel(state.cursor_timer)
-        nil
+    new_timer =
+      if editable != state.editable do
+        if editable and state.cursor_timer == nil do
+          # Becoming editable - start blink timer
+          {:ok, timer} = :timer.send_interval(state.cursor_blink_rate, :blink)
+          timer
+        else
+          if not editable and state.cursor_timer != nil do
+            # Becoming read-only - stop blink timer
+            :timer.cancel(state.cursor_timer)
+            nil
+          else
+            state.cursor_timer
+          end
+        end
       else
         state.cursor_timer
       end
-      end
-    else
-      state.cursor_timer
-    end
 
     # When entering edit mode, ensure cursor starts visible
-    cursor_visible = if editable and not state.editable do
-      true  # Always start with cursor visible when entering edit mode
-    else
-      state.cursor_visible
-    end
+    cursor_visible =
+      if editable and not state.editable do
+        # Always start with cursor visible when entering edit mode
+        true
+      else
+        state.cursor_visible
+      end
 
-    new_state = %{state |
-      editable: editable,
-      focused: Map.get(opts, :focused, state.focused),
-      cursor_timer: new_timer,
-      cursor_visible: cursor_visible
+    new_state = %{
+      state
+      | editable: editable,
+        focused: Map.get(opts, :focused, state.focused),
+        cursor_timer: new_timer,
+        cursor_visible: cursor_visible
     }
 
     # CRITICAL: When editable changes, update input registration
@@ -663,10 +717,11 @@ defmodule ScenicWidgets.TextField do
     # Only process if we're in store_backed mode
     if state.input_mode == :store_backed do
       # Extract cursor from buffer state
-      cursor = case buf_state.cursors do
-        [%{line: l, col: c} | _] -> {l, c}
-        _ -> state.cursor
-      end
+      cursor =
+        case buf_state.cursor do
+          %{line: l, col: c} -> {l, c}
+          _ -> state.cursor
+        end
 
       # Convert selection from buffer format %{start: ..., end: ...} to TextField format {{line, col}, {line, col}}.
       # Buffer mutators may store selection in two different map formats:
@@ -674,14 +729,21 @@ defmodule ScenicWidgets.TextField do
       #   - %{start: {l, c}, end: {l, c}}            (buffer_mutator.ex tuple format)
       # Both must be normalised to the {{line, col}, {line, col}} tuple that
       # get_selected_text/1 and delete_selection/1 expect.
-      selection = case buf_state.selection do
-        %{start: %{line: sl, col: sc}, end: %{line: el, col: ec}} ->
-          {{sl, sc}, {el, ec}}
-        %{start: {sl, sc}, end: {el, ec}} ->
-          {{sl, sc}, {el, ec}}
-        nil -> nil
-        other -> other  # Already in {{line, col}, {line, col}} tuple format
-      end
+      selection =
+        case buf_state.selection do
+          %{start: %{line: sl, col: sc}, end: %{line: el, col: ec}} ->
+            {{sl, sc}, {el, ec}}
+
+          %{start: {sl, sc}, end: {el, ec}} ->
+            {{sl, sc}, {el, ec}}
+
+          nil ->
+            nil
+
+          # Already in {{line, col}, {line, col}} tuple format
+          other ->
+            other
+        end
 
       # Get new search state
       new_search_query = Map.get(buf_state, :search_query, state.search_query)
@@ -689,22 +751,28 @@ defmodule ScenicWidgets.TextField do
       new_search_index = Map.get(buf_state, :search_current_index, state.search_current_index)
 
       # Update local state from buffer
-      new_state = %{state |
-        lines: buf_state.data,
-        cursor: cursor,
-        selection: selection,
-        search_query: new_search_query,
-        search_matches: new_search_matches,
-        search_current_index: new_search_index
+      new_state = %{
+        state
+        | lines: buf_state.data,
+          cursor: cursor,
+          selection: selection,
+          search_query: new_search_query,
+          search_matches: new_search_matches,
+          search_current_index: new_search_index
       }
+
+      pane_view = Map.get(buf_state, :pane_view, %{})
+      incoming_folds = Map.get(pane_view, :folds, MapSet.to_list(state.folds || MapSet.new()))
+      new_state = %{new_state | folds: MapSet.new(incoming_folds)}
 
       # Update scroll content size when lines change (critical for horizontal scrolling)
       # This ensures the scroll state knows the actual content dimensions
-      new_state = if state.lines != buf_state.data do
-        Reducer.update_scroll_content_size(new_state)
-      else
-        new_state
-      end
+      new_state =
+        if state.lines != buf_state.data do
+          Reducer.update_scroll_content_size(new_state)
+        else
+          new_state
+        end
 
       # A buffer SWITCH (a different document behind the stable pane source)
       # must not inherit the previous document's scroll position — the view
@@ -720,7 +788,15 @@ defmodule ScenicWidgets.TextField do
             new_state
 
           uuid ->
-            %{new_state | buffer_id: uuid, scroll: %{new_state.scroll | offset_x: 0, offset_y: 0}}
+            %{
+              new_state
+              | buffer_id: uuid,
+                scroll: %{
+                  new_state.scroll
+                  | offset_x: Map.get(pane_view, :offset_x, 0),
+                    offset_y: Map.get(pane_view, :offset_y, 0)
+                }
+            }
         end
 
       # Emit search_complete if search results changed
@@ -730,6 +806,7 @@ defmodule ScenicWidgets.TextField do
       if new_search_query != nil do
         old_count = length(old_matches)
         new_count = length(new_matches)
+
         if old_count != new_count do
           send_parent_event(scene, {:search_complete, state.id, new_search_query, new_count})
         end
@@ -747,6 +824,24 @@ defmodule ScenicWidgets.TextField do
       update_scene(scene, state, new_state)
     else
       {:noreply, scene}
+    end
+  end
+
+  defp maybe_persist_view(old_state, new_state) do
+    old_scroll = old_state.scroll
+    new_scroll = new_state.scroll
+
+    if old_state.dispatch &&
+         (old_scroll.offset_x != new_scroll.offset_x or old_scroll.offset_y != new_scroll.offset_y or
+            old_state.folds != new_state.folds) do
+      GenServer.cast(old_state.dispatch, {
+        :view_state,
+        %{
+          offset_x: new_scroll.offset_x,
+          offset_y: new_scroll.offset_y,
+          folds: MapSet.to_list(new_state.folds)
+        }
+      })
     end
   end
 
@@ -793,11 +888,14 @@ defmodule ScenicWidgets.TextField do
       {:unix, :darwin} ->
         # macOS - use Port to pipe text to pbcopy
         case System.find_executable("pbcopy") do
-          nil -> {:error, "pbcopy not found"}
+          nil ->
+            {:error, "pbcopy not found"}
+
           path ->
             port = Port.open({:spawn_executable, path}, [:binary])
             send(port, {self(), {:command, text}})
             send(port, {self(), :close})
+
             receive do
               {^port, :closed} -> :ok
             after
@@ -810,10 +908,14 @@ defmodule ScenicWidgets.TextField do
         case System.find_executable("xclip") do
           nil ->
             {:error, "xclip not found"}
+
           path ->
-            port = Port.open({:spawn_executable, path}, [:binary, args: ["-selection", "clipboard"]])
+            port =
+              Port.open({:spawn_executable, path}, [:binary, args: ["-selection", "clipboard"]])
+
             send(port, {self(), {:command, text}})
             send(port, {self(), :close})
+
             receive do
               {^port, :closed} -> :ok
             after
@@ -824,11 +926,14 @@ defmodule ScenicWidgets.TextField do
       {:win32, _} ->
         # Windows - use clip.exe
         case System.find_executable("clip") do
-          nil -> {:error, "clip not found"}
+          nil ->
+            {:error, "clip not found"}
+
           path ->
             port = Port.open({:spawn_executable, path}, [:binary])
             send(port, {self(), {:command, text}})
             send(port, {self(), :close})
+
             receive do
               {^port, :closed} -> :ok
             after
@@ -855,6 +960,7 @@ defmodule ScenicWidgets.TextField do
           nil ->
             Logger.warning("xclip not found, clipboard paste not available")
             ""
+
           _ ->
             {text, 0} = System.cmd("xclip", ["-selection", "clipboard", "-o"])
             text

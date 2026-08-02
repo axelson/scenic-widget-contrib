@@ -13,6 +13,7 @@ defmodule ScenicWidgets.TextField.Reducer do
   """
 
   alias ScenicWidgets.TextField.State
+  alias Widgex.Scroll.ScrollController
   use ScenicWidgets.ScenicEventsDefinitions
   use Widgex.Scrollable
 
@@ -39,9 +40,13 @@ defmodule ScenicWidgets.TextField.Reducer do
   # We use :codepoint for text input and :key only for non-character keys (arrows, backspace, etc.)
 
   # Debounce: Ignore codepoints that arrive immediately after focus (e.g., "k" from space+k shortcut)
-  def process_input(%State{focused: true, focus_time: focus_time} = state, {:codepoint, _} = _input)
+  def process_input(
+        %State{focused: true, focus_time: focus_time} = state,
+        {:codepoint, _} = _input
+      )
       when is_integer(focus_time) do
     now = System.monotonic_time(:millisecond)
+
     if now - focus_time < @focus_debounce_ms do
       # Input arrived too soon after focus - ignore it (likely the focus-triggering key)
       {:noop, state}
@@ -51,7 +56,8 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  def process_input(%State{focused: true} = state, {:codepoint, {char, _mods}} = input) when is_bitstring(char) do
+  def process_input(%State{focused: true} = state, {:codepoint, {char, _mods}} = input)
+      when is_bitstring(char) do
     process_input_codepoint(state, input)
   end
 
@@ -82,7 +88,11 @@ defmodule ScenicWidgets.TextField.Reducer do
   # ===== SPECIAL KEYS =====
 
   # Enter key - insert newline in multi_line mode (doesn't send codepoint event, only key event)
-  def process_input(%State{focused: true, mode: :multi_line} = state, {:key, {:key_enter, key_state, _mods}}) when key_state > 0 do
+  def process_input(
+        %State{focused: true, mode: :multi_line} = state,
+        {:key, {:key_enter, key_state, _mods}}
+      )
+      when key_state > 0 do
     # key_state > 0 matches both press (1) and repeat (2) events
     state_with_undo = State.push_undo(state)
     state_after_delete = delete_selection(state_with_undo)
@@ -91,26 +101,41 @@ defmodule ScenicWidgets.TextField.Reducer do
   end
 
   # Enter key - emit :enter_pressed event in single_line mode (for command bars, search fields, etc.)
-  def process_input(%State{focused: true, mode: :single_line} = state, {:key, {:key_enter, key_state, _mods}}) when key_state > 0 do
+  def process_input(
+        %State{focused: true, mode: :single_line} = state,
+        {:key, {:key_enter, key_state, _mods}}
+      )
+      when key_state > 0 do
     # Don't insert newline - emit event for parent to handle
     {:event, {:enter_pressed, state.id, State.get_text(state)}, state}
   end
 
   # Escape key - emit :escape_pressed event for parent to handle (close dialogs, etc.)
   # Note: Scenic uses :key_esc not :key_escape
-  def process_input(%State{focused: true} = state, {:key, {:key_esc, key_state, _mods}}) when key_state > 0 do
+  def process_input(%State{focused: true} = state, {:key, {:key_esc, key_state, _mods}})
+      when key_state > 0 do
+    {:event, {:escape_pressed, state.id}, state}
+  end
+
+  def process_input(%State{focused: true} = state, {:key, {:key_escape, key_state, _mods}})
+      when key_state > 0 do
     {:event, {:escape_pressed, state.id}, state}
   end
 
   # Backspace - delete selection or character before cursor
   # key_state > 0 matches both press (1) and repeat (2) for key-hold functionality
-  def process_input(%State{focused: true, selection: selection} = state, {:key, {:key_backspace, key_state, _mods}}) when selection != nil and key_state > 0 do
+  def process_input(
+        %State{focused: true, selection: selection} = state,
+        {:key, {:key_backspace, key_state, _mods}}
+      )
+      when selection != nil and key_state > 0 do
     state_with_undo = State.push_undo(state)
     new_state = delete_selection(state_with_undo)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
 
-  def process_input(%State{focused: true} = state, {:key, {:key_backspace, key_state, _mods}}) when key_state > 0 do
+  def process_input(%State{focused: true} = state, {:key, {:key_backspace, key_state, _mods}})
+      when key_state > 0 do
     state_with_undo = State.push_undo(state)
     new_state = delete_before_cursor(state_with_undo)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
@@ -118,13 +143,18 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # Delete - delete selection or character at cursor
   # key_state > 0 matches both press (1) and repeat (2) for key-hold functionality
-  def process_input(%State{focused: true, selection: selection} = state, {:key, {:key_delete, key_state, _mods}}) when selection != nil and key_state > 0 do
+  def process_input(
+        %State{focused: true, selection: selection} = state,
+        {:key, {:key_delete, key_state, _mods}}
+      )
+      when selection != nil and key_state > 0 do
     state_with_undo = State.push_undo(state)
     new_state = delete_selection(state_with_undo)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
 
-  def process_input(%State{focused: true} = state, {:key, {:key_delete, key_state, _mods}}) when key_state > 0 do
+  def process_input(%State{focused: true} = state, {:key, {:key_delete, key_state, _mods}})
+      when key_state > 0 do
     state_with_undo = State.push_undo(state)
     new_state = delete_at_cursor(state_with_undo)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
@@ -132,7 +162,8 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # Arrow keys with Shift - text selection
   # key_state > 0 matches both press (1) and repeat (2) for key-hold functionality
-  def process_input(%State{focused: true} = state, {:key, {:key_left, key_state, mods}}) when key_state > 0 do
+  def process_input(%State{focused: true} = state, {:key, {:key_left, key_state, mods}})
+      when key_state > 0 do
     if :shift in mods do
       {:noop, move_cursor_with_selection(state, :left)}
     else
@@ -140,7 +171,8 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  def process_input(%State{focused: true} = state, {:key, {:key_right, key_state, mods}}) when key_state > 0 do
+  def process_input(%State{focused: true} = state, {:key, {:key_right, key_state, mods}})
+      when key_state > 0 do
     if :shift in mods do
       {:noop, move_cursor_with_selection(state, :right)}
     else
@@ -148,7 +180,8 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  def process_input(%State{focused: true} = state, {:key, {:key_up, key_state, mods}}) when key_state > 0 do
+  def process_input(%State{focused: true} = state, {:key, {:key_up, key_state, mods}})
+      when key_state > 0 do
     if :shift in mods do
       {:noop, move_cursor_with_selection(state, :up)}
     else
@@ -156,7 +189,8 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  def process_input(%State{focused: true} = state, {:key, {:key_down, key_state, mods}}) when key_state > 0 do
+  def process_input(%State{focused: true} = state, {:key, {:key_down, key_state, mods}})
+      when key_state > 0 do
     if :shift in mods do
       new_state = move_cursor_with_selection(state, :down)
       {:noop, new_state}
@@ -242,34 +276,20 @@ defmodule ScenicWidgets.TextField.Reducer do
   end
 
   # Ctrl+G - Go to next match (if searching)
-  def process_input(%State{focused: true, search_matches: matches, search_current_index: idx} = state, @ctrl_g)
+  def process_input(
+        %State{focused: true, search_matches: matches, search_current_index: idx} = state,
+        @ctrl_g
+      )
       when length(matches) > 0 do
     # Cycle to next match
     next_idx = rem(idx + 1, length(matches))
     {line, col, _text} = Enum.at(matches, next_idx)
-    new_state = %{state | search_current_index: next_idx, cursor: {line, col}}
+
+    new_state =
+      %{state | search_current_index: next_idx, cursor: {line, col}}
       |> State.ensure_cursor_visible()
+
     {:event, {:search_navigated, state.id, next_idx, length(matches)}, new_state}
-  end
-
-  # Ctrl+U - Undo
-  def process_input(%State{focused: true} = state, @ctrl_u) do
-    case State.undo(state) do
-      {:ok, new_state} ->
-        {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
-      {:noop, state} ->
-        {:noop, state}
-    end
-  end
-
-  # Ctrl+R - Redo
-  def process_input(%State{focused: true} = state, @ctrl_r) do
-    case State.redo(state) do
-      {:ok, new_state} ->
-        {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
-      {:noop, state} ->
-        {:noop, state}
-    end
   end
 
   # ===== SHIFT KEY TRACKING (for Shift+scroll horizontal scrolling) =====
@@ -320,38 +340,56 @@ defmodule ScenicWidgets.TextField.Reducer do
   # ===== SCROLLBAR DRAG =====
 
   # Mouse button release - end scrollbar drag
-  def process_input(%State{scrollbar_drag: drag} = state, {:cursor_button, {:btn_left, 0, _, _pos}}) when drag != nil do
+  def process_input(
+        %State{scrollbar_drag: drag} = state,
+        {:cursor_button, {:btn_left, 0, _, _pos}}
+      )
+      when drag != nil do
     {:noop, %{state | scrollbar_drag: nil, scrollbar_drag_start: nil, scrollbar_drag_offset: nil}}
   end
 
   # Mouse move during scrollbar drag
-  def process_input(%State{scrollbar_drag: :x, scrollbar_drag_start: {start_x, _}, scrollbar_drag_offset: start_offset, scroll: scroll} = state, {:cursor_pos, {x, _y}}) do
+  def process_input(
+        %State{
+          scrollbar_drag: :x,
+          scrollbar_drag_start: {start_x, _},
+          scrollbar_drag_offset: start_offset,
+          scroll: scroll
+        } = state,
+        {:cursor_pos, {x, _y}}
+      ) do
     # Calculate how far we've dragged in pixels
     drag_delta = x - start_x
 
     # Convert to scroll offset based on track/content ratio
-    {_track_start, track_length, content_size, viewport_size} = State.scrollbar_track_info(state, :x)
-    max_offset = content_size - viewport_size
+    {_track_start, track_length, content_size, viewport_size} =
+      State.scrollbar_track_info(state, :x)
 
-    # The ratio of track movement to content movement
-    # When thumb moves full track length, content scrolls full max_offset
-    scroll_delta = (drag_delta / track_length) * max_offset
+    new_offset_x =
+      drag_offset(start_offset, drag_delta, track_length, content_size, viewport_size)
 
-    new_offset_x = max(0, min(max_offset, start_offset + scroll_delta))
     new_scroll = %{scroll | offset_x: new_offset_x}
 
     {:noop, %{state | scroll: new_scroll}}
   end
 
-  def process_input(%State{scrollbar_drag: :y, scrollbar_drag_start: {_, start_y}, scrollbar_drag_offset: start_offset, scroll: scroll} = state, {:cursor_pos, {_x, y}}) do
+  def process_input(
+        %State{
+          scrollbar_drag: :y,
+          scrollbar_drag_start: {_, start_y},
+          scrollbar_drag_offset: start_offset,
+          scroll: scroll
+        } = state,
+        {:cursor_pos, {_x, y}}
+      ) do
     drag_delta = y - start_y
 
-    {_track_start, track_length, content_size, viewport_size} = State.scrollbar_track_info(state, :y)
-    max_offset = content_size - viewport_size
+    {_track_start, track_length, content_size, viewport_size} =
+      State.scrollbar_track_info(state, :y)
 
-    scroll_delta = (drag_delta / track_length) * max_offset
+    new_offset_y =
+      drag_offset(start_offset, drag_delta, track_length, content_size, viewport_size)
 
-    new_offset_y = max(0, min(max_offset, start_offset + scroll_delta))
     new_scroll = %{scroll | offset_y: new_offset_y}
 
     {:noop, %{state | scroll: new_scroll}}
@@ -364,19 +402,23 @@ defmodule ScenicWidgets.TextField.Reducer do
     case State.scrollbar_hit_test(state, pos) do
       :x ->
         # Start horizontal scrollbar drag
-        {:noop, %{state |
-          scrollbar_drag: :x,
-          scrollbar_drag_start: pos,
-          scrollbar_drag_offset: state.scroll.offset_x
-        }}
+        {:noop,
+         %{
+           state
+           | scrollbar_drag: :x,
+             scrollbar_drag_start: pos,
+             scrollbar_drag_offset: state.scroll.offset_x
+         }}
 
       :y ->
         # Start vertical scrollbar drag
-        {:noop, %{state |
-          scrollbar_drag: :y,
-          scrollbar_drag_start: pos,
-          scrollbar_drag_offset: state.scroll.offset_y
-        }}
+        {:noop,
+         %{
+           state
+           | scrollbar_drag: :y,
+             scrollbar_drag_start: pos,
+             scrollbar_drag_offset: state.scroll.offset_y
+         }}
 
       nil ->
         # Not on scrollbar - handle focus
@@ -390,12 +432,15 @@ defmodule ScenicWidgets.TextField.Reducer do
     if inside and state.editable do
       # Click to focus AND position cursor at click location
       {line, col} = State.click_to_cursor(state, pos)
-      new_state = %{state |
-        focused: true,
-        focus_time: System.monotonic_time(:millisecond),
-        cursor: {line, col},
-        selection: nil
+
+      new_state = %{
+        state
+        | focused: true,
+          focus_time: System.monotonic_time(:millisecond),
+          cursor: {line, col},
+          selection: nil
       }
+
       {:event, {:focus_gained, state.id}, new_state}
     else
       {:noop, state}
@@ -445,6 +490,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     case State.undo(state) do
       {:ok, new_state} ->
         {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+
       {:noop, state} ->
         {:noop, state}
     end
@@ -455,52 +501,78 @@ defmodule ScenicWidgets.TextField.Reducer do
     case State.redo(state) do
       {:ok, new_state} ->
         {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+
       {:noop, state} ->
         {:noop, state}
     end
   end
 
+  def process_action(%State{} = state, {:toggle_fold, line}) when is_integer(line) do
+    folds = ScenicWidgets.TextField.Folding.toggle(state.lines, state.folds, line)
+    {:event, {:folds_changed, state.id, MapSet.to_list(folds)}, %{state | folds: folds}}
+  end
+
+  def process_action(%State{} = state, :unfold_all) do
+    folds = ScenicWidgets.TextField.Folding.unfold_all()
+    {:event, {:folds_changed, state.id, []}, %{state | folds: folds}}
+  end
+
+  def process_action(%State{} = state, {:fold_to_level, level}) when level in 1..4 do
+    folds = ScenicWidgets.TextField.Folding.fold_to_level(state.lines, level)
+    {:event, {:folds_changed, state.id, MapSet.to_list(folds)}, %{state | folds: folds}}
+  end
+
   # Perform search across all lines
-  def process_action(%State{lines: lines} = state, {:search, query}) when is_binary(query) and query != "" do
+  def process_action(%State{lines: lines} = state, {:search, query})
+      when is_binary(query) and query != "" do
     # Simple search - find all occurrences of query in lines
     matches = find_all_matches(lines, query)
     match_count = length(matches)
 
-    new_state = %{state |
-      search_query: query,
-      search_matches: matches,
-      search_current_index: 0
-    }
+    new_state = %{state | search_query: query, search_matches: matches, search_current_index: 0}
 
     # Jump to first match if any
-    new_state = if match_count > 0 do
-      {line, col, _text} = hd(matches)
-      %{new_state | cursor: {line, col}}
-      |> State.ensure_cursor_visible()
-    else
-      new_state
-    end
+    new_state =
+      if match_count > 0 do
+        {line, col, _text} = hd(matches)
+
+        %{
+          new_state
+          | cursor: {line, col},
+            folds: ScenicWidgets.TextField.Folding.expand_to_line(state.lines, state.folds, line)
+        }
+        |> State.ensure_cursor_visible()
+      else
+        new_state
+      end
 
     {:event, {:search_complete, state.id, query, match_count}, new_state}
   end
 
   # Clear search state
   def process_action(state, :clear_search) do
-    new_state = %{state |
-      search_query: nil,
-      search_matches: [],
-      search_current_index: 0
-    }
+    new_state = %{state | search_query: nil, search_matches: [], search_current_index: 0}
     {:event, {:search_cleared, state.id}, new_state}
   end
 
   # Navigate to next search match
-  def process_action(%State{search_matches: matches, search_current_index: idx} = state, :find_next)
+  def process_action(
+        %State{search_matches: matches, search_current_index: idx} = state,
+        :find_next
+      )
       when length(matches) > 0 do
     next_idx = rem(idx + 1, length(matches))
     {line, col, _text} = Enum.at(matches, next_idx)
-    new_state = %{state | search_current_index: next_idx, cursor: {line, col}}
+
+    new_state =
+      %{
+        state
+        | search_current_index: next_idx,
+          cursor: {line, col},
+          folds: ScenicWidgets.TextField.Folding.expand_to_line(state.lines, state.folds, line)
+      }
       |> State.ensure_cursor_visible()
+
     {:event, {:search_navigated, state.id, next_idx, length(matches)}, new_state}
   end
 
@@ -510,12 +582,23 @@ defmodule ScenicWidgets.TextField.Reducer do
   end
 
   # Navigate to previous search match
-  def process_action(%State{search_matches: matches, search_current_index: idx} = state, :find_prev)
+  def process_action(
+        %State{search_matches: matches, search_current_index: idx} = state,
+        :find_prev
+      )
       when length(matches) > 0 do
     prev_idx = if idx == 0, do: length(matches) - 1, else: idx - 1
     {line, col, _text} = Enum.at(matches, prev_idx)
-    new_state = %{state | search_current_index: prev_idx, cursor: {line, col}}
+
+    new_state =
+      %{
+        state
+        | search_current_index: prev_idx,
+          cursor: {line, col},
+          folds: ScenicWidgets.TextField.Folding.expand_to_line(state.lines, state.folds, line)
+      }
       |> State.ensure_cursor_visible()
+
     {:event, {:search_navigated, state.id, prev_idx, length(matches)}, new_state}
   end
 
@@ -543,49 +626,67 @@ defmodule ScenicWidgets.TextField.Reducer do
   - {:local_update, new_state} - Local-only update (focus, scrollbar drag)
   - action - Buffer action tuple/atom to send to Buffer.Process
   """
-  def input_to_buffer_action(%State{focused: true} = state, {:codepoint, {char, _mods}}) when is_bitstring(char) do
+  # Command-modified key presses are also reported by GLFW as codepoints. They
+  # belong to the shortcut owner and must never become document text.
+  def input_to_buffer_action(%State{focused: true}, {:codepoint, {_char, mods}})
+      when is_list(mods) and mods != [] do
+    :ignore
+  end
+
+  def input_to_buffer_action(%State{focused: true} = state, {:codepoint, {char, _mods}})
+      when is_bitstring(char) do
     # Insert character at cursor
     {:insert, char, :at_cursor}
   end
 
   # Enter key - insert newline
-  def input_to_buffer_action(%State{focused: true, mode: :multi_line}, {:key, {:key_enter, key_state, _mods}}) when key_state > 0 do
+  def input_to_buffer_action(
+        %State{focused: true, mode: :multi_line},
+        {:key, {:key_enter, key_state, _mods}}
+      )
+      when key_state > 0 do
     {:newline, :at_cursor}
   end
 
   # Tab key - insert tab character
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_tab, key_state, _mods}}) when key_state > 0 do
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_tab, key_state, _mods}})
+      when key_state > 0 do
     {:insert, "\t", :at_cursor}
   end
 
   # Backspace
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_backspace, key_state, _mods}}) when key_state > 0 do
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_backspace, key_state, _mods}})
+      when key_state > 0 do
     {:delete, :before_cursor}
   end
 
   # Delete
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_delete, key_state, _mods}}) when key_state > 0 do
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_delete, key_state, _mods}})
+      when key_state > 0 do
     {:delete, :at_cursor}
   end
 
   # Arrow keys - cursor movement
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_left, key_state, mods}}) when key_state > 0 do
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_left, key_state, mods}})
+      when key_state > 0 do
     cond do
-      :ctrl in mods  -> {:move_cursor, :prev_word}
+      :ctrl in mods -> {:move_cursor, :prev_word}
       :shift in mods -> {:select_text, :left, 1}
-      true           -> {:move_cursor, :left, 1}
+      true -> {:move_cursor, :left, 1}
     end
   end
 
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_right, key_state, mods}}) when key_state > 0 do
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_right, key_state, mods}})
+      when key_state > 0 do
     cond do
-      :ctrl in mods  -> {:move_cursor, :next_word}
+      :ctrl in mods -> {:move_cursor, :next_word}
       :shift in mods -> {:select_text, :right, 1}
-      true           -> {:move_cursor, :right, 1}
+      true -> {:move_cursor, :right, 1}
     end
   end
 
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_up, key_state, mods}}) when key_state > 0 do
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_up, key_state, mods}})
+      when key_state > 0 do
     if :shift in mods do
       {:select_text, :up, 1}
     else
@@ -593,7 +694,8 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_down, key_state, mods}}) when key_state > 0 do
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_down, key_state, mods}})
+      when key_state > 0 do
     if :shift in mods do
       {:select_text, :down, 1}
     else
@@ -602,11 +704,13 @@ defmodule ScenicWidgets.TextField.Reducer do
   end
 
   # Home/End keys
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_home, key_state, _mods}}) when key_state > 0 do
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_home, key_state, _mods}})
+      when key_state > 0 do
     {:move_cursor, :line_start}
   end
 
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_end, key_state, _mods}}) when key_state > 0 do
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_end, key_state, _mods}})
+      when key_state > 0 do
     {:move_cursor, :line_end}
   end
 
@@ -635,13 +739,13 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:clipboard_paste}
   end
 
-  # Ctrl+U - Undo
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_u, 1, [:ctrl]}}) do
+  # Canonical undo/redo bindings.
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_z, 1, [:ctrl]}}) do
     :undo
   end
 
-  # Ctrl+R - Redo
-  def input_to_buffer_action(%State{focused: true}, {:key, {:key_r, 1, [:ctrl]}}) do
+  def input_to_buffer_action(%State{focused: true}, {:key, {:key_z, 1, mods}})
+      when mods in [[:ctrl, :shift], [:shift, :ctrl]] do
     :redo
   end
 
@@ -663,31 +767,56 @@ defmodule ScenicWidgets.TextField.Reducer do
   # ===== SCROLLBAR DRAG (store_backed mode) =====
 
   # Mouse button release - end scrollbar drag
-  def input_to_buffer_action(%State{scrollbar_drag: drag} = state, {:cursor_button, {:btn_left, 0, _, _pos}}) when drag != nil do
-    {:local_update, %{state | scrollbar_drag: nil, scrollbar_drag_start: nil, scrollbar_drag_offset: nil}}
+  def input_to_buffer_action(
+        %State{scrollbar_drag: drag} = state,
+        {:cursor_button, {:btn_left, 0, _, _pos}}
+      )
+      when drag != nil do
+    {:local_update,
+     %{state | scrollbar_drag: nil, scrollbar_drag_start: nil, scrollbar_drag_offset: nil}}
   end
 
   # Mouse move during horizontal scrollbar drag
-  def input_to_buffer_action(%State{scrollbar_drag: :x, scrollbar_drag_start: {start_x, _}, scrollbar_drag_offset: start_offset, scroll: scroll} = state, {:cursor_pos, {x, _y}}) do
+  def input_to_buffer_action(
+        %State{
+          scrollbar_drag: :x,
+          scrollbar_drag_start: {start_x, _},
+          scrollbar_drag_offset: start_offset,
+          scroll: scroll
+        } = state,
+        {:cursor_pos, {x, _y}}
+      ) do
     drag_delta = x - start_x
-    {_track_start, track_length, content_size, viewport_size} = State.scrollbar_track_info(state, :x)
-    max_offset = content_size - viewport_size
 
-    scroll_delta = (drag_delta / track_length) * max_offset
-    new_offset_x = max(0, min(max_offset, start_offset + scroll_delta))
+    {_track_start, track_length, content_size, viewport_size} =
+      State.scrollbar_track_info(state, :x)
+
+    new_offset_x =
+      drag_offset(start_offset, drag_delta, track_length, content_size, viewport_size)
+
     new_scroll = %{scroll | offset_x: new_offset_x}
 
     {:local_update, %{state | scroll: new_scroll}}
   end
 
   # Mouse move during vertical scrollbar drag
-  def input_to_buffer_action(%State{scrollbar_drag: :y, scrollbar_drag_start: {_, start_y}, scrollbar_drag_offset: start_offset, scroll: scroll} = state, {:cursor_pos, {_x, y}}) do
+  def input_to_buffer_action(
+        %State{
+          scrollbar_drag: :y,
+          scrollbar_drag_start: {_, start_y},
+          scrollbar_drag_offset: start_offset,
+          scroll: scroll
+        } = state,
+        {:cursor_pos, {_x, y}}
+      ) do
     drag_delta = y - start_y
-    {_track_start, track_length, content_size, viewport_size} = State.scrollbar_track_info(state, :y)
-    max_offset = content_size - viewport_size
 
-    scroll_delta = (drag_delta / track_length) * max_offset
-    new_offset_y = max(0, min(max_offset, start_offset + scroll_delta))
+    {_track_start, track_length, content_size, viewport_size} =
+      State.scrollbar_track_info(state, :y)
+
+    new_offset_y =
+      drag_offset(start_offset, drag_delta, track_length, content_size, viewport_size)
+
     new_scroll = %{scroll | offset_y: new_offset_y}
 
     {:local_update, %{state | scroll: new_scroll}}
@@ -700,19 +829,23 @@ defmodule ScenicWidgets.TextField.Reducer do
     case hit_result do
       :x ->
         # Start horizontal scrollbar drag
-        {:local_update, %{state |
-          scrollbar_drag: :x,
-          scrollbar_drag_start: coords,
-          scrollbar_drag_offset: state.scroll.offset_x
-        }}
+        {:local_update,
+         %{
+           state
+           | scrollbar_drag: :x,
+             scrollbar_drag_start: coords,
+             scrollbar_drag_offset: state.scroll.offset_x
+         }}
 
       :y ->
         # Start vertical scrollbar drag
-        {:local_update, %{state |
-          scrollbar_drag: :y,
-          scrollbar_drag_start: coords,
-          scrollbar_drag_offset: state.scroll.offset_y
-        }}
+        {:local_update,
+         %{
+           state
+           | scrollbar_drag: :y,
+             scrollbar_drag_start: coords,
+             scrollbar_drag_offset: state.scroll.offset_y
+         }}
 
       nil ->
         # Not on scrollbar - handle focus, cursor positioning, double-click, and text drag.
@@ -730,12 +863,14 @@ defmodule ScenicWidgets.TextField.Reducer do
           now = System.monotonic_time(:millisecond)
 
           # Check for double-click
-          is_double_click = case {state.last_click_time, state.last_click_pos} do
-            {last_time, last_pos} when is_integer(last_time) and last_pos == click_pos ->
-              now - last_time < @double_click_ms
-            _ ->
-              false
-          end
+          is_double_click =
+            case {state.last_click_time, state.last_click_pos} do
+              {last_time, last_pos} when is_integer(last_time) and last_pos == click_pos ->
+                now - last_time < @double_click_ms
+
+              _ ->
+                false
+            end
 
           if is_double_click do
             # Double-click: select word at click position
@@ -744,35 +879,42 @@ defmodule ScenicWidgets.TextField.Reducer do
                 # Select the word - start at word start, end at word end
                 start_pos = {line, start_col}
                 end_pos = {line, end_col}
-                new_state = %{state |
-                  focused: true,
-                  text_drag: nil,
-                  text_drag_start: nil,
-                  last_click_time: nil,
-                  last_click_pos: nil
+
+                new_state = %{
+                  state
+                  | focused: true,
+                    text_drag: nil,
+                    text_drag_start: nil,
+                    last_click_time: nil,
+                    last_click_pos: nil
                 }
+
                 {:double_click_select, new_state, {:select_range, start_pos, end_pos}}
 
               nil ->
                 # No word at position - just move cursor (treat as single click)
-                new_state = %{state |
-                  focused: true,
-                  text_drag: true,
-                  text_drag_start: click_pos,
-                  last_click_time: now,
-                  last_click_pos: click_pos
+                new_state = %{
+                  state
+                  | focused: true,
+                    text_drag: true,
+                    text_drag_start: click_pos,
+                    last_click_time: now,
+                    last_click_pos: click_pos
                 }
+
                 {:click_move_cursor, new_state, {:set_cursor, click_pos}}
             end
           else
             # Single click: focus, start text drag for potential selection, and move cursor
-            new_state = %{state |
-              focused: true,
-              text_drag: true,
-              text_drag_start: click_pos,
-              last_click_time: now,
-              last_click_pos: click_pos
+            new_state = %{
+              state
+              | focused: true,
+                text_drag: true,
+                text_drag_start: click_pos,
+                last_click_time: now,
+                last_click_pos: click_pos
             }
+
             # Use :set_cursor for absolute positioning (not :move_cursor which is for relative movement)
             {:click_move_cursor, new_state, {:set_cursor, click_pos}}
           end
@@ -783,12 +925,19 @@ defmodule ScenicWidgets.TextField.Reducer do
   end
 
   # Mouse button release - end text drag
-  def input_to_buffer_action(%State{text_drag: true} = state, {:cursor_button, {:btn_left, 0, _, _pos}}) do
+  def input_to_buffer_action(
+        %State{text_drag: true} = state,
+        {:cursor_button, {:btn_left, 0, _, _pos}}
+      ) do
     {:local_update, %{state | text_drag: nil, text_drag_start: nil}}
   end
 
   # Mouse move during text drag - update selection
-  def input_to_buffer_action(%State{text_drag: true, text_drag_start: start_pos} = state, {:cursor_pos, coords}) when start_pos != nil do
+  def input_to_buffer_action(
+        %State{text_drag: true, text_drag_start: start_pos} = state,
+        {:cursor_pos, coords}
+      )
+      when start_pos != nil do
     # Convert current position to line/col
     {line, col} = State.click_to_cursor(state, coords)
     current_pos = {line, col}
@@ -864,11 +1013,17 @@ defmodule ScenicWidgets.TextField.Reducer do
   # the clicks it was meant to suppress fall through to the document
   # (observed: menu clicks moving the cursor). Quillex passes `true` for that
   # reason; converting IconMenu's bounds into pane space is unfinished work.
-  defp store_backed_overlay_click?(%State{overlay_open: %{x: x0, y: y0, width: w, height: h}}, {x, y}) do
+  defp store_backed_overlay_click?(
+         %State{overlay_open: %{x: x0, y: y0, width: w, height: h}},
+         {x, y}
+       ) do
     x >= x0 and x <= x0 + w and y >= y0 and y <= y0 + h
   end
 
   defp store_backed_overlay_click?(%State{overlay_open: true}, _coords), do: true
+
+  defp store_backed_overlay_click?(%State{input_mode: :store_backed} = state, coords),
+    do: _legacy_overlay_click?(state, coords)
 
   defp store_backed_overlay_click?(%State{}, _coords), do: false
 
@@ -914,7 +1069,8 @@ defmodule ScenicWidgets.TextField.Reducer do
     query_len = String.length(query)
 
     lines
-    |> Enum.with_index(1)  # 1-based line numbers
+    # 1-based line numbers
+    |> Enum.with_index(1)
     |> Enum.flat_map(fn {line, line_num} ->
       find_matches_in_line(line, query, query_len, line_num, 1, [])
     end)
@@ -939,8 +1095,9 @@ defmodule ScenicWidgets.TextField.Reducer do
         remainder = binary_part(line, remainder_start, byte_size(line) - remainder_start)
         new_col = grapheme_col + query_len
 
-        find_matches_in_line(remainder, query, query_len, line_num, new_col,
-          [{line_num, grapheme_col, matched_text} | acc])
+        find_matches_in_line(remainder, query, query_len, line_num, new_col, [
+          {line_num, grapheme_col, matched_text} | acc
+        ])
     end
   end
 
@@ -961,13 +1118,20 @@ defmodule ScenicWidgets.TextField.Reducer do
       |> List.replace_at(line_num - 1, before)
       |> List.insert_at(line_num, after_cursor)
 
-    new_state = %{state | lines: new_lines, cursor: {line_num + 1, 1}}
+    new_state = %{
+      state
+      | lines: new_lines,
+        cursor: {line_num + 1, 1},
+        folds: reconcile_folds(state, new_lines)
+    }
+
     new_state
     |> update_scroll_content_size()
     |> State.ensure_cursor_visible()
   end
 
-  defp insert_char(%State{lines: lines, cursor: {line_num, col}} = state, char) when is_binary(char) do
+  defp insert_char(%State{lines: lines, cursor: {line_num, col}} = state, char)
+       when is_binary(char) do
     current_line = Enum.at(lines, line_num - 1, "")
     {before, after_cursor} = String.split_at(current_line, col - 1)
     new_line = before <> char <> after_cursor
@@ -975,6 +1139,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     new_lines = List.replace_at(lines, line_num - 1, new_line)
 
     new_state = %{state | lines: new_lines, cursor: {line_num, col + 1}}
+
     new_state
     |> update_scroll_content_size()
     |> State.ensure_cursor_visible()
@@ -1001,7 +1166,13 @@ defmodule ScenicWidgets.TextField.Reducer do
         |> List.delete_at(line_num - 1)
 
       new_col = String.length(prev_line) + 1
-      %{state | lines: new_lines, cursor: {line_num - 1, new_col}}
+
+      %{
+        state
+        | lines: new_lines,
+          cursor: {line_num - 1, new_col},
+          folds: reconcile_folds(state, new_lines)
+      }
       |> update_scroll_content_size()
     else
       state
@@ -1038,7 +1209,7 @@ defmodule ScenicWidgets.TextField.Reducer do
           |> List.replace_at(line_num - 1, new_line)
           |> List.delete_at(line_num)
 
-        %{state | lines: new_lines}
+        %{state | lines: new_lines, folds: reconcile_folds(state, new_lines)}
         |> update_scroll_content_size()
       else
         state
@@ -1050,6 +1221,7 @@ defmodule ScenicWidgets.TextField.Reducer do
       new_line = before <> new_after
 
       new_lines = List.replace_at(lines, line_num - 1, new_line)
+
       %{state | lines: new_lines}
       |> update_scroll_content_size()
     end
@@ -1060,17 +1232,18 @@ defmodule ScenicWidgets.TextField.Reducer do
   Automatically ensures cursor remains visible after movement.
   """
   defp move_cursor(%State{cursor: {line, col}, lines: lines} = state, :left) do
-    new_state = if col > 1 do
-      %{state | cursor: {line, col - 1}}
-    else
-      # At start of line - move to end of previous line
-      if line > 1 do
-        prev_line = Enum.at(lines, line - 2)
-        %{state | cursor: {line - 1, String.length(prev_line) + 1}}
+    new_state =
+      if col > 1 do
+        %{state | cursor: {line, col - 1}}
       else
-        state
+        # At start of line - move to end of previous line
+        if line > 1 do
+          prev_line = Enum.at(lines, line - 2)
+          %{state | cursor: {line - 1, String.length(prev_line) + 1}}
+        else
+          state
+        end
       end
-    end
 
     State.ensure_cursor_visible(new_state)
   end
@@ -1078,40 +1251,43 @@ defmodule ScenicWidgets.TextField.Reducer do
   defp move_cursor(%State{cursor: {line, col}, lines: lines} = state, :right) do
     current_line = Enum.at(lines, line - 1, "")
 
-    new_state = if col <= String.length(current_line) do
-      %{state | cursor: {line, col + 1}}
-    else
-      # At end of line - move to start of next line
-      if line < length(lines) do
-        %{state | cursor: {line + 1, 1}}
+    new_state =
+      if col <= String.length(current_line) do
+        %{state | cursor: {line, col + 1}}
       else
-        state
+        # At end of line - move to start of next line
+        if line < length(lines) do
+          %{state | cursor: {line + 1, 1}}
+        else
+          state
+        end
       end
-    end
 
     State.ensure_cursor_visible(new_state)
   end
 
   defp move_cursor(%State{cursor: {line, col}, lines: lines} = state, :up) do
-    new_state = if line > 1 do
-      prev_line = Enum.at(lines, line - 2)
-      new_col = min(col, String.length(prev_line) + 1)
-      %{state | cursor: {line - 1, new_col}}
-    else
-      state
-    end
+    new_state =
+      if line > 1 do
+        prev_line = Enum.at(lines, line - 2)
+        new_col = min(col, String.length(prev_line) + 1)
+        %{state | cursor: {line - 1, new_col}}
+      else
+        state
+      end
 
     State.ensure_cursor_visible(new_state)
   end
 
   defp move_cursor(%State{cursor: {line, col}, lines: lines} = state, :down) do
-    new_state = if line < length(lines) do
-      next_line = Enum.at(lines, line)
-      new_col = min(col, String.length(next_line) + 1)
-      %{state | cursor: {line + 1, new_col}}
-    else
-      state
-    end
+    new_state =
+      if line < length(lines) do
+        next_line = Enum.at(lines, line)
+        new_col = min(col, String.length(next_line) + 1)
+        %{state | cursor: {line + 1, new_col}}
+      else
+        state
+      end
 
     State.ensure_cursor_visible(new_state)
   end
@@ -1160,10 +1336,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     last_line = Enum.at(lines, last_line_num - 1, "")
     last_col = String.length(last_line) + 1
 
-    %{state |
-      selection: {{1, 1}, {last_line_num, last_col}},
-      cursor: {last_line_num, last_col}
-    }
+    %{state | selection: {{1, 1}, {last_line_num, last_col}}, cursor: {last_line_num, last_col}}
   end
 
   @doc """
@@ -1191,7 +1364,14 @@ defmodule ScenicWidgets.TextField.Reducer do
         new_line = before <> after_sel
 
         new_lines = List.replace_at(state.lines, start_line - 1, new_line)
-        %{state | lines: new_lines, cursor: start_pos, selection: nil}
+
+        %{
+          state
+          | lines: new_lines,
+            cursor: start_pos,
+            selection: nil,
+            folds: reconcile_folds(state, new_lines)
+        }
 
       # Multi-line selection
       true ->
@@ -1212,7 +1392,13 @@ defmodule ScenicWidgets.TextField.Reducer do
             if idx == start_line, do: merged_line, else: line
           end)
 
-        %{state | lines: new_lines, cursor: start_pos, selection: nil}
+        %{
+          state
+          | lines: new_lines,
+            cursor: start_pos,
+            selection: nil,
+            folds: reconcile_folds(state, new_lines)
+        }
     end
   end
 
@@ -1257,8 +1443,10 @@ defmodule ScenicWidgets.TextField.Reducer do
           cond do
             idx == start_line ->
               String.slice(line, start_col - 1, String.length(line))
+
             idx == end_line ->
               String.slice(line, 0, end_col - 1)
+
             true ->
               line
           end
@@ -1273,7 +1461,8 @@ defmodule ScenicWidgets.TextField.Reducer do
   efficiently in a single operation.
   Returns the final cursor position after all text is inserted.
   """
-  defp insert_text_at_cursor(%State{lines: lines, cursor: {line, col}} = state, text) when is_binary(text) do
+  defp insert_text_at_cursor(%State{lines: lines, cursor: {line, col}} = state, text)
+       when is_binary(text) do
     paste_lines = String.split(text, "\n")
 
     case paste_lines do
@@ -1285,7 +1474,13 @@ defmodule ScenicWidgets.TextField.Reducer do
         new_lines = List.replace_at(lines, line - 1, updated_line)
         final_col = col + String.length(single_line)
 
-        new_state = %{state | lines: new_lines, cursor: {line, final_col}}
+        new_state = %{
+          state
+          | lines: new_lines,
+            cursor: {line, final_col},
+            folds: reconcile_folds(state, new_lines)
+        }
+
         State.ensure_cursor_visible(new_state)
 
       # Multiple lines - efficient batch insertion
@@ -1305,13 +1500,20 @@ defmodule ScenicWidgets.TextField.Reducer do
         [_current | remaining_after] = after_lines
 
         # Combine all parts
-        new_lines = before_lines ++ [first_updated] ++ middle_lines ++ [last_updated] ++ remaining_after
+        new_lines =
+          before_lines ++ [first_updated] ++ middle_lines ++ [last_updated] ++ remaining_after
 
         # Calculate final cursor position
         final_line = line + length(paste_lines) - 1
         final_col = String.length(last_line) + 1
 
-        new_state = %{state | lines: new_lines, cursor: {final_line, final_col}}
+        new_state = %{
+          state
+          | lines: new_lines,
+            cursor: {final_line, final_col},
+            folds: reconcile_folds(state, new_lines)
+        }
+
         State.ensure_cursor_visible(new_state)
     end
   end
@@ -1352,40 +1554,67 @@ defmodule ScenicWidgets.TextField.Reducer do
   Update scroll content size based on current wrapped line count and max line width.
   Should be called after text changes that affect line count or line length.
   """
-  def update_scroll_content_size(%State{lines: lines, scroll: scroll, wrap_mode: wrap_mode} = state) do
+  def update_scroll_content_size(
+        %State{lines: lines, scroll: scroll, wrap_mode: wrap_mode} = state
+      ) do
     line_height = State.line_height(state)
 
-    # Calculate content dimensions based on wrap mode
-    {content_width, display_line_count} = case wrap_mode do
-      :none ->
-        # No wrapping: content width is the widest line, height is line count
-        {max_line_width, _longest_line, _longest_line_chars} = lines
-          |> Enum.with_index()
-          |> Enum.map(fn {line, idx} -> {State.string_width(state, line), idx + 1, String.length(line)} end)
-          |> Enum.max_by(fn {w, _, _} -> w end, fn -> {0, 0, 0} end)
-        # Add padding for cursor at end of line
-        content_w = max(scroll.viewport_width, max_line_width + 40)
-        {content_w, length(lines)}
+    visible_lines =
+      ScenicWidgets.TextField.Folding.projection(lines, state.folds || MapSet.new())
+      |> Enum.map(fn
+        {_line, text, 0} -> text
+        {_line, text, count} -> text <> "  … #{count} lines"
+      end)
 
-      _wrap ->
-        # Word/char wrapping: content fits viewport width, but height depends on wrapped lines
-        # Use the same wrapping logic as the renderer for accurate line count
-        max_width = scroll.viewport_width - 40  # Account for padding and scrollbar
-        wrapped_count = lines
-          |> Enum.map(fn line -> count_wrapped_lines(state, line, max_width) end)
-          |> Enum.sum()
-        {scroll.viewport_width, wrapped_count}
-    end
+    # Calculate content dimensions based on wrap mode
+    {content_width, display_line_count} =
+      case wrap_mode do
+        :none ->
+          # No wrapping: content width is the widest line, height is line count
+          {max_line_width, _longest_line, _longest_line_chars} =
+            visible_lines
+            |> Enum.with_index()
+            |> Enum.map(fn {line, idx} ->
+              {State.string_width(state, line), idx + 1, String.length(line)}
+            end)
+            |> Enum.max_by(fn {w, _, _} -> w end, fn -> {0, 0, 0} end)
+
+          # Add padding for cursor at end of line
+          content_w = max(scroll.viewport_width, max_line_width + 40)
+          {content_w, length(visible_lines)}
+
+        _wrap ->
+          # Word/char wrapping: content fits viewport width, but height depends on wrapped lines
+          # Use the same wrapping logic as the renderer for accurate line count
+          # Account for padding and scrollbar
+          max_width = scroll.viewport_width - 40
+
+          wrapped_count =
+            visible_lines
+            |> Enum.map(fn line -> count_wrapped_lines(state, line, max_width) end)
+            |> Enum.sum()
+
+          {scroll.viewport_width, wrapped_count}
+      end
 
     # Add half line height of bottom padding so last line isn't jammed against frame edge
     bottom_padding = div(line_height, 2)
     content_height = display_line_count * line_height + bottom_padding
 
-    new_scroll = Widgex.Scroll.ScrollState.update_content_size(scroll, content_width, content_height)
+    new_scroll =
+      Widgex.Scroll.ScrollState.update_content_size(scroll, content_width, content_height)
 
     # Update gutter width if line count changed significantly (different number of digits)
     %{state | scroll: new_scroll}
     |> State.maybe_update_gutter_width()
+  end
+
+  defp reconcile_folds(state, new_lines) do
+    ScenicWidgets.TextField.Folding.reconcile_after_edit(
+      state.folds || MapSet.new(),
+      state.lines,
+      new_lines
+    )
   end
 
   # Count how many display lines a single source line will wrap into
@@ -1397,20 +1626,37 @@ defmodule ScenicWidgets.TextField.Reducer do
     else
       # Word wrap: split by words and count lines
       words = String.split(line, " ")
-      {line_count, _current_width} = Enum.reduce(words, {1, 0}, fn word, {lines, current_w} ->
-        word_width = State.string_width(state, word)
-        space_width = State.string_width(state, " ")
 
-        test_width = if current_w == 0, do: word_width, else: current_w + space_width + word_width
+      {line_count, _current_width} =
+        Enum.reduce(words, {1, 0}, fn word, {lines, current_w} ->
+          word_width = State.string_width(state, word)
+          space_width = State.string_width(state, " ")
 
-        if test_width <= max_width do
-          {lines, test_width}
-        else
-          # Word doesn't fit, start new line
-          {lines + 1, word_width}
-        end
-      end)
+          test_width =
+            if current_w == 0, do: word_width, else: current_w + space_width + word_width
+
+          if test_width <= max_width do
+            {lines, test_width}
+          else
+            # Word doesn't fit, start new line
+            {lines + 1, word_width}
+          end
+        end)
+
       line_count
     end
+  end
+
+  defp drag_offset(start_offset, pointer_delta, track_length, content_size, viewport_size) do
+    thumb_length = ScrollController.thumb_length(track_length, content_size, viewport_size)
+    max_offset = max(content_size - viewport_size, 0)
+
+    ScrollController.drag_offset(
+      start_offset,
+      pointer_delta,
+      track_length,
+      thumb_length,
+      max_offset
+    )
   end
 end

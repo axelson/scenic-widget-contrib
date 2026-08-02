@@ -18,8 +18,15 @@ defmodule ScenicWidgets.TabBar.Renderer do
   def initial_render(graph, %State{} = state) do
     graph
     |> render_background(state)
-    |> render_all_tabs(state)
-    |> render_selection_indicator(state)
+    |> Primitives.group(
+      fn clipped ->
+        clipped
+        |> render_all_tabs(state)
+        |> render_selection_indicator(state)
+      end,
+      id: :tab_viewport,
+      scissor: {state.frame.size.width, state.theme.height}
+    )
     |> render_semantic_content(state)
   end
 
@@ -66,16 +73,19 @@ defmodule ScenicWidgets.TabBar.Renderer do
     is_selected = state.selected_id == tab.id
     is_hovered = state.hovered_tab_id == tab.id
 
-    bg_color = cond do
-      is_selected -> theme.tab_selected_background
-      is_hovered -> theme.tab_hover_background
-      true -> theme.tab_background
-    end
+    bg_color =
+      cond do
+        is_selected -> theme.tab_selected_background
+        is_hovered -> theme.tab_hover_background
+        true -> theme.tab_background
+      end
 
     text_color = if is_selected, do: theme.text_selected_color, else: theme.text_color
 
     # Calculate text bounds (leave room for close button if closeable)
-    close_width = if tab.closeable, do: theme.close_button_size + theme.close_button_margin, else: 0
+    close_width =
+      if tab.closeable, do: theme.close_button_size + theme.close_button_margin, else: 0
+
     text_max_width = width - theme.tab_padding * 2 - close_width
     truncated_label = truncate_label(tab.label, text_max_width, theme.font_size)
 
@@ -113,11 +123,13 @@ defmodule ScenicWidgets.TabBar.Renderer do
       end,
       id: tab_semantic_id,
       semantic: %{type: :tab, tab_id: tab.id},
-      translate: {logical_x - offset, 0}  # Apply scroll offset to position
+      # Apply scroll offset to position
+      translate: {logical_x - offset, 0}
     )
   end
 
   defp maybe_build_close_button(graph, %{closeable: false}, _state), do: graph
+
   defp maybe_build_close_button(graph, tab, %State{theme: theme} = state) do
     is_hovered = state.hovered_close_id == tab.id
     color = if is_hovered, do: theme.close_button_hover_color, else: theme.close_button_color
@@ -135,6 +147,7 @@ defmodule ScenicWidgets.TabBar.Renderer do
     close_semantic_id = "tab_bar_close_#{tab.id}"
 
     padding = 4
+
     graph
     |> Primitives.group(
       fn g ->
@@ -165,6 +178,7 @@ defmodule ScenicWidgets.TabBar.Renderer do
   end
 
   defp render_selection_indicator(graph, %State{selected_id: nil}), do: graph
+
   defp render_selection_indicator(graph, %State{theme: theme} = state) do
     case State.get_tab_bounds(state, state.selected_id) do
       nil ->
@@ -173,6 +187,7 @@ defmodule ScenicWidgets.TabBar.Renderer do
       {x, _y, width, _height} ->
         # Render indicator at bottom of tab bar (using theme.height for consistency)
         indicator_y = theme.height - theme.selection_indicator_height
+
         graph
         |> Primitives.rect(
           {width, theme.selection_indicator_height},
@@ -187,11 +202,16 @@ defmodule ScenicWidgets.TabBar.Renderer do
   # Update Rendering
   # ===========================================================================
 
-  defp update_scroll_if_changed(graph, %{scroll_offset: old}, %{scroll_offset: new}) when old == new do
+  defp update_scroll_if_changed(graph, %{scroll_offset: old}, %{scroll_offset: new})
+       when old == new do
     graph
   end
 
-  defp update_scroll_if_changed(graph, _old_state, %{tabs: tabs, scroll_offset: offset} = new_state) do
+  defp update_scroll_if_changed(
+         graph,
+         _old_state,
+         %{tabs: tabs, scroll_offset: offset} = new_state
+       ) do
     # Update each tab's position based on new scroll offset
     Enum.reduce(tabs, graph, fn tab, acc ->
       {base_x, _y, _w, _h} = State.get_tab_bounds(new_state, tab.id)
@@ -206,41 +226,46 @@ defmodule ScenicWidgets.TabBar.Renderer do
   defp update_hover_if_changed(graph, old_state, new_state) do
     # Only update if hover state changed
     if old_state.hovered_tab_id == new_state.hovered_tab_id and
-       old_state.hovered_close_id == new_state.hovered_close_id do
+         old_state.hovered_close_id == new_state.hovered_close_id do
       graph
     else
       theme = new_state.theme
 
       # Update previously hovered tab background
-      graph = if old_state.hovered_tab_id && old_state.hovered_tab_id != new_state.hovered_tab_id do
-        is_selected = old_state.hovered_tab_id == new_state.selected_id
-        bg_color = if is_selected, do: theme.tab_selected_background, else: theme.tab_background
+      graph =
+        if old_state.hovered_tab_id && old_state.hovered_tab_id != new_state.hovered_tab_id do
+          is_selected = old_state.hovered_tab_id == new_state.selected_id
+          bg_color = if is_selected, do: theme.tab_selected_background, else: theme.tab_background
 
-        Graph.modify(graph, {:tab_bg, old_state.hovered_tab_id}, fn p ->
-          Primitives.update_opts(p, fill: bg_color)
-        end)
-      else
-        graph
-      end
+          Graph.modify(graph, {:tab_bg, old_state.hovered_tab_id}, fn p ->
+            Primitives.update_opts(p, fill: bg_color)
+          end)
+        else
+          graph
+        end
 
       # Update newly hovered tab background
-      graph = if new_state.hovered_tab_id && old_state.hovered_tab_id != new_state.hovered_tab_id do
-        is_selected = new_state.hovered_tab_id == new_state.selected_id
-        bg_color = if is_selected, do: theme.tab_selected_background, else: theme.tab_hover_background
+      graph =
+        if new_state.hovered_tab_id && old_state.hovered_tab_id != new_state.hovered_tab_id do
+          is_selected = new_state.hovered_tab_id == new_state.selected_id
 
-        Graph.modify(graph, {:tab_bg, new_state.hovered_tab_id}, fn p ->
-          Primitives.update_opts(p, fill: bg_color)
-        end)
-      else
-        graph
-      end
+          bg_color =
+            if is_selected, do: theme.tab_selected_background, else: theme.tab_hover_background
+
+          Graph.modify(graph, {:tab_bg, new_state.hovered_tab_id}, fn p ->
+            Primitives.update_opts(p, fill: bg_color)
+          end)
+        else
+          graph
+        end
 
       # Update close button hover states
-      graph = if old_state.hovered_close_id && old_state.hovered_close_id != new_state.hovered_close_id do
-        update_close_button_hover(graph, old_state.hovered_close_id, false, theme)
-      else
-        graph
-      end
+      graph =
+        if old_state.hovered_close_id && old_state.hovered_close_id != new_state.hovered_close_id do
+          update_close_button_hover(graph, old_state.hovered_close_id, false, theme)
+        else
+          graph
+        end
 
       if new_state.hovered_close_id && old_state.hovered_close_id != new_state.hovered_close_id do
         update_close_button_hover(graph, new_state.hovered_close_id, true, theme)
@@ -266,7 +291,8 @@ defmodule ScenicWidgets.TabBar.Renderer do
     end)
   end
 
-  defp update_selection_if_changed(graph, %{selected_id: old}, %{selected_id: new}) when old == new do
+  defp update_selection_if_changed(graph, %{selected_id: old}, %{selected_id: new})
+       when old == new do
     graph
   end
 
@@ -274,20 +300,21 @@ defmodule ScenicWidgets.TabBar.Renderer do
     theme = new_state.theme
 
     # Un-highlight previously selected tab
-    graph = if old_state.selected_id do
-      is_hovered = old_state.selected_id == new_state.hovered_tab_id
-      bg_color = if is_hovered, do: theme.tab_hover_background, else: theme.tab_background
+    graph =
+      if old_state.selected_id do
+        is_hovered = old_state.selected_id == new_state.hovered_tab_id
+        bg_color = if is_hovered, do: theme.tab_hover_background, else: theme.tab_background
 
-      graph
-      |> Graph.modify({:tab_bg, old_state.selected_id}, fn p ->
-        Primitives.update_opts(p, fill: bg_color)
-      end)
-      |> Graph.modify({:tab_label, old_state.selected_id}, fn p ->
-        Primitives.update_opts(p, fill: theme.text_color)
-      end)
-    else
-      graph
-    end
+        graph
+        |> Graph.modify({:tab_bg, old_state.selected_id}, fn p ->
+          Primitives.update_opts(p, fill: bg_color)
+        end)
+        |> Graph.modify({:tab_label, old_state.selected_id}, fn p ->
+          Primitives.update_opts(p, fill: theme.text_color)
+        end)
+      else
+        graph
+      end
 
     # Highlight newly selected tab
     if new_state.selected_id do
@@ -331,7 +358,9 @@ defmodule ScenicWidgets.TabBar.Renderer do
       # Just scroll changed - update indicator position
       old_state.scroll_offset != new_state.scroll_offset ->
         case State.get_tab_bounds(new_state, new_state.selected_id) do
-          nil -> graph
+          nil ->
+            graph
+
           {x, _y, _w, _height} ->
             Graph.modify(graph, :selection_indicator, fn p ->
               Primitives.update_opts(p, translate: {x, indicator_y})
@@ -350,7 +379,8 @@ defmodule ScenicWidgets.TabBar.Renderer do
   defp render_semantic_content(graph, %State{} = state) do
     graph
     |> Primitives.text(
-      "",  # Empty text - just used as semantic carrier
+      # Empty text - just used as semantic carrier
+      "",
       id: :semantic_tab_bar_content,
       hidden: true,
       semantic: semantic_metadata(state)
@@ -369,7 +399,7 @@ defmodule ScenicWidgets.TabBar.Renderer do
 
   defp semantic_changed?(old_state, new_state) do
     old_state.tabs != new_state.tabs or
-    old_state.selected_id != new_state.selected_id
+      old_state.selected_id != new_state.selected_id
   end
 
   defp semantic_metadata(%State{tabs: tabs, selected_id: selected_id}) do
@@ -377,14 +407,15 @@ defmodule ScenicWidgets.TabBar.Renderer do
       type: :tab_bar,
       tab_count: length(tabs),
       selected_id: selected_id,
-      tabs: Enum.map(tabs, fn tab ->
-        %{
-          id: tab.id,
-          label: tab.label,
-          selected: tab.id == selected_id,
-          closeable: tab.closeable
-        }
-      end)
+      tabs:
+        Enum.map(tabs, fn tab ->
+          %{
+            id: tab.id,
+            label: tab.label,
+            selected: tab.id == selected_id,
+            closeable: tab.closeable
+          }
+        end)
     }
   end
 

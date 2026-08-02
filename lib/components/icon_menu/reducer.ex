@@ -43,11 +43,12 @@ defmodule ScenicWidgets.IconMenu.Reducer do
         new_state = %{state | hovered_menu: hovered_icon, hovered_item: nil}
 
         # If a dropdown is open and we hover a different icon, switch to it
-        new_state = if state.active_menu && hovered_icon && state.active_menu != hovered_icon do
-          %{new_state | active_menu: hovered_icon}
-        else
-          new_state
-        end
+        new_state =
+          if state.active_menu && hovered_icon && state.active_menu != hovered_icon do
+            %{new_state | active_menu: hovered_icon}
+          else
+            new_state
+          end
 
         {:noop, new_state}
 
@@ -107,13 +108,13 @@ defmodule ScenicWidgets.IconMenu.Reducer do
 
           {true, item_id} ->
             # Click on menu item
-            # Execute action callback if present
-            action = State.get_item_action(state, item_id)
-            if is_function(action, 0), do: action.()
+            item = State.find_item(state, item_id)
 
-            # Close menu and notify parent
-            new_state = %{state | active_menu: nil, hovered_menu: nil, hovered_item: nil}
-            {:menu_item_clicked, item_id, new_state}
+            if item && not State.item_enabled?(item) do
+              {:noop, state}
+            else
+              activate_item(state, item, item_id, coords)
+            end
 
           {false, _} ->
             # Click outside dropdown - close menu
@@ -124,6 +125,42 @@ defmodule ScenicWidgets.IconMenu.Reducer do
       true ->
         {:noop, state}
     end
+  end
+
+  defp activate_item(state, %ScenicWidgets.Menu.Model.Slider{} = slider, item_id, {x, _y}) do
+    bounds = state.dropdown_bounds[state.active_menu].items[item_id]
+    ratio = (x - bounds.x) / max(bounds.width, 1)
+    raw = slider.min + min(1.0, max(0.0, ratio)) * (slider.max - slider.min)
+    steps = round((raw - slider.min) / slider.step)
+    value = min(slider.max, max(slider.min, slider.min + steps * slider.step))
+    updated = %{slider | value: value}
+
+    menus =
+      Enum.map(state.menus, fn
+        %{id: id, items: items} = menu when id == state.active_menu ->
+          %{
+            menu
+            | items:
+                Enum.map(items, fn item ->
+                  if State.get_item_id(item) == item_id, do: updated, else: item
+                end)
+          }
+
+        menu ->
+          menu
+      end)
+
+    {:menu_value_changed, item_id, value, %{state | menus: menus, hovered_item: item_id}}
+  end
+
+  defp activate_item(state, _item, item_id, _coords) do
+    # Execute action callback if present
+    action = State.get_item_action(state, item_id)
+    if is_function(action, 0), do: action.()
+
+    # Close menu and notify parent
+    new_state = %{state | active_menu: nil, hovered_menu: nil, hovered_item: nil}
+    {:menu_item_clicked, item_id, new_state}
   end
 
   @doc """

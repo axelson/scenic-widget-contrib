@@ -117,6 +117,10 @@ defmodule ScenicWidgets.IconMenu do
       {:menu_item_clicked, item_id, new_state} ->
         send_parent_event(scene, {:menu_item_clicked, item_id})
         update_scene(scene, state, new_state)
+
+      {:menu_value_changed, item_id, value, new_state} ->
+        send_parent_event(scene, {:menu_value_changed, item_id, value})
+        update_scene(scene, state, new_state)
     end
   end
 
@@ -141,9 +145,12 @@ defmodule ScenicWidgets.IconMenu do
 
     # Re-render from scratch to reflect menu changes
     graph = Renderer.initial_render(Graph.build(), new_state)
-    scene = scene
+
+    scene =
+      scene
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
+
     {:noreply, scene}
   end
 
@@ -181,7 +188,9 @@ defmodule ScenicWidgets.IconMenu do
 
   defp update_scene(scene, old_state, new_state) do
     graph = Renderer.update_render(scene.assigns.graph, old_state, new_state)
-    scene = scene
+
+    scene =
+      scene
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
 
@@ -192,7 +201,9 @@ defmodule ScenicWidgets.IconMenu do
 
   defp update_scene_tuple(scene, old_state, new_state) do
     graph = Renderer.update_render(scene.assigns.graph, old_state, new_state)
-    scene = scene
+
+    scene =
+      scene
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
 
@@ -235,8 +246,16 @@ defmodule ScenicWidgets.IconMenu do
         semantic_id = String.to_atom("icon_menu_#{menu_id_str}")
 
         # Register the icon button (convert local to screen coordinates)
-        register_button(viewport, scene_name, semantic_id, menu.icon,
-          offset_x + button_x, offset_y + button_y, button_size, button_size)
+        register_button(
+          viewport,
+          scene_name,
+          semantic_id,
+          Map.get(menu, :label, humanize(menu.id)),
+          offset_x + button_x,
+          offset_y + button_y,
+          button_size,
+          button_size
+        )
 
         # Register menu items using the pre-calculated dropdown bounds
         case Map.get(state.dropdown_bounds, menu.id) do
@@ -252,8 +271,17 @@ defmodule ScenicWidgets.IconMenu do
               screen_x = offset_x + item_bounds.x
               screen_y = offset_y + item_bounds.y
 
-              register_menu_item(viewport, scene_name, item_id, item_label, menu_id_str,
-                screen_x, screen_y, item_bounds.width, item_bounds.height)
+              register_menu_item(
+                viewport,
+                scene_name,
+                item_id,
+                item_label,
+                menu_id_str,
+                screen_x,
+                screen_y,
+                item_bounds.width,
+                item_bounds.height
+              )
             end)
         end
       end)
@@ -262,11 +290,14 @@ defmodule ScenicWidgets.IconMenu do
     end
   end
 
+  defp humanize(id), do: id |> Atom.to_string() |> String.capitalize()
+
   # Find the label for a menu item by its ID
   defp find_item_label(items, item_id) do
     Enum.find_value(items, item_id, fn
       {id, label} when id == item_id -> label
       {id, label, _opts} when id == item_id -> label
+      %{id: id, label: label} when id == item_id -> label
       _ -> nil
     end)
   end
@@ -288,6 +319,7 @@ defmodule ScenicWidgets.IconMenu do
       hidden: false,
       z_index: 0
     }
+
     :ets.insert(viewport.semantic_table, {{scene_name, id}, entry})
     :ets.insert(viewport.semantic_index, {id, {scene_name, id}})
   end
@@ -309,9 +341,11 @@ defmodule ScenicWidgets.IconMenu do
       label: item_label,
       role: :menuitem,
       value: item_id,
-      hidden: false,  # Will be visible when dropdown is open
+      # Will be visible when dropdown is open
+      hidden: false,
       z_index: 10
     }
+
     :ets.insert(viewport.semantic_table, {{scene_name, semantic_id}, entry})
     :ets.insert(viewport.semantic_index, {semantic_id, {scene_name, semantic_id}})
   end

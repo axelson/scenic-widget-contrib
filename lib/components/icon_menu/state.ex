@@ -33,32 +33,32 @@ defmodule ScenicWidgets.IconMenu.State do
   """
 
   @type menu_item_opts :: %{
-    optional(:type) => :toggle | :normal,
-    optional(:checked) => boolean(),
-    optional(:enabled) => boolean()
-  }
+          optional(:type) => :toggle | :normal,
+          optional(:checked) => boolean(),
+          optional(:enabled) => boolean()
+        }
 
   @type menu_item ::
-    {String.t(), String.t()}
-    | {String.t(), String.t(), function()}
-    | {String.t(), String.t(), menu_item_opts()}
+          {String.t(), String.t()}
+          | {String.t(), String.t(), function()}
+          | {String.t(), String.t(), menu_item_opts()}
 
   @type menu :: %{
-    id: atom(),
-    icon: String.t(),
-    items: [menu_item()]
-  }
+          id: atom(),
+          icon: String.t(),
+          items: [menu_item()]
+        }
 
   @type t :: %__MODULE__{
-    frame: map(),
-    menus: [menu()],
-    active_menu: atom() | nil,
-    hovered_menu: atom() | nil,
-    hovered_item: String.t() | nil,
-    theme: map(),
-    dropdown_bounds: map(),
-    align: :left | :right
-  }
+          frame: map(),
+          menus: [menu()],
+          active_menu: atom() | nil,
+          hovered_menu: atom() | nil,
+          hovered_item: String.t() | nil,
+          theme: map(),
+          dropdown_bounds: map(),
+          align: :left | :right
+        }
 
   defstruct [
     :frame,
@@ -68,7 +68,8 @@ defmodule ScenicWidgets.IconMenu.State do
     hovered_item: nil,
     theme: %{},
     dropdown_bounds: %{},
-    align: :right  # Default to right alignment (flush with right edge of frame)
+    # Default to right alignment (flush with right edge of frame)
+    align: :right
   ]
 
   @default_theme %{
@@ -129,29 +130,45 @@ defmodule ScenicWidgets.IconMenu.State do
   """
   def demo_menus do
     [
-      %{id: :file, icon: "F", items: [
-        {"new", "New File"},
-        {"open", "Open..."},
-        {"save", "Save"},
-        {"save_as", "Save As..."},
-        {"close", "Close"}
-      ]},
-      %{id: :edit, icon: "E", items: [
-        {"undo", "Undo"},
-        {"redo", "Redo"},
-        {"cut", "Cut"},
-        {"copy", "Copy"},
-        {"paste", "Paste"}
-      ]},
-      %{id: :view, icon: "V", items: [
-        {"zoom_in", "Zoom In"},
-        {"zoom_out", "Zoom Out"},
-        {"reset_zoom", "Reset Zoom"}
-      ]},
-      %{id: :help, icon: "?", items: [
-        {"about", "About"},
-        {"docs", "Documentation"}
-      ]}
+      %{
+        id: :file,
+        icon: "F",
+        items: [
+          {"new", "New File"},
+          {"open", "Open..."},
+          {"save", "Save"},
+          {"save_as", "Save As..."},
+          {"close", "Close"}
+        ]
+      },
+      %{
+        id: :edit,
+        icon: "E",
+        items: [
+          {"undo", "Undo"},
+          {"redo", "Redo"},
+          {"cut", "Cut"},
+          {"copy", "Copy"},
+          {"paste", "Paste"}
+        ]
+      },
+      %{
+        id: :view,
+        icon: "V",
+        items: [
+          {"zoom_in", "Zoom In"},
+          {"zoom_out", "Zoom Out"},
+          {"reset_zoom", "Reset Zoom"}
+        ]
+      },
+      %{
+        id: :help,
+        icon: "?",
+        items: [
+          {"about", "About"},
+          {"docs", "Documentation"}
+        ]
+      }
     ]
   end
 
@@ -175,35 +192,40 @@ defmodule ScenicWidgets.IconMenu.State do
 
       # For right-aligned menus, dropdown extends leftward (right edge aligns with button's right edge)
       # For left-aligned menus, dropdown extends rightward (left edge aligns with button's left edge)
-      dropdown_x = case align do
-        :right -> button_x + button_size - dropdown_width
-        :left -> button_x
-      end
+      dropdown_x =
+        case align do
+          :right -> button_x + button_size - dropdown_width
+          :left -> button_x
+        end
 
       # Calculate dropdown height based on items
-      dropdown_height = length(menu.items) * item_height + (2 * padding)
+      dropdown_height = length(menu.items) * item_height + 2 * padding
 
       # Calculate item bounds within dropdown (relative to dropdown origin)
-      item_bounds = menu.items
+      item_bounds =
+        menu.items
         |> Enum.with_index()
         |> Enum.map(fn {item, item_index} ->
           item_id = get_item_id(item)
-          {item_id, %{
-            x: dropdown_x + padding,
-            y: y + padding + (item_index * item_height),
-            width: dropdown_width - (2 * padding),
-            height: item_height
-          }}
+
+          {item_id,
+           %{
+             x: dropdown_x + padding,
+             y: y + padding + item_index * item_height,
+             width: dropdown_width - 2 * padding,
+             height: item_height
+           }}
         end)
         |> Enum.into(%{})
 
-      {menu.id, %{
-        x: dropdown_x,
-        y: y,
-        width: dropdown_width,
-        height: dropdown_height,
-        items: item_bounds
-      }}
+      {menu.id,
+       %{
+         x: dropdown_x,
+         y: y,
+         width: dropdown_width,
+         height: dropdown_height,
+         items: item_bounds
+       }}
     end)
     |> Enum.into(%{})
   end
@@ -213,6 +235,7 @@ defmodule ScenicWidgets.IconMenu.State do
   For :right alignment, icons are pushed to the right edge of the frame.
   """
   def alignment_offset(%__MODULE__{align: :left}), do: 0
+
   def alignment_offset(%__MODULE__{align: :right, frame: frame, menus: menus, theme: theme}) do
     total_width = length(menus) * theme.icon_button_size
     frame_width = get_frame_width(frame)
@@ -232,7 +255,9 @@ defmodule ScenicWidgets.IconMenu.State do
     x_offset = alignment_offset(state)
 
     case Enum.find_index(menus, &(&1.id == menu_id)) do
-      nil -> nil
+      nil ->
+        nil
+
       index ->
         {x_offset + index * button_size, 0, button_size, theme.height}
     end
@@ -258,6 +283,7 @@ defmodule ScenicWidgets.IconMenu.State do
     |> Enum.with_index()
     |> Enum.find_value(fn {menu, index} ->
       x = x_offset + index * button_size
+
       if px >= x and px < x + button_size do
         menu.id
       end
@@ -269,19 +295,24 @@ defmodule ScenicWidgets.IconMenu.State do
   Returns {true, item_id} or {false, nil}.
   """
   def point_in_dropdown?(%__MODULE__{active_menu: nil}, _coords), do: {false, nil}
+
   def point_in_dropdown?(%__MODULE__{active_menu: menu_id, dropdown_bounds: bounds}, {px, py}) do
     case Map.get(bounds, menu_id) do
-      nil -> {false, nil}
+      nil ->
+        {false, nil}
+
       dropdown ->
         if px >= dropdown.x and px <= dropdown.x + dropdown.width and
-           py >= dropdown.y and py <= dropdown.y + dropdown.height do
+             py >= dropdown.y and py <= dropdown.y + dropdown.height do
           # Find which item is hovered
-          hovered = Enum.find_value(dropdown.items, fn {item_id, item_bounds} ->
-            if px >= item_bounds.x and px <= item_bounds.x + item_bounds.width and
-               py >= item_bounds.y and py <= item_bounds.y + item_bounds.height do
-              item_id
-            end
-          end)
+          hovered =
+            Enum.find_value(dropdown.items, fn {item_id, item_bounds} ->
+              if px >= item_bounds.x and px <= item_bounds.x + item_bounds.width and
+                   py >= item_bounds.y and py <= item_bounds.y + item_bounds.height do
+                item_id
+              end
+            end)
+
           {true, hovered}
         else
           {false, nil}
@@ -304,12 +335,20 @@ defmodule ScenicWidgets.IconMenu.State do
   """
   def get_item_action(%__MODULE__{menus: menus, active_menu: active_menu}, item_id) do
     case Enum.find(menus, &(&1.id == active_menu)) do
-      nil -> nil
+      nil ->
+        nil
+
       menu ->
         case Enum.find(menu.items, fn item -> get_item_id(item) == item_id end) do
           {_id, _label, action} when is_function(action, 0) -> action
           _ -> nil
         end
+    end
+  end
+
+  def find_item(%__MODULE__{menus: menus, active_menu: active_menu}, item_id) do
+    with %{items: items} <- Enum.find(menus, &(&1.id == active_menu)) do
+      Enum.find(items, &(get_item_id(&1) == item_id))
     end
   end
 
@@ -322,12 +361,24 @@ defmodule ScenicWidgets.IconMenu.State do
   """
   def get_item_id({id, _label}), do: id
   def get_item_id({id, _label, _opts_or_action}), do: id
+  def get_item_id(%{id: id}), do: id
 
   @doc """
   Extract the label from a menu item tuple.
   """
   def get_item_label({_id, label}), do: label
   def get_item_label({_id, label, _opts_or_action}), do: label
+  def get_item_label(%{label: label}), do: label
+
+  def display_label(%ScenicWidgets.Menu.Model.Slider{label: label, value: value}),
+    do: "#{label}: #{value}"
+
+  def display_label(%ScenicWidgets.Menu.Model.Submenu{label: label}), do: label <> "  ›"
+
+  def display_label(%{label: label, shortcut: shortcut}) when is_binary(shortcut),
+    do: label <> "    " <> shortcut
+
+  def display_label(item), do: get_item_label(item)
 
   @doc """
   Extract options from a menu item. Returns empty map for simple items.
@@ -336,12 +387,23 @@ defmodule ScenicWidgets.IconMenu.State do
   def get_item_opts({_id, _label, opts}) when is_map(opts), do: opts
   def get_item_opts({_id, _label, _action}), do: %{}
 
+  def get_item_opts(%ScenicWidgets.Menu.Model.Toggle{checked?: checked, enabled?: enabled}),
+    do: %{type: :toggle, checked: checked, enabled: enabled}
+
+  def get_item_opts(%ScenicWidgets.Menu.Model.Radio{selected?: selected, enabled?: enabled}),
+    do: %{type: :radio, checked: selected, enabled: enabled}
+
+  def get_item_opts(%ScenicWidgets.Menu.Model.Slider{enabled?: enabled}),
+    do: %{type: :slider, enabled: enabled}
+
+  def get_item_opts(%{enabled?: enabled}), do: %{enabled: enabled}
+
   @doc """
   Check if a menu item is a toggle type.
   """
   def is_toggle_item?(item) do
     opts = get_item_opts(item)
-    Map.get(opts, :type) == :toggle
+    Map.get(opts, :type) in [:toggle, :radio]
   end
 
   @doc """
@@ -351,4 +413,6 @@ defmodule ScenicWidgets.IconMenu.State do
     opts = get_item_opts(item)
     Map.get(opts, :checked, false)
   end
+
+  def item_enabled?(item), do: Map.get(get_item_opts(item), :enabled, true)
 end

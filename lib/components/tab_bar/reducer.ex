@@ -8,7 +8,8 @@ defmodule ScenicWidgets.TabBar.Reducer do
 
   alias ScenicWidgets.TabBar.State
 
-  @scroll_amount 50  # Pixels to scroll per wheel tick
+  # Pixels to scroll per wheel tick
+  @scroll_amount 50
 
   @doc """
   Process user input and return state transitions.
@@ -27,6 +28,15 @@ defmodule ScenicWidgets.TabBar.Reducer do
   end
 
   def process_input(%State{} = state, {:cursor_scroll, {_dx, dy, _x, _y}}) do
+    handle_scroll(state, dy)
+  end
+
+  def process_input(%State{} = state, {:cursor_scroll, {{dx, dy}, _coords}}) do
+    delta = if dx == 0, do: dy, else: dx
+    handle_scroll(state, delta)
+  end
+
+  def process_input(%State{} = state, {:cursor_scroll, {_dx, dy}}) do
     handle_scroll(state, dy)
   end
 
@@ -87,7 +97,7 @@ defmodule ScenicWidgets.TabBar.Reducer do
   """
   def handle_scroll(%State{} = state, delta_y) do
     # Negative delta = scroll right, positive = scroll left (natural scrolling)
-    new_offset = state.scroll_offset - (delta_y * @scroll_amount)
+    new_offset = state.scroll_offset - delta_y * @scroll_amount
 
     # Clamp to valid range
     max_offset = State.max_scroll_offset(state)
@@ -109,7 +119,7 @@ defmodule ScenicWidgets.TabBar.Reducer do
   end
 
   def select_tab(%State{} = state, tab_id) do
-    new_state = %{state | selected_id: tab_id}
+    new_state = State.ensure_selected_visible(%{state | selected_id: tab_id})
     {:tab_selected, tab_id, new_state}
   end
 
@@ -133,19 +143,22 @@ defmodule ScenicWidgets.TabBar.Reducer do
         new_tabs = Enum.reject(tabs, &(&1.id == tab_id))
 
         # If we closed the selected tab, select an adjacent one
-        new_selected = if state.selected_id == tab_id do
-          select_adjacent_tab(tabs, tab_id)
-        else
-          state.selected_id
-        end
+        new_selected =
+          if state.selected_id == tab_id do
+            select_adjacent_tab(tabs, tab_id)
+          else
+            state.selected_id
+          end
 
         # Recalculate tab widths
-        new_state = %{state |
-          tabs: new_tabs,
-          selected_id: new_selected,
-          hovered_tab_id: nil,
-          hovered_close_id: nil
+        new_state = %{
+          state
+          | tabs: new_tabs,
+            selected_id: new_selected,
+            hovered_tab_id: nil,
+            hovered_close_id: nil
         }
+
         new_state = %{new_state | tab_widths: State.calculate_tab_widths(new_state)}
 
         # Adjust scroll if needed

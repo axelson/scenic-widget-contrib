@@ -49,7 +49,8 @@ defmodule ScenicWidgets.PopupModal do
   end
 
   def validate(data) do
-    {:error, "PopupModal requires :frame, :title and :body (list of lines), got: #{inspect(data)}"}
+    {:error,
+     "PopupModal requires :frame, :title and :body (list of lines), got: #{inspect(data)}"}
   end
 
   @impl Scenic.Scene
@@ -80,7 +81,8 @@ defmodule ScenicWidgets.PopupModal do
   end
 
   @impl Scenic.Scene
-  def handle_input({:key, {key, 1, _mods}}, _context, scene) when key in [:key_enter, :key_escape] do
+  def handle_input({:key, {key, 1, _mods}}, _context, scene)
+      when key in [:key_enter, :key_escape] do
     respond(scene)
   end
 
@@ -103,11 +105,10 @@ defmodule ScenicWidgets.PopupModal do
 
     panel_h = @pad * 2 + @title_height + length(state.body) * @line_height + @button_h + 16
     panel_w = @panel_width
-    px = (fw - panel_w) / 2
-    py = (fh - panel_h) / 2
+    bounds = ScenicWidgets.ModalShell.bounds(state.frame, {panel_w, panel_h})
 
     Graph.build()
-    |> rect({fw, fh}, fill: @overlay, id: :popup_overlay)
+    |> ScenicWidgets.ModalShell.overlay(state.frame, :popup_overlay, fill: @overlay)
     |> group(
       fn g ->
         g
@@ -121,7 +122,7 @@ defmodule ScenicWidgets.PopupModal do
         |> render_body_lines(state.body)
         |> render_button(state, panel_w, panel_h)
       end,
-      translate: {px, py},
+      translate: {bounds.x, bounds.y},
       id: :popup_panel
     )
   end

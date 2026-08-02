@@ -64,17 +64,19 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     is_active = state.active_menu == menu.id
     is_hovered = state.hovered_menu == menu.id
 
-    bg_color = cond do
-      is_active -> theme.icon_active_bg
-      is_hovered -> theme.icon_hover_bg
-      true -> theme.background
-    end
+    bg_color =
+      cond do
+        is_active -> theme.icon_active_bg
+        is_hovered -> theme.icon_hover_bg
+        true -> theme.background
+      end
 
-    icon_color = cond do
-      is_active -> theme.icon_active_color
-      is_hovered -> theme.icon_hover_color
-      true -> theme.icon_color
-    end
+    icon_color =
+      cond do
+        is_active -> theme.icon_active_color
+        is_hovered -> theme.icon_hover_color
+        true -> theme.icon_color
+      end
 
     graph
     |> Primitives.group(
@@ -86,24 +88,74 @@ defmodule ScenicWidgets.IconMenu.Renderer do
           id: {:icon_bg, menu.id},
           fill: bg_color
         )
-        # Icon text (centered)
-        |> Primitives.text(
-          menu.icon,
-          id: {:icon_text, menu.id},
-          fill: icon_color,
-          font: theme.font,
-          font_size: theme.icon_font_size,
-          text_align: :center,
-          translate: {width / 2, height / 2 + theme.icon_font_size / 3}
-        )
+        |> render_icon(menu.icon, menu.id, icon_color, theme, width, height)
       end,
       id: {:icon_button, menu.id},
       translate: {x, y}
     )
   end
 
+  # Primitive-drawn toolbar icons remain crisp at any scale and avoid the
+  # placeholder F/E/V letters that made the control look unfinished.
+  defp render_icon(graph, :file, id, color, _theme, width, height) do
+    x = width / 2 - 7
+    y = height / 2 - 9
+
+    graph
+    |> Primitives.rrect({14, 18, 1},
+      id: {:icon_text, id},
+      stroke: {1.5, color},
+      fill: :clear,
+      translate: {x, y}
+    )
+    |> Primitives.line({{x + 3, y + 6}, {x + 11, y + 6}}, stroke: {1, color})
+    |> Primitives.line({{x + 3, y + 10}, {x + 11, y + 10}}, stroke: {1, color})
+    |> Primitives.line({{x + 3, y + 14}, {x + 9, y + 14}}, stroke: {1, color})
+  end
+
+  defp render_icon(graph, :edit, id, color, _theme, width, height) do
+    x = width / 2
+    y = height / 2
+
+    graph
+    |> Primitives.line({{x - 7, y + 7}, {x + 6, y - 6}}, id: {:icon_text, id}, stroke: {3, color})
+    |> Primitives.line({{x - 8, y + 8}, {x - 3, y + 7}}, stroke: {2, color})
+    |> Primitives.line({{x + 4, y - 7}, {x + 7, y - 4}}, stroke: {2, color})
+  end
+
+  defp render_icon(graph, :view, id, color, _theme, width, height) do
+    x = width / 2
+    y = height / 2
+
+    graph
+    |> Primitives.ellipse({10, 6},
+      id: {:icon_text, id},
+      stroke: {1.5, color},
+      fill: :clear,
+      translate: {x, y}
+    )
+    |> Primitives.circle(2.5, fill: color, translate: {x, y})
+  end
+
+  defp render_icon(graph, icon, id, color, theme, width, height) do
+    label = if is_atom(icon), do: icon |> Atom.to_string() |> String.first(), else: icon
+
+    Primitives.text(graph, label,
+      id: {:icon_text, id},
+      fill: color,
+      font: theme.font,
+      font_size: theme.icon_font_size,
+      text_align: :center,
+      translate: {width / 2, height / 2 + theme.icon_font_size / 3}
+    )
+  end
+
   defp render_dropdown(graph, %State{active_menu: nil}), do: graph
-  defp render_dropdown(graph, %State{active_menu: menu_id, menus: menus, theme: theme, dropdown_bounds: bounds} = state) do
+
+  defp render_dropdown(
+         graph,
+         %State{active_menu: menu_id, menus: menus, theme: theme, dropdown_bounds: bounds} = state
+       ) do
     menu = Enum.find(menus, &(&1.id == menu_id))
     dropdown = Map.get(bounds, menu_id)
 
@@ -130,7 +182,12 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     end
   end
 
-  defp render_dropdown_items(graph, items, %State{theme: theme, active_menu: menu_id, dropdown_bounds: bounds, hovered_item: hovered_item}) do
+  defp render_dropdown_items(graph, items, %State{
+         theme: theme,
+         active_menu: menu_id,
+         dropdown_bounds: bounds,
+         hovered_item: hovered_item
+       }) do
     dropdown = Map.get(bounds, menu_id)
     padding = theme.dropdown_padding
 
@@ -141,7 +198,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     |> Enum.with_index()
     |> Enum.reduce(graph, fn {item, index}, acc ->
       item_id = State.get_item_id(item)
-      label = State.get_item_label(item)
+      label = State.display_label(item)
       is_toggle = State.is_toggle_item?(item)
       is_checked = State.is_item_checked?(item)
 
@@ -150,36 +207,45 @@ defmodule ScenicWidgets.IconMenu.Renderer do
 
       # Position relative to dropdown origin
       item_x = padding
-      item_y = padding + (index * theme.dropdown_item_height)
+      item_y = padding + index * theme.dropdown_item_height
 
       bg_color = if is_hovered, do: theme.item_hover_bg, else: :clear
-      text_color = if is_hovered, do: theme.item_hover_text_color, else: theme.item_text_color
+      enabled? = State.item_enabled?(item)
+
+      text_color =
+        cond do
+          not enabled? -> {120, 120, 120}
+          is_hovered -> theme.item_hover_text_color
+          true -> theme.item_text_color
+        end
 
       acc
       |> Primitives.group(
         fn g ->
-          g = g
-          # Item background (for hover)
-          |> Primitives.rrect(
-            {dropdown.width - (2 * padding), theme.dropdown_item_height, 3},
-            id: {:item_bg, item_id},
-            fill: bg_color
-          )
+          g =
+            g
+            # Item background (for hover)
+            |> Primitives.rrect(
+              {dropdown.width - 2 * padding, theme.dropdown_item_height, 3},
+              id: {:item_bg, item_id},
+              fill: bg_color
+            )
 
           # Checkmark for toggle items (only if checked)
-          g = if is_toggle and is_checked do
-            g
-            |> Primitives.text(
-              "✓",
-              id: {:item_check, item_id},
-              fill: text_color,
-              font: theme.font,
-              font_size: theme.dropdown_font_size,
-              translate: {6, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
-            )
-          else
-            g
-          end
+          g =
+            if is_toggle and is_checked do
+              g
+              |> Primitives.text(
+                "✓",
+                id: {:item_check, item_id},
+                fill: text_color,
+                font: theme.font,
+                font_size: theme.dropdown_font_size,
+                translate: {6, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
+              )
+            else
+              g
+            end
 
           # Item text (offset if toggle items exist to align all labels)
           text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
@@ -218,73 +284,77 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       theme = new_state.theme
 
       # Update old hovered button (if any)
-      graph = if old_state.hovered_menu && old_state.hovered_menu != new_state.hovered_menu do
-        is_active = old_state.hovered_menu == new_state.active_menu
-        bg_color = if is_active, do: theme.icon_active_bg, else: theme.background
-        icon_color = if is_active, do: theme.icon_active_color, else: theme.icon_color
-
-        graph
-        |> Graph.modify({:icon_bg, old_state.hovered_menu}, fn p ->
-          Primitives.update_opts(p, fill: bg_color)
-        end)
-        |> Graph.modify({:icon_text, old_state.hovered_menu}, fn p ->
-          Primitives.update_opts(p, fill: icon_color)
-        end)
-      else
-        graph
-      end
-
-      # Update new hovered button (if any)
-      graph = if new_state.hovered_menu && old_state.hovered_menu != new_state.hovered_menu do
-        is_active = new_state.hovered_menu == new_state.active_menu
-        bg_color = if is_active, do: theme.icon_active_bg, else: theme.icon_hover_bg
-        icon_color = if is_active, do: theme.icon_active_color, else: theme.icon_hover_color
-
-        graph
-        |> Graph.modify({:icon_bg, new_state.hovered_menu}, fn p ->
-          Primitives.update_opts(p, fill: bg_color)
-        end)
-        |> Graph.modify({:icon_text, new_state.hovered_menu}, fn p ->
-          Primitives.update_opts(p, fill: icon_color)
-        end)
-      else
-        graph
-      end
-
-      # Update active state changes
-      graph = if active_changed do
-        # Update old active (now inactive)
-        graph = if old_state.active_menu && old_state.active_menu != new_state.active_menu do
-          is_hovered = old_state.active_menu == new_state.hovered_menu
-          bg_color = if is_hovered, do: theme.icon_hover_bg, else: theme.background
-          icon_color = if is_hovered, do: theme.icon_hover_color, else: theme.icon_color
+      graph =
+        if old_state.hovered_menu && old_state.hovered_menu != new_state.hovered_menu do
+          is_active = old_state.hovered_menu == new_state.active_menu
+          bg_color = if is_active, do: theme.icon_active_bg, else: theme.background
+          icon_color = if is_active, do: theme.icon_active_color, else: theme.icon_color
 
           graph
-          |> Graph.modify({:icon_bg, old_state.active_menu}, fn p ->
+          |> Graph.modify({:icon_bg, old_state.hovered_menu}, fn p ->
             Primitives.update_opts(p, fill: bg_color)
           end)
-          |> Graph.modify({:icon_text, old_state.active_menu}, fn p ->
+          |> Graph.modify({:icon_text, old_state.hovered_menu}, fn p ->
             Primitives.update_opts(p, fill: icon_color)
           end)
         else
           graph
         end
 
-        # Update new active
-        if new_state.active_menu do
+      # Update new hovered button (if any)
+      graph =
+        if new_state.hovered_menu && old_state.hovered_menu != new_state.hovered_menu do
+          is_active = new_state.hovered_menu == new_state.active_menu
+          bg_color = if is_active, do: theme.icon_active_bg, else: theme.icon_hover_bg
+          icon_color = if is_active, do: theme.icon_active_color, else: theme.icon_hover_color
+
           graph
-          |> Graph.modify({:icon_bg, new_state.active_menu}, fn p ->
-            Primitives.update_opts(p, fill: theme.icon_active_bg)
+          |> Graph.modify({:icon_bg, new_state.hovered_menu}, fn p ->
+            Primitives.update_opts(p, fill: bg_color)
           end)
-          |> Graph.modify({:icon_text, new_state.active_menu}, fn p ->
-            Primitives.update_opts(p, fill: theme.icon_active_color)
+          |> Graph.modify({:icon_text, new_state.hovered_menu}, fn p ->
+            Primitives.update_opts(p, fill: icon_color)
           end)
         else
           graph
         end
-      else
-        graph
-      end
+
+      # Update active state changes
+      graph =
+        if active_changed do
+          # Update old active (now inactive)
+          graph =
+            if old_state.active_menu && old_state.active_menu != new_state.active_menu do
+              is_hovered = old_state.active_menu == new_state.hovered_menu
+              bg_color = if is_hovered, do: theme.icon_hover_bg, else: theme.background
+              icon_color = if is_hovered, do: theme.icon_hover_color, else: theme.icon_color
+
+              graph
+              |> Graph.modify({:icon_bg, old_state.active_menu}, fn p ->
+                Primitives.update_opts(p, fill: bg_color)
+              end)
+              |> Graph.modify({:icon_text, old_state.active_menu}, fn p ->
+                Primitives.update_opts(p, fill: icon_color)
+              end)
+            else
+              graph
+            end
+
+          # Update new active
+          if new_state.active_menu do
+            graph
+            |> Graph.modify({:icon_bg, new_state.active_menu}, fn p ->
+              Primitives.update_opts(p, fill: theme.icon_active_bg)
+            end)
+            |> Graph.modify({:icon_text, new_state.active_menu}, fn p ->
+              Primitives.update_opts(p, fill: theme.icon_active_color)
+            end)
+          else
+            graph
+          end
+        else
+          graph
+        end
 
       graph
     else
@@ -297,11 +367,12 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       # Dropdown opened or changed
       old_state.active_menu != new_state.active_menu ->
         # Need to rebuild the dropdown - remove old and add new
-        graph = if old_state.active_menu do
-          Graph.delete(graph, :dropdown_group)
-        else
-          graph
-        end
+        graph =
+          if old_state.active_menu do
+            Graph.delete(graph, :dropdown_group)
+          else
+            graph
+          end
 
         if new_state.active_menu do
           render_dropdown(graph, new_state)
@@ -322,17 +393,18 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     theme = new_state.theme
 
     # Un-hover old item
-    graph = if old_state.hovered_item do
-      graph
-      |> Graph.modify({:item_bg, old_state.hovered_item}, fn p ->
-        Primitives.update_opts(p, fill: :clear)
-      end)
-      |> Graph.modify({:item_text, old_state.hovered_item}, fn p ->
-        Primitives.update_opts(p, fill: theme.item_text_color)
-      end)
-    else
-      graph
-    end
+    graph =
+      if old_state.hovered_item do
+        graph
+        |> Graph.modify({:item_bg, old_state.hovered_item}, fn p ->
+          Primitives.update_opts(p, fill: :clear)
+        end)
+        |> Graph.modify({:item_text, old_state.hovered_item}, fn p ->
+          Primitives.update_opts(p, fill: theme.item_text_color)
+        end)
+      else
+        graph
+      end
 
     # Hover new item
     if new_state.hovered_item do
