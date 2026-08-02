@@ -846,16 +846,44 @@ defmodule ScenicWidgets.TextField.Reducer do
   # overlay (e.g. IconMenu dropdown). See click handler comment above.
   # Tolerance of 4× font size past the line text width permits the usual
   # "click past end of line → place cursor at EOL" affordance.
-  defp store_backed_overlay_click?(%State{input_mode: :store_backed} = state, {x, y}) do
+  # Should this click be ignored because it was meant for an overlay?
+  #
+  # TextField requests :cursor_button non-positionally, so it also receives
+  # clicks aimed at things rendered ABOVE it (an IconMenu dropdown, a
+  # dialog). Acting on those moves the cursor in the document underneath.
+  #
+  # The host TELLS us when an overlay owns the pointer (`overlay_open`).
+  # This replaces a geometric heuristic that dropped any click landing right
+  # of the clicked line's text — which also killed every click on a short or
+  # BLANK line (the empty lines between paragraphs), leaving that whitespace
+  # dead to the mouse. Clicking past the end of a line now places the cursor
+  # at end-of-line, as it should.
+  # Rect form: ignore clicks inside the overlay's area only. NOTE for anyone
+  # wiring this up — the rect must be in THIS component's local coordinate
+  # space. Passing an overlay's own local bounds silently never matches, and
+  # the clicks it was meant to suppress fall through to the document
+  # (observed: menu clicks moving the cursor). Quillex passes `true` for that
+  # reason; converting IconMenu's bounds into pane space is unfinished work.
+  defp store_backed_overlay_click?(%State{overlay_open: %{x: x0, y: y0, width: w, height: h}}, {x, y}) do
+    x >= x0 and x <= x0 + w and y >= y0 and y <= y0 + h
+  end
+
+  defp store_backed_overlay_click?(%State{overlay_open: true}, _coords), do: true
+
+  defp store_backed_overlay_click?(%State{}, _coords), do: false
+
+  # Retained for reference: the geometry-guessing predecessor.
+  defp _legacy_overlay_click?(%State{input_mode: :store_backed} = state, {x, y}) do
     line_height = State.line_height(state)
     text_padding = 10
     gutter_width = if state.show_line_numbers, do: state.line_number_width, else: 0
     scroll = state.scroll
 
     content_x = x - gutter_width - text_padding + scroll.offset_x
-    content_y = y + scroll.offset_y
+    # -4 keeps this row model aligned with click_to_cursor (cursor-block offset)
+    content_y = y + scroll.offset_y - 4
 
-    line_idx = max(1, div(trunc(content_y), line_height) + 1)
+    line_idx = max(1, div(max(trunc(content_y), 0), line_height) + 1)
 
     cond do
       line_idx > length(state.lines) ->
@@ -873,7 +901,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
-  defp store_backed_overlay_click?(_state, _coords), do: false
+  defp _legacy_overlay_click?(_state, _coords), do: false
 
   # ===== SEARCH HELPER =====
 

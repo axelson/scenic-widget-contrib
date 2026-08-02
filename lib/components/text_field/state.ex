@@ -41,10 +41,13 @@ defmodule ScenicWidgets.TextField.State do
     :tab_width,                # Number of spaces per tab (default 4)
     :font,                     # %{name: atom, size: int, metrics: FontMetrics | nil}
     :colors,                   # %{text:, background:, cursor:, line_numbers:, border:, focused_border:}
+    :border_sides,             # Which edges get the 1px border line (default all four)
+    :overlay_open,             # Host says an overlay (menu/dialog) owns the pointer — ignore clicks
 
     # Buffer-backed mode (when input_mode == :store_backed)
     :dispatch,        # Buffer store process: pid or via-tuple (GenServer.cast target)
     :source,            # Scenic.PubSub source atom publishing buffer state snapshots
+    :buffer_id,       # UUID of the document currently shown — used to detect buffer SWITCHES
 
     # Interaction
     :editable,                 # Boolean (allow editing)
@@ -123,17 +126,7 @@ defmodule ScenicWidgets.TextField.State do
     show_line_numbers = Map.get(data, :show_line_numbers, false)
 
     # Calculate dynamic gutter width based on line count
-    line_number_width = if show_line_numbers do
-      line_count = length(lines)
-      digit_count = if line_count == 0, do: 1, else: trunc(:math.log10(max(1, line_count))) + 1
-      digits_to_show = max(2, digit_count)
-      # Use font size approximation since we don't have full state yet
-      digit_width = trunc(font.size * 0.6)
-      width = trunc(digits_to_show * digit_width) + 20
-      width
-    else
-      0
-    end
+    line_number_width = gutter_width(show_line_numbers, lines, font)
 
     # Calculate the content frame (excluding line numbers if shown)
     # IMPORTANT: Must create a proper Dimensions struct so .box is correct
@@ -180,10 +173,13 @@ defmodule ScenicWidgets.TextField.State do
       tab_width: Map.get(data, :tab_width, 4),
       font: font,
       colors: Map.get(data, :colors) || default_colors(),
+      border_sides: Map.get(data, :border_sides, [:top, :right, :bottom, :left]),
+      overlay_open: Map.get(data, :overlay_open, false),
 
       # Buffer-backed mode
       dispatch: Map.get(data, :dispatch),
       source: Map.get(data, :source),
+      buffer_id: Map.get(data, :buffer_id),
 
       # Interaction
       editable: Map.get(data, :editable, true),
@@ -600,17 +596,70 @@ defmodule ScenicWidgets.TextField.State do
   Accounts for scroll offset, gutter, and text padding.
   Returns {line, col} tuple (1-indexed).
   """
+  @doc """
+  Gutter (line-number column) width for a given line count and font.
+  Shared by `new/1` and `recalculate_line_number_width/1` so the two can
+  never drift apart.
+  """
+  def gutter_width(false, _lines, _font), do: 0
+
+  def gutter_width(true, lines, font) do
+    line_count = length(lines)
+    digit_count = if line_count == 0, do: 1, else: trunc(:math.log10(max(1, line_count))) + 1
+    digits_to_show = max(2, digit_count)
+    digit_width = trunc(font.size * 0.6)
+    trunc(digits_to_show * digit_width) + 20
+  end
+
+  @doc """
+  Recompute the scroll state's VIEWPORT dimensions from the current frame
+  and gutter width, preserving the current offsets (clamped).
+
+  Must be called after the frame changes when state is updated in place —
+  `new/1` derives these from the content frame, and stale values make the
+  visible-region maths wrong (text can vanish while the gutter still draws).
+  """
+  def recalculate_scroll_viewport(%__MODULE__{scroll: nil} = state), do: state
+
+  def recalculate_scroll_viewport(%__MODULE__{frame: frame, scroll: scroll} = state) do
+    content_width = max(frame.size.width - (state.line_number_width || 0), 1)
+    content_height = max(frame.size.height, 1)
+
+    scroll =
+      scroll
+      |> Map.put(:viewport_width, content_width)
+      |> Map.put(:viewport_height, content_height)
+      |> Widgex.Scroll.ScrollState.clamp()
+
+    %{state | scroll: scroll}
+  end
+
+  @doc """
+  Recompute the gutter width from current state (line count / font / whether
+  line numbers are shown). Used when settings are applied in place.
+  """
+  def recalculate_line_number_width(%__MODULE__{} = state) do
+    %{state | line_number_width: gutter_width(state.show_line_numbers, state.lines, state.font)}
+  end
+
   def click_to_cursor(%__MODULE__{scroll: scroll, lines: lines} = state, {click_x, click_y}) do
     line_height = line_height(state)
     text_padding = 10  # Same as in renderer
     gutter_width = if state.show_line_numbers, do: state.line_number_width, else: 0
 
-    # Convert click to content coordinates (accounting for scroll and gutter)
+    # Convert click to content coordinates (accounting for scroll and gutter).
+    # Input coords arrive already transformed to this component's local space.
     content_x = click_x - gutter_width - text_padding + scroll.offset_x
-    content_y = click_y + scroll.offset_y
+
+    # The -4 aligns the click rows with the VISUAL rows: the renderer draws
+    # line n's cursor block at (n-1)*line_height + 4 (see render_cursor) and
+    # the text baseline at n*line_height, so glyphs sit ~4-6px lower than a
+    # naive (n-1)*line_height row model. Without this, clicks in the bottom
+    # few pixels of a visual line land one line down (QA A-known-failure #3).
+    content_y = click_y + scroll.offset_y - 4
 
     # Calculate line number from Y coordinate
-    line = max(1, min(length(lines), div(trunc(content_y), line_height) + 1))
+    line = max(1, min(length(lines), div(max(trunc(content_y), 0), line_height) + 1))
 
     # Get the text of the clicked line
     line_text = Enum.at(lines, line - 1, "")
@@ -649,7 +698,17 @@ defmodule ScenicWidgets.TextField.State do
   Get the word at or near the cursor position.
   Returns the word as a string, or nil if cursor is not on a word.
   """
-  def word_at_cursor(%__MODULE__{lines: lines, cursor: {line_num, col}}) do
+  def word_at_cursor(%__MODULE__{lines: lines, cursor: cursor}), do: word_at(lines, cursor)
+
+  @doc """
+  The word at `{line, col}` in `lines`, or nil.
+
+  Takes plain data rather than component state so a host can compute it from
+  the document itself (e.g. a buffer store) instead of calling synchronously
+  into the live component — which blocks on whatever that component is
+  currently rendering.
+  """
+  def word_at(lines, {line_num, col}) when is_list(lines) do
     line = Enum.at(lines, line_num - 1, "")
     extract_word_at(line, col - 1)  # Convert to 0-indexed
   end
@@ -740,6 +799,39 @@ defmodule ScenicWidgets.TextField.State do
   end
 
   @doc """
+  Which DISPLAY lines need rendering right now, as `{first, last}` (1-indexed,
+  inclusive), given the live scroll offset and frame height.
+
+  Rendering every line of the document builds one primitive per line, which
+  on a large file costs seconds and blocks the component. Only lines within
+  the viewport (plus `viewport_buffer_lines` either side, so small scrolls
+  need no rebuild) are worth drawing — everything else is scissored away.
+
+  Single-line mode always renders its one line.
+  """
+  def visible_display_range(%__MODULE__{mode: :single_line}, display_count), do: {1, display_count}
+
+  def visible_display_range(%__MODULE__{} = state, display_count) do
+    line_height = line_height(state)
+    offset_y = (state.scroll && state.scroll.offset_y) || 0
+    height = state.frame.size.height
+    buffer = state.viewport_buffer_lines || 5
+
+    last = min(display_count, trunc((offset_y + height) / line_height) + 1 + buffer)
+
+    # Clamp the START to the document as well. If the scroll offset outruns
+    # the content (stale content_height, or wrap mode changing the display
+    # line count under us), an unclamped start lands past the last line and
+    # the range selects NOTHING — the view goes blank exactly when scrolled
+    # to the end of the file.
+    first =
+      max(1, trunc(offset_y / line_height) + 1 - buffer)
+      |> min(max(display_count, 1))
+
+    {first, max(last, first)}
+  end
+
+  @doc """
   Calculate which lines should be rendered based on viewport and scroll position.
   Returns {render_start, render_end} tuple (1-indexed, inclusive).
   """
@@ -786,8 +878,14 @@ defmodule ScenicWidgets.TextField.State do
     viewport_height = frame.size.height
     viewport_width = frame.size.width
 
+    # Use the cursor's DISPLAY line: with word wrap on it sits further down
+    # than its source line, and scrolling by the source line scrolls too
+    # little — the bottom of a wrapped document could not be reached.
+    {display_line, _display_col} =
+      ScenicWidgets.TextField.Renderer.source_to_display_cursor(state, {line, col})
+
     # Calculate cursor pixel position
-    cursor_y = (line - 1) * line_height
+    cursor_y = (display_line - 1) * line_height
 
     # Get text before cursor for horizontal position
     current_line = get_line(state, line)

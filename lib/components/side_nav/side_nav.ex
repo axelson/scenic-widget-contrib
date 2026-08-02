@@ -171,6 +171,17 @@ defmodule ScenicWidgets.SideNav do
     {:noreply, scene}
   end
 
+  # Component-level focus, granted/revoked by the parent scene — the same
+  # :focus/:blur contract TextField uses. Keyboard input is ignored while
+  # unfocused (see the {:key, _} gate in handle_input/3).
+  def handle_put(:focus, scene) do
+    {:noreply, assign(scene, state: %{scene.assigns.state | focused: true})}
+  end
+
+  def handle_put(:blur, scene) do
+    {:noreply, assign(scene, state: %{scene.assigns.state | focused: false})}
+  end
+
   # Handle scroll input routed from parent scene
   def handle_put(%{scroll: scroll_data}, scene) do
     state = scene.assigns.state
@@ -240,7 +251,7 @@ defmodule ScenicWidgets.SideNav do
       state = scene.assigns.state
 
       # Toggle expansion state
-      new_state = State.toggle_expanded(state, item_id)
+      new_state = %{State.toggle_expanded(state, item_id) | focused: true}
 
       # Send expand/collapse event to parent
       if MapSet.member?(new_state.expanded, item_id) do
@@ -290,7 +301,7 @@ defmodule ScenicWidgets.SideNav do
     # If it's a group with children, toggle expansion instead of navigating
     if item && Item.has_children?(item) do
       Logger.debug("   📂 Group item - toggling expansion")
-      new_state = State.toggle_expanded(state, item_id)
+      new_state = %{State.toggle_expanded(state, item_id) | focused: true}
 
       # Send expand/collapse event to parent (informational only)
       if MapSet.member?(new_state.expanded, item_id) do
@@ -321,10 +332,12 @@ defmodule ScenicWidgets.SideNav do
         Logger.debug("   ℹ️  No action callback - parent message only")
       end
 
-      # Set as active and focused
+      # Set as active and focused (a click inside the nav also grants the
+      # component keyboard focus)
       new_state = state
         |> State.set_active(item_id)
         |> State.set_focused(item_id)
+        |> Map.put(:focused, true)
 
       graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
       scene = scene
@@ -345,7 +358,14 @@ defmodule ScenicWidgets.SideNav do
 
   # Note: scroll input is handled via handle_put from parent scene
 
-  # Keyboard navigation
+  # Keyboard navigation — gated on component focus. SideNav requests [:key]
+  # globally, so without this gate every keystroke on screen reaches it:
+  # Enter typed into an editor would also "open" the focused nav item
+  # (double-delivery). TextField has the equivalent gate in its handle_input.
+  def handle_input({:key, _}, _context, %{assigns: %{state: %State{focused: false}}} = scene) do
+    {:noreply, scene}
+  end
+
   def handle_input({:key, {:key_down, 1, _}}, _context, scene) do
     handle_keyboard(scene, &Reducer.handle_key_down/1)
   end

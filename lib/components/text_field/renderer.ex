@@ -102,16 +102,26 @@ defmodule ScenicWidgets.TextField.Renderer do
     )
   end
 
-  defp render_border(graph, %State{frame: frame, colors: colors, focused: focused}) do
+  defp render_border(graph, %State{frame: frame, colors: colors, focused: focused} = state) do
     border_color = if focused, do: colors.focused_border, else: colors.border
+    {w, h} = {frame.size.width, frame.size.height}
+    sides = state.border_sides || [:top, :right, :bottom, :left]
 
+    # One line per requested side, grouped under :border. The stroke lives on
+    # the group so update_border_if_changed can restyle every side with a
+    # single Graph.modify (children inherit the group's stroke).
     graph
-    |> Primitives.rect(
-      {frame.size.width, frame.size.height},
+    |> Primitives.group(
+      fn g -> Enum.reduce(sides, g, &border_line(&2, &1, w, h)) end,
       stroke: {1, border_color},
       id: :border
     )
   end
+
+  defp border_line(g, :top, w, _h), do: Primitives.line(g, {{0, 0}, {w, 0}})
+  defp border_line(g, :bottom, w, h), do: Primitives.line(g, {{0, h}, {w, h}})
+  defp border_line(g, :left, _w, h), do: Primitives.line(g, {{0, 0}, {0, h}})
+  defp border_line(g, :right, w, h), do: Primitives.line(g, {{w, 0}, {w, h}})
 
   # Render both the gutter (line numbers) and text content areas
   defp render_gutter_and_content(graph, %State{show_line_numbers: false} = state) do
@@ -142,7 +152,12 @@ defmodule ScenicWidgets.TextField.Renderer do
       # Inner group that scrolls vertically
       Primitives.group(outer_g, fn inner_g ->
         # Render line numbers for each display line
-        Enum.reduce(Enum.with_index(line_mapping, 1), inner_g, fn {{source_line_num, is_first_of_source}, display_line_num}, g ->
+        {gutter_first, gutter_last} = State.visible_display_range(state, length(line_mapping))
+
+        line_mapping
+        |> Enum.with_index(1)
+        |> Enum.filter(fn {_entry, n} -> n >= gutter_first and n <= gutter_last end)
+        |> Enum.reduce(inner_g, fn {{source_line_num, is_first_of_source}, display_line_num}, g ->
           y_pos = (display_line_num - 1) * line_height + line_height
           x_pos = gutter_width - 10  # Right-align
 
@@ -289,7 +304,16 @@ defmodule ScenicWidgets.TextField.Renderer do
   # leading spaces as zero-width
   # For single-line mode, uses text_base: :middle for perfect vertical centering
   defp render_text_lines(graph, %State{mode: mode, frame: frame} = state, display_lines, x_offset, line_height, _text_y_offset \\ 0) do
-    Enum.reduce(Enum.with_index(display_lines, 1), graph, fn {line_text, line_num}, g ->
+    # Draw only the lines that can be seen (plus a small buffer). Each is
+    # positioned at its ABSOLUTE y, so the content group's scroll translate
+    # keeps working unchanged. Rendering an entire document builds one
+    # primitive per line — seconds of work on a large file.
+    {first, last} = State.visible_display_range(state, length(display_lines))
+
+    display_lines
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {_line, n} -> n >= first and n <= last end)
+    |> Enum.reduce(graph, fn {line_text, line_num}, g ->
       # Expand tabs and get indent width + trimmed content
       # Scenic renders leading spaces as zero-width, so we position explicitly
       {indent_width, content} = State.expand_tabs_with_indent(state, line_text)
@@ -707,18 +731,54 @@ defmodule ScenicWidgets.TextField.Renderer do
   defp update_gutter_scroll(graph, _old_state, _new_state), do: graph
 
   # Update content scroll position (both directions)
-  defp update_content_scroll(graph, %State{scroll: old_scroll}, %State{scroll: new_scroll})
-      when old_scroll.offset_x != new_scroll.offset_x or old_scroll.offset_y != new_scroll.offset_y do
-    try do
-      Graph.modify(graph, :text_content, fn primitive ->
-        Scenic.Primitive.put_style(primitive, :translate, {-new_scroll.offset_x, -new_scroll.offset_y})
-      end)
-    rescue
-      _ -> graph
+  # Scrolling far enough to change WHICH lines are visible means the drawn
+  # set is now wrong (only visible lines are rendered), so the content area
+  # must be rebuilt rather than merely translated.
+  # Scrolling past the buffered margin changes WHICH lines should be drawn,
+  # so the content area (and gutter) must be rebuilt, not merely translated.
+  # Within the margin a translate is enough — that is what the buffer is for.
+  defp update_content_scroll(graph, %State{} = old_state, %State{} = new_state) do
+    if visible_window_changed?(old_state, new_state) do
+      graph
+      |> rebuild_content_area(new_state)
+      |> rebuild_gutter_if_shown(new_state)
+    else
+      translate_content_scroll(graph, old_state, new_state)
     end
   end
 
-  defp update_content_scroll(graph, _old_state, _new_state), do: graph
+  # Compare windows using scroll offset and frame geometry ONLY.
+  #
+  # Never call wrap_lines here: this runs on every render, and re-wrapping the
+  # whole document per render stalls the component badly enough that scroll
+  # input stops being serviced. The line count only clamps the window's end,
+  # which is not needed to detect that the window moved.
+  defp visible_window_changed?(old_state, new_state) do
+    unclamped_window(old_state) != unclamped_window(new_state)
+  end
+
+  defp unclamped_window(%State{} = state) do
+    line_height = State.line_height(state)
+    offset_y = (state.scroll && state.scroll.offset_y) || 0
+    buffer = state.viewport_buffer_lines || 5
+
+    {
+      max(1, trunc(offset_y / line_height) + 1 - buffer),
+      trunc((offset_y + state.frame.size.height) / line_height) + 1 + buffer
+    }
+  end
+
+  defp translate_content_scroll(graph, %State{scroll: old_scroll}, %State{scroll: new_scroll})
+      when old_scroll.offset_x != new_scroll.offset_x or old_scroll.offset_y != new_scroll.offset_y do
+    # No rescue here: if :text_content can't be modified the view silently
+    # stops following the scroll state (the "state scrolls, pixels don't"
+    # bug class) — crash loudly instead so the cause is visible.
+    Graph.modify(graph, :text_content, fn primitive ->
+      Scenic.Primitive.put_style(primitive, :translate, {-new_scroll.offset_x, -new_scroll.offset_y})
+    end)
+  end
+
+  defp translate_content_scroll(graph, _old_state, _new_state), do: graph
 
   # Rebuild the entire content area when line count increases
   # This is needed because we can't add new primitives to existing groups
@@ -747,86 +807,87 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   # Update text lines when content changes
   # Must update both text content AND x-position due to explicit indent positioning
-  defp update_lines_if_changed(graph, %State{lines: old_lines}, %State{lines: new_lines} = new_state)
+  # Any change to the text rebuilds the content area (and the gutter, whose
+  # line numbers may have shifted) rather than modifying per-line primitives.
+  #
+  # The old path called Graph.modify on {:text_line, n} for every line. With
+  # only the VISIBLE lines rendered, primitives outside the window do not
+  # exist, and those modifies silently no-opped (they are rescued) — edits
+  # off-screen would not appear when scrolled to. A rebuild is correct by
+  # construction, and cheap precisely because rendering is virtualised: it
+  # draws a screenful, not a document.
+  defp update_lines_if_changed(graph, %State{lines: old_lines} = old_state, %State{lines: new_lines} = new_state)
       when old_lines != new_lines do
-    old_display_lines = wrap_lines_from(old_lines, new_state)
-    new_display_lines = wrap_lines(new_state)
+    old_display = wrap_lines_from(old_lines, new_state)
+    new_display = wrap_lines(new_state)
 
-    old_count = length(old_display_lines)
-    new_count = length(new_display_lines)
-
-    x_offset = 10  # text_padding
-    line_height = State.line_height(new_state)
-    frame_height = new_state.frame.size.height
-
-    # If line count increased, we need to rebuild the content area
-    if new_count > old_count do
-      rebuild_content_area(graph, new_state)
+    if length(old_display) != length(new_display) do
+      # Line count changed: which lines are drawn shifts, so rebuild (also
+      # renumbers the gutter). Cheap because rendering is virtualised.
+      graph
+      |> rebuild_content_area(new_state)
+      |> rebuild_gutter_if_shown(new_state)
     else
-      # Update existing lines - both content AND position for indentation
-      graph = Enum.reduce(Enum.with_index(new_display_lines, 1), graph, fn {line_text, line_num}, g ->
-        # Get indent width and trimmed content
-        {indent_width, content} = State.expand_tabs_with_indent(new_state, line_text)
-        line_x = x_offset + indent_width
-
-        # For single-line mode, use frame center (text_base: :middle is already set)
-        # For multi-line, use standard baseline positioning
-        # +2 adjustment matches initial render
-        y_pos = case new_state.mode do
-          :single_line -> frame_height / 2 + 2
-          _ -> (line_num - 1) * line_height + line_height
-        end
-
-        try do
-          Graph.modify(g, {:text_line, line_num}, fn primitive ->
-            primitive
-            |> Scenic.Primitive.put(content)
-            |> Scenic.Primitive.put_style(:translate, {line_x, y_pos})
-          end)
-        rescue
-          _ -> g
-        end
-      end)
-
-      # Clear any extra old lines (reset position to base x_offset)
-      if old_count > new_count do
-        Enum.reduce((new_count + 1)..old_count, graph, fn line_num, g ->
-          y_pos = case new_state.mode do
-            :single_line -> frame_height / 2 + 2
-            _ -> (line_num - 1) * line_height + line_height
-          end
-          try do
-            Graph.modify(g, {:text_line, line_num}, fn primitive ->
-              primitive
-              |> Scenic.Primitive.put("")
-              |> Scenic.Primitive.put_style(:translate, {x_offset, y_pos})
-            end)
-          rescue
-            _ -> g
-          end
-        end)
-      else
-        graph
-      end
+      # Same number of lines: edit the primitives that exist, i.e. only the
+      # ones inside the rendered window. Rebuilding here instead would make
+      # every keystroke O(document) — typing into a long file could not keep
+      # up. Lines outside the window have no primitive and need none; they
+      # are rendered from current state whenever the window next moves.
+      {first, last} = State.visible_display_range(new_state, length(new_display))
+      update_visible_line_primitives(graph, new_state, new_display, first, last)
     end
   end
 
   defp update_lines_if_changed(graph, _old_state, _new_state), do: graph
+
+  defp rebuild_gutter_if_shown(graph, %State{show_line_numbers: true} = state),
+    do: rebuild_gutter(graph, state)
+
+  defp rebuild_gutter_if_shown(graph, _state), do: graph
+
+  defp update_visible_line_primitives(graph, %State{} = state, display_lines, first, last) do
+    x_offset = 10  # text_padding
+    line_height = State.line_height(state)
+    frame_height = state.frame.size.height
+
+    display_lines
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {_line, n} -> n >= first and n <= last end)
+    |> Enum.reduce(graph, fn {line_text, line_num}, g ->
+      {indent_width, content} = State.expand_tabs_with_indent(state, line_text)
+      line_x = x_offset + indent_width
+
+      y_pos =
+        case state.mode do
+          :single_line -> frame_height / 2 + 2
+          _ -> (line_num - 1) * line_height + line_height
+        end
+
+      try do
+        Graph.modify(g, {:text_line, line_num}, fn primitive ->
+          primitive
+          |> Scenic.Primitive.put(content)
+          |> Scenic.Primitive.put_style(:translate, {line_x, y_pos})
+        end)
+      rescue
+        _ -> g
+      end
+    end)
+  end
 
   defp update_semantic_if_changed(graph, old_state, new_state) do
     if semantic_changed?(old_state, new_state) do
       semantic = semantic_metadata(new_state)
       text = State.get_text(new_state)
 
-      try do
-        Graph.modify(graph, :semantic_content, fn primitive ->
-          primitive
-          |> Scenic.Primitive.put(text)
-          |> Scenic.Primitive.put_style(:semantic, semantic)
-        end)
-      rescue
-        _ -> graph
-      end
+      # No rescue: a swallowed modify failure here leaves the semantic table
+      # frozen at stale values while the visible state moves on — the
+      # "cursor moved on screen but tests read the old position" bug class.
+      Graph.modify(graph, :semantic_content, fn primitive ->
+        primitive
+        |> Scenic.Primitive.put(text)
+        |> Scenic.Primitive.put_style(:semantic, semantic)
+      end)
     else
       graph
     end
@@ -838,6 +899,11 @@ defmodule ScenicWidgets.TextField.Renderer do
     old_state.selection != new_state.selection or
     old_state.editable != new_state.editable or
     old_state.mode != new_state.mode or
+    # The published frame is part of the semantic payload (consumers derive
+    # coordinates from it), so a frame change alone must refresh it —
+    # otherwise a resize/layout shift leaves stale geometry on record and
+    # anything computing positions from it is off by the delta.
+    old_state.frame != new_state.frame or
     scroll_changed?(old_state.scroll, new_state.scroll)
   end
 
@@ -938,13 +1004,17 @@ defmodule ScenicWidgets.TextField.Renderer do
     end
   end
 
-  defp semantic_metadata(%State{id: id, editable: editable, mode: mode, cursor: cursor, selection: selection, scroll: scroll}) do
+  defp semantic_metadata(%State{id: id, editable: editable, mode: mode, cursor: cursor, selection: selection, scroll: scroll, frame: frame}) do
     %{
       type: if(mode == :multi_line, do: :text_buffer, else: :text_field),
       field_id: id,
       editable: editable,
       multiline: mode == :multi_line,
-      role: if(mode == :multi_line, do: :textbox, else: :textfield)
+      role: if(mode == :multi_line, do: :textbox, else: :textfield),
+      # The component's actual frame in parent coords. Tests must derive
+      # click coordinates from THIS, not from the configured window size —
+      # the WM may grant a smaller window and the layout reflows to match.
+      frame: %{x: frame.pin.x, y: frame.pin.y, width: frame.size.width, height: frame.size.height}
     }
     |> maybe_put(:cursor_position, cursor)
     |> maybe_put(:selection, selection_to_map(selection))
@@ -1136,12 +1206,20 @@ defmodule ScenicWidgets.TextField.Renderer do
   # Convert source cursor position to display cursor position
   # When lines wrap, we need to find which display line the cursor is on
   # and what column within that display line
-  defp source_to_display_cursor(%State{wrap_mode: :none}, {source_line, source_col}) do
+  @doc """
+  Map a cursor from SOURCE {line, col} to DISPLAY {line, col}.
+
+  Public because scrolling needs it too: with word wrap on, a cursor's
+  display line is further down than its source line, and anything computing
+  a scroll target from the source line scrolls too little (the end of a
+  wrapped document becomes unreachable).
+  """
+  def source_to_display_cursor(%State{wrap_mode: :none}, {source_line, source_col}) do
     # No wrapping - simple 1:1 mapping
     {source_line, source_col}
   end
 
-  defp source_to_display_cursor(%State{lines: lines} = state, {source_line, source_col}) do
+  def source_to_display_cursor(%State{lines: lines} = state, {source_line, source_col}) do
     max_width = content_area_width(state)
 
     # Count how many display lines exist before the source line containing the cursor

@@ -261,6 +261,18 @@ defmodule ScenicWidgets.TextField do
     # (e.g., buffer pane shouldn't receive input when search bar is open,
     #  read-only HyperCards shouldn't capture keyboard input)
     case input do
+      # An overlay owns the keyboard — ignore ALL key input regardless of our
+      # own focus flag. This is a second, independent guard: focus is granted
+      # and revoked by asynchronous messages, so during the window in which an
+      # overlay is opening, a still-focused editor would otherwise apply the
+      # user's keystrokes to the DOCUMENT. That is how typing a search query
+      # (and the backspaces clearing it) silently edited the open file.
+      {:key, _} when state.overlay_open != false and state.overlay_open != nil ->
+        {:noreply, scene}
+
+      {:codepoint, _} when state.overlay_open != false and state.overlay_open != nil ->
+        {:noreply, scene}
+
       # Keyboard input - only process if focused AND editable
       {:key, _} when not state.focused or not state.editable ->
         {:noreply, scene}
@@ -268,11 +280,35 @@ defmodule ScenicWidgets.TextField do
       {:codepoint, _} when not state.focused or not state.editable ->
         {:noreply, scene}
 
-      # Mouse/scroll input - always process (for clicks, scrolling)
+      # Scroll is positional: only act on it when the pointer is inside this
+      # component's frame. request_input delivers every scroll event globally,
+      # so without this bound-check two components on screen (e.g. an editor
+      # beside a sidebar) would BOTH scroll on a single wheel event.
+      {:cursor_scroll, {{_dx, _dy}, {x, y}}} ->
+        if point_in_frame?(state.frame, x, y) do
+          do_handle_input(input, scene)
+        else
+          {:noreply, scene}
+        end
+
+      {:cursor_scroll, {_dx, _dy, x, y}} ->
+        if point_in_frame?(state.frame, x, y) do
+          do_handle_input(input, scene)
+        else
+          {:noreply, scene}
+        end
+
+      # Mouse input - always process (for clicks)
       # But don't allow gaining focus if not editable
       _ ->
         do_handle_input(input, scene)
     end
+  end
+
+  # Input coords from request_input arrive in the parent's coordinate space —
+  # the same space as state.frame's pin for a component placed by a root scene.
+  defp point_in_frame?(%{pin: %{x: px, y: py}, size: %{width: w, height: h}}, x, y) do
+    x >= px and x <= px + w and y >= py and y <= py + h
   end
 
   defp do_handle_input(input, scene) do
@@ -453,7 +489,11 @@ defmodule ScenicWidgets.TextField do
 
   def handle_put(:focus, scene) do
     # Focus the text field
-    state = %{scene.assigns.state | focused: true}
+    # Being told to focus means this field owns the keyboard now, so any
+    # "an overlay owns it" gate is by definition stale — clear it. Without
+    # this, a single missed clear latches the gate and the editor silently
+    # ignores everything typed into it.
+    state = %{scene.assigns.state | focused: true, overlay_open: false}
     update_scene(scene, scene.assigns.state, state)
   end
 
@@ -461,6 +501,65 @@ defmodule ScenicWidgets.TextField do
     # Blur the text field
     state = %{scene.assigns.state | focused: false}
     update_scene(scene, scene.assigns.state, state)
+  end
+
+  @doc """
+  Apply editor settings (and/or a new frame) IN PLACE.
+
+  Rebuilds this component's graph from scratch while keeping the process
+  alive — so its input registration, focus and cursor survive. Hosts should
+  prefer this over delete-and-recreate: during a recreation there is a
+  window in which the old component has died and the new one has not yet
+  requested input, and any keystroke or click arriving in that window is
+  lost. (Symptom: a character vanishes if you type while toggling a setting.)
+
+  Recognised keys: `:show_line_numbers`, `:wrap_mode`, `:tab_width`,
+  `:frame`, `:colors`, `:font`. Unknown keys are ignored.
+  """
+  @doc """
+  Set the "an overlay owns the pointer" flag.
+
+  Deliberately does NOT re-render: the flag only gates click handling, and
+  hosts toggle it on every menu open/close — including hover-switching
+  between menus. Routing it through `{:update_settings, ...}` rebuilds the
+  whole graph, which on a large document is slow enough to block the
+  component and time out the caller.
+  """
+  def handle_put({:set_overlay_open, open?}, scene)
+      when is_boolean(open?) or is_map(open?) or is_nil(open?) do
+    {:noreply, assign(scene, state: %{scene.assigns.state | overlay_open: open? || false})}
+  end
+
+  def handle_put({:update_settings, settings}, scene) when is_map(settings) do
+    old_state = scene.assigns.state
+
+    new_state =
+      Enum.reduce([:show_line_numbers, :wrap_mode, :tab_width, :frame, :colors, :font, :overlay_open], old_state, fn
+        key, acc ->
+          case Map.fetch(settings, key) do
+            {:ok, value} -> Map.put(acc, key, value)
+            :error -> acc
+          end
+      end)
+
+    # Recompute EVERY frame-derived value, in dependency order. Missing one
+    # is subtle and severe: leaving the scroll's viewport dimensions stale
+    # after a frame change made the content area compute an empty visible
+    # region, so the gutter drew and the text did not.
+    new_state =
+      new_state
+      |> State.recalculate_line_number_width()
+      |> State.recalculate_scroll_viewport()
+      |> Reducer.update_scroll_content_size()
+
+    graph = Renderer.initial_render(Scenic.Graph.build(), new_state)
+
+    scene =
+      scene
+      |> assign(state: new_state, graph: graph)
+      |> push_graph(graph)
+
+    {:noreply, scene}
   end
 
   def handle_put(%{editable: editable} = opts, scene) do
@@ -606,6 +705,23 @@ defmodule ScenicWidgets.TextField do
       else
         new_state
       end
+
+      # A buffer SWITCH (a different document behind the stable pane source)
+      # must not inherit the previous document's scroll position — the view
+      # would open scrolled to wherever the last buffer happened to be, and
+      # every click would land offset by the stale scroll. Reset to origin.
+      # Same-document updates keep scroll: typing must not yank the view.
+      new_state =
+        case Map.get(buf_state, :uuid) do
+          nil ->
+            new_state
+
+          uuid when uuid == state.buffer_id ->
+            new_state
+
+          uuid ->
+            %{new_state | buffer_id: uuid, scroll: %{new_state.scroll | offset_x: 0, offset_y: 0}}
+        end
 
       # Emit search_complete if search results changed
       old_matches = state.search_matches || []

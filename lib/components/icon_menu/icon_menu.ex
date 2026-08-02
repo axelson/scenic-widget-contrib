@@ -155,11 +155,38 @@ defmodule ScenicWidgets.IconMenu do
   # Private Helpers
   # ===========================================================================
 
+  # Tell the parent when a dropdown opens or closes.
+  #
+  # A dropdown renders ABOVE sibling components, but sibling components that
+  # request positional input non-positionally still receive clicks meant for
+  # it. Without this signal they can only guess (badly) from geometry
+  # whether a click was theirs. Emitted from the single place every menu
+  # transition passes through, so open/close can never be missed.
+  defp notify_dropdown_state(scene, %{active_menu: same}, %{active_menu: same}), do: scene
+
+  defp notify_dropdown_state(scene, _old_state, %{active_menu: nil}) do
+    send_parent_event(scene, {:dropdown_closed})
+    scene
+  end
+
+  defp notify_dropdown_state(scene, _old_state, %{active_menu: menu_id} = new_state) do
+    # Send the dropdown's BOUNDS, not just "a menu is open". A consumer that
+    # only knows "open" has to ignore every click while it is set, so a
+    # single missed close event makes the whole UI beneath it unclickable.
+    # With bounds, a stale state can only ever affect the dropdown's own area.
+    bounds = Map.get(new_state.dropdown_bounds || %{}, menu_id)
+    send_parent_event(scene, {:dropdown_opened, menu_id, bounds})
+    scene
+  end
+
   defp update_scene(scene, old_state, new_state) do
     graph = Renderer.update_render(scene.assigns.graph, old_state, new_state)
     scene = scene
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
+
+    notify_dropdown_state(scene, old_state, new_state)
+
     {:noreply, scene}
   end
 
@@ -168,6 +195,9 @@ defmodule ScenicWidgets.IconMenu do
     scene = scene
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
+
+    notify_dropdown_state(scene, old_state, new_state)
+
     {:noreply, scene}
   end
 

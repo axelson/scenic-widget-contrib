@@ -23,7 +23,8 @@ defmodule ScenicWidgets.SideNav.State do
     :expanded,           # MapSet of expanded node IDs
     :scroll,             # Widgex.Scroll.ScrollState for scrolling
     :theme,              # Visual theme configuration
-    :item_bounds         # Pre-calculated bounds for hit-testing
+    :item_bounds,        # Pre-calculated bounds for hit-testing
+    focused: false       # Component-level keyboard focus — all key input is ignored while false
   ]
 
   @default_theme %{
