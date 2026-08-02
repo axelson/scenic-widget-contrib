@@ -363,36 +363,17 @@ defmodule ScenicWidgets.TextField do
         # No action to send (e.g., unhandled key)
         {:noreply, scene}
 
-      {:clipboard_copy, text} ->
-        # Copy is handled locally (clipboard is a system thing)
-        copy_to_system_clipboard(text)
+      {:clipboard_copy, _text} ->
+        if state.dispatch, do: GenServer.cast(state.dispatch, {:action, [{:copy, :selection}]})
         {:noreply, scene}
 
-      {:clipboard_cut, text} ->
-        # Cut: copy to clipboard, clear selection immediately, and send delete action to buffer
-        copy_to_system_clipboard(text)
-        new_state = %{state | selection: nil, text_drag: nil, text_drag_start: nil}
-
-        if state.dispatch do
-          GenServer.cast(state.dispatch, {:action, [{:delete, :selection}]})
-        end
-
-        update_scene(scene, state, new_state)
+      {:clipboard_cut, _text} ->
+        if state.dispatch, do: GenServer.cast(state.dispatch, {:action, [{:cut, :selection}]})
+        {:noreply, scene}
 
       {:clipboard_paste} ->
-        # Paste: get clipboard text and send insert action to buffer
-        clipboard_text = paste_from_system_clipboard()
-
-        if state.dispatch && clipboard_text != "" do
-          GenServer.cast(state.dispatch, {:action, [{:insert, clipboard_text, :at_cursor}]})
-        end
-
-        if state.selection != nil do
-          new_state = %{state | selection: nil}
-          update_scene(scene, state, new_state)
-        else
-          {:noreply, scene}
-        end
+        if state.dispatch, do: GenServer.cast(state.dispatch, {:action, [{:paste, :at_cursor}]})
+        {:noreply, scene}
 
       {:local_update, new_state} ->
         # Some updates (like focus, scrollbar drag) are handled locally
@@ -461,26 +442,37 @@ defmodule ScenicWidgets.TextField do
         update_scene(scene, state, new_state)
 
       {:event, {:clipboard_copy, _id, text}, new_state} ->
-        # Copy to system clipboard
-        copy_to_system_clipboard(text)
-        send_parent_event(scene, {:clipboard_copy, state.id, text})
-        update_scene(scene, state, new_state)
+        case clipboard_copy(text) do
+          :ok ->
+            send_parent_event(scene, {:clipboard_copy, state.id, text})
+            update_scene(scene, state, new_state)
+
+          {:error, reason} ->
+            clipboard_error(scene, :copy, reason)
+        end
 
       {:event, {:clipboard_cut, _id, text}, new_state} ->
-        # Cut to system clipboard
-        copy_to_system_clipboard(text)
-        send_parent_event(scene, {:clipboard_cut, state.id, text})
-        update_scene(scene, state, new_state)
+        case clipboard_copy(text) do
+          :ok ->
+            send_parent_event(scene, {:clipboard_cut, state.id, text})
+            update_scene(scene, state, new_state)
+
+          {:error, reason} ->
+            clipboard_error(scene, :cut, reason)
+        end
 
       {:event, {:clipboard_paste_requested, _id}, new_state} ->
-        # Get text from system clipboard and paste it
-        clipboard_text = paste_from_system_clipboard()
+        case clipboard_paste() do
+          {:ok, clipboard_text} ->
+            {:event, event_data, final_state} =
+              Reducer.process_action(new_state, {:insert_text, clipboard_text})
 
-        {:event, event_data, final_state} =
-          Reducer.process_action(new_state, {:insert_text, clipboard_text})
+            send_parent_event(scene, event_data)
+            update_scene(scene, state, final_state)
 
-        send_parent_event(scene, event_data)
-        update_scene(scene, state, final_state)
+          {:error, reason} ->
+            clipboard_error(scene, :paste, reason)
+        end
 
       {:event, event_data, new_state} ->
         send_parent_event(scene, event_data)
@@ -883,98 +875,12 @@ defmodule ScenicWidgets.TextField do
 
   # ===== CLIPBOARD HELPERS =====
 
-  defp copy_to_system_clipboard(text) do
-    case :os.type() do
-      {:unix, :darwin} ->
-        # macOS - use Port to pipe text to pbcopy
-        case System.find_executable("pbcopy") do
-          nil ->
-            {:error, "pbcopy not found"}
+  defp clipboard_copy(text), do: ScenicWidgets.Clipboard.adapter().copy(text)
+  defp clipboard_paste, do: ScenicWidgets.Clipboard.adapter().paste()
 
-          path ->
-            port = Port.open({:spawn_executable, path}, [:binary])
-            send(port, {self(), {:command, text}})
-            send(port, {self(), :close})
-
-            receive do
-              {^port, :closed} -> :ok
-            after
-              5000 -> {:error, "Clipboard operation timed out"}
-            end
-        end
-
-      {:unix, _} ->
-        # Linux - try xclip
-        case System.find_executable("xclip") do
-          nil ->
-            {:error, "xclip not found"}
-
-          path ->
-            port =
-              Port.open({:spawn_executable, path}, [:binary, args: ["-selection", "clipboard"]])
-
-            send(port, {self(), {:command, text}})
-            send(port, {self(), :close})
-
-            receive do
-              {^port, :closed} -> :ok
-            after
-              5000 -> {:error, "Clipboard operation timed out"}
-            end
-        end
-
-      {:win32, _} ->
-        # Windows - use clip.exe
-        case System.find_executable("clip") do
-          nil ->
-            {:error, "clip not found"}
-
-          path ->
-            port = Port.open({:spawn_executable, path}, [:binary])
-            send(port, {self(), {:command, text}})
-            send(port, {self(), :close})
-
-            receive do
-              {^port, :closed} -> :ok
-            after
-              5000 -> {:error, "Clipboard operation timed out"}
-            end
-        end
-
-      _ ->
-        Logger.warning("Clipboard copy not supported on this OS")
-        {:error, "Unsupported OS"}
-    end
-  end
-
-  defp paste_from_system_clipboard() do
-    case :os.type() do
-      {:unix, :darwin} ->
-        # macOS
-        {text, 0} = System.cmd("pbpaste", [])
-        text
-
-      {:unix, _} ->
-        # Linux - try xclip
-        case System.find_executable("xclip") do
-          nil ->
-            Logger.warning("xclip not found, clipboard paste not available")
-            ""
-
-          _ ->
-            {text, 0} = System.cmd("xclip", ["-selection", "clipboard", "-o"])
-            text
-        end
-
-      {:win32, _} ->
-        # Windows - powershell Get-Clipboard
-        {text, 0} = System.cmd("powershell", ["-command", "Get-Clipboard"])
-        text
-
-      _ ->
-        Logger.warning("Clipboard paste not supported on this OS")
-        ""
-    end
+  defp clipboard_error(scene, operation, reason) do
+    send_parent_event(scene, {:clipboard_error, operation, reason})
+    {:noreply, scene}
   end
 
   # ===== SCENIC CALLBACKS =====
