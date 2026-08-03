@@ -629,15 +629,28 @@ defmodule ScenicWidgets.TextField.Reducer do
   """
   # Command-modified key presses are also reported by GLFW as codepoints. They
   # belong to the shortcut owner and must never become document text.
-  def input_to_buffer_action(%State{focused: true}, {:codepoint, {_char, mods}})
-      when is_list(mods) and mods != [] do
-    :ignore
-  end
+  #
+  # Only COMMAND modifiers disqualify a codepoint. This used to reject any
+  # non-empty mods list, which silently swallowed every shifted character —
+  # capitals, and `!@#$%^&*()_+{}|:"<>?` with them — because the driver reports
+  # Shift+a as {"A", [:shift]}. Shift and the lock keys are text modifiers: the
+  # driver has ALREADY applied them to produce the character, so by the time a
+  # codepoint exists the shift has done its job and carries no further meaning.
+  #
+  # :alt is deliberately absent. On macOS Option is a text modifier
+  # (Option+e -> é, Option+3 -> #), and dropping those would break typing on the
+  # platform we are about to support. Known gap: AltGr on X11/Windows is
+  # reported as ctrl+alt, so AltGr characters are still swallowed by the :ctrl
+  # clause below.
+  @command_mods [:ctrl, :meta]
 
-  def input_to_buffer_action(%State{focused: true} = state, {:codepoint, {char, _mods}})
-      when is_bitstring(char) do
-    # Insert character at cursor
-    {:insert, char, :at_cursor}
+  def input_to_buffer_action(%State{focused: true}, {:codepoint, {char, mods}})
+      when is_bitstring(char) and is_list(mods) do
+    if Enum.any?(mods, &(&1 in @command_mods)) do
+      :ignore
+    else
+      {:insert, char, :at_cursor}
+    end
   end
 
   # Enter key - insert newline
