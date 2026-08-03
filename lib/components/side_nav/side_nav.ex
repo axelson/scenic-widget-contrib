@@ -364,8 +364,14 @@ defmodule ScenicWidgets.SideNav do
       case Reducer.handle_scroll_input(state, payload) do
         {:scroll_changed, new_state} ->
           graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+          scene = scene |> assign(state: new_state, graph: graph) |> push_graph(graph)
 
-          {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
+          # Scrolling moves every row on screen, so the positions published to
+          # the semantic layer are stale until re-registered — same reason
+          # expand/collapse re-registers.
+          register_semantic_elements(scene, new_state)
+
+          {:noreply, scene}
 
         {:noop, _state} ->
           {:noreply, scene}
@@ -474,8 +480,18 @@ defmodule ScenicWidgets.SideNav do
     viewport = scene.viewport
     scene_name = scene.assigns[:id] || :side_nav
 
-    # Get the component's screen position from frame.pin
-    {offset_x, offset_y} = state.frame.pin.point
+    # The component's screen position, less however far the content is
+    # scrolled. Item bounds are content-space coordinates, and the rendered
+    # content group is translated by ScrollState.translate_offset/1
+    # ({-offset_x, -offset_y}) — so registering `pin + bounds` alone described
+    # where a row would be if the sidebar had never been scrolled. Rows kept
+    # their original advertised positions after a scroll, which is wrong for
+    # anything that trusts the semantic layer to say where a thing is, clicks
+    # included.
+    {pin_x, pin_y} = state.frame.pin.point
+    {scroll_tx, scroll_ty} = Widgex.Scroll.ScrollState.translate_offset(state.scroll)
+    offset_x = pin_x + scroll_tx
+    offset_y = pin_y + scroll_ty
 
     Logger.debug("🔍 SideNav attempting semantic registration...")
     Logger.debug("   Viewport has semantic_table? #{inspect(!!viewport.semantic_table)}")
