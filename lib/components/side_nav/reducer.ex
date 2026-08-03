@@ -217,25 +217,28 @@ defmodule ScenicWidgets.SideNav.Reducer do
   Accepts either {dx, dy} or {{dx, dy}, coords} format.
   Returns {:scroll_changed, new_state} or {:noop, state}
   """
-  def handle_scroll_input(%State{} = state, {{_dx, dy}, _coords}) do
+  def handle_scroll_input(%State{} = state, {{dx, dy}, _coords}) do
     # Full scroll event with coords - extract delta
-    do_scroll(state, dy)
+    do_scroll(state, dx, dy)
   end
 
-  def handle_scroll_input(%State{} = state, {_dx, dy}) do
+  def handle_scroll_input(%State{} = state, {dx, dy}) do
     # Just the delta tuple
-    do_scroll(state, dy)
+    do_scroll(state, dx, dy)
   end
 
-  def handle_scroll_input(%State{} = state, {_dx, dy, _x, _y}) do
+  def handle_scroll_input(%State{} = state, {dx, dy, _x, _y}) do
     # Alternative format from some Scenic drivers
-    do_scroll(state, dy)
+    do_scroll(state, dx, dy)
   end
 
-  defp do_scroll(%State{} = state, dy) when is_number(dy) do
-    # Use Widgex.Scrollable's handle_scroll function
-    # Negate for natural scrolling (scroll down = content moves up)
-    new_scroll = handle_scroll(state.scroll, -dy)
+  # Both axes. The sidebar is created with direction: :both — file trees run
+  # off the right edge at depth as readily as they run off the bottom — but
+  # dx used to be discarded here, so horizontal scrolling could never happen
+  # no matter what the scroll state allowed.
+  defp do_scroll(%State{} = state, dx, dy) when is_number(dx) and is_number(dy) do
+    # Negate for natural scrolling (scroll down/right = content moves up/left)
+    new_scroll = handle_scroll_2d(state.scroll, -dx, -dy)
 
     if scroll_changed?(state.scroll, new_scroll) do
       {:scroll_changed, %{state | scroll: new_scroll}}

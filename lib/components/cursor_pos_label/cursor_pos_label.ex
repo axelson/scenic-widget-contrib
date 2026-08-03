@@ -18,8 +18,15 @@ defmodule ScenicWidgets.CursorPosLabel do
         color: color | nil         # optional (default dim grey)
       }
 
-  Snapshots are expected to carry `cursors: [%{line: l, col: c} | _]`
-  (the Quillex `BufState` shape).
+  Snapshots are expected to carry `cursor: %{line: l, col: c}` (the Quillex
+  `BufState` shape), or `cursor: nil` before one has been placed.
+
+  Note the deliberate absence of a catch-all clause on that match. This
+  component previously read `cursors: [cursor | _]`, from when buffers carried
+  a list for multi-cursor work; when that collapsed to a single `cursor`, the
+  match silently stopped succeeding and a `_ ->` fallback kept re-displaying
+  the last known position. The label sat frozen at "Ln 1, Col 1" and nothing
+  failed. An unrecognised snapshot shape should crash here instead.
   """
   use Scenic.Component, has_children: false
   require Logger
@@ -61,8 +68,13 @@ defmodule ScenicWidgets.CursorPosLabel do
   def handle_info({{Scenic.PubSub, :data}, {_source, buf_state, _ts}}, scene) do
     cursor =
       case buf_state do
-        %{cursors: [%{line: l, col: c} | _]} -> {l, c}
-        _ -> scene.assigns.cursor
+        # A buffer that has not placed its cursor yet — keep showing the
+        # initial position until it does.
+        %{cursor: nil} ->
+          scene.assigns.cursor
+
+        %{cursor: %{line: l, col: c}} ->
+          {l, c}
       end
 
     if cursor == scene.assigns.cursor do
@@ -80,10 +92,14 @@ defmodule ScenicWidgets.CursorPosLabel do
   defp render(%{frame: frame, font: font, color: color, cursor: {line, col}}) do
     %{size: %{width: w, height: h}} = frame
 
+    # Centred, not right-aligned. Right-aligning pinned the text 8px off the
+    # right edge and let the left gap absorb whatever was left over, so the
+    # padding was visibly lopsided — and it shifted every time the digit count
+    # changed. Centring makes the two gaps equal by construction at any width.
     Graph.build()
     |> text("Ln #{line}, Col #{col}",
-      translate: {w - 8, h / 2 + font.size / 3},
-      text_align: :right,
+      translate: {w / 2, h / 2 + font.size / 3},
+      text_align: :center,
       font: font.name,
       font_size: font.size,
       fill: color,

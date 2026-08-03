@@ -97,11 +97,21 @@ defmodule ScenicWidgets.SideNav do
       |> assign(state: state, graph: graph)
       |> push_graph(graph)
 
-    # Request input for keyboard only.
-    # Mouse clicks and cursor_pos are handled via primitives with `input: [...]` style,
-    # which uses Scenic's hit-testing. Requesting :cursor_button here would cause
-    # double-delivery when the parent scene also requests it.
-    request_input(scene, [:key])
+    # Keyboard, plus scroll.
+    #
+    # Mouse clicks and cursor_pos are handled via primitives with `input: [...]`
+    # style, which uses Scenic's hit-testing. Requesting :cursor_button here
+    # would cause double-delivery when the parent scene also requests it.
+    #
+    # Scroll is different, and has to be requested. It is positional, but
+    # hit-testing only considers primitives that named :cursor_scroll in their
+    # own `input:` list — and none of this component's do. So a wheel event over
+    # the sidebar found no scroll target here and the sidebar never scrolled.
+    # Requesting it delivers every scroll event globally, so handle_input
+    # bounds-checks against our frame before acting (the same shape TextField
+    # uses; without the check an editor beside a sidebar would both scroll on
+    # one wheel event).
+    request_input(scene, [:key, :cursor_scroll])
 
     Logger.debug("   Graph pushed, now calling register_semantic_elements...")
     # Register semantic elements for MCP interaction
@@ -180,26 +190,6 @@ defmodule ScenicWidgets.SideNav do
 
   def handle_put(:blur, scene) do
     {:noreply, assign(scene, state: %{scene.assigns.state | focused: false})}
-  end
-
-  # Handle scroll input routed from parent scene
-  def handle_put(%{scroll: scroll_data}, scene) do
-    state = scene.assigns.state
-
-    case Reducer.handle_scroll_input(state, scroll_data) do
-      {:scroll_changed, new_state} ->
-        graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
-
-        scene =
-          scene
-          |> assign(state: new_state, graph: graph)
-          |> push_graph(graph)
-
-        {:noreply, scene}
-
-      {:noop, _state} ->
-        {:noreply, scene}
-    end
   end
 
   def handle_put(_value, scene) do
@@ -356,7 +346,40 @@ defmodule ScenicWidgets.SideNav do
     {:noreply, scene}
   end
 
-  # Note: scroll input is handled via handle_put from parent scene
+  # Scroll. Requested globally (see init/3), so act only when the pointer is
+  # actually over this sidebar. Both wheel-event shapes Scenic emits are
+  # accepted; the payload goes to the reducer unchanged so it can use both axes.
+  def handle_input({:cursor_scroll, {{_dx, _dy}, {x, y}}} = input, _context, scene) do
+    maybe_scroll(scene, input, x, y)
+  end
+
+  def handle_input({:cursor_scroll, {_dx, _dy, x, y}} = input, _context, scene) do
+    maybe_scroll(scene, input, x, y)
+  end
+
+  defp maybe_scroll(scene, {:cursor_scroll, payload}, x, y) do
+    state = scene.assigns.state
+
+    if point_in_frame?(state.frame, x, y) do
+      case Reducer.handle_scroll_input(state, payload) do
+        {:scroll_changed, new_state} ->
+          graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+
+          {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
+
+        {:noop, _state} ->
+          {:noreply, scene}
+      end
+    else
+      {:noreply, scene}
+    end
+  end
+
+  # Input coords arrive in the parent's coordinate space — the same space as
+  # state.frame's pin for a component placed by a root scene.
+  defp point_in_frame?(%{pin: %{x: px, y: py}, size: %{width: w, height: h}}, x, y) do
+    x >= px and x <= px + w and y >= py and y <= py + h
+  end
 
   # Keyboard navigation — gated on component focus. SideNav requests [:key]
   # globally, so without this gate every keystroke on screen reaches it:

@@ -97,6 +97,11 @@ defmodule ScenicWidgets.IconMenu.Renderer do
 
   # Primitive-drawn toolbar icons remain crisp at any scale and avoid the
   # placeholder F/E/V letters that made the control look unfinished.
+  #
+  # EVERY primitive of an icon carries the same {:icon_text, id}. Graph.modify/3
+  # applies to all primitives sharing an id, and recolouring on hover has to
+  # move the whole glyph — when only the first stroke was tagged, hovering
+  # recoloured one line of the pencil and left the other two behind.
   defp render_icon(graph, :file, id, color, _theme, width, height) do
     x = width / 2 - 7
     y = height / 2 - 9
@@ -108,9 +113,18 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       fill: :clear,
       translate: {x, y}
     )
-    |> Primitives.line({{x + 3, y + 6}, {x + 11, y + 6}}, stroke: {1, color})
-    |> Primitives.line({{x + 3, y + 10}, {x + 11, y + 10}}, stroke: {1, color})
-    |> Primitives.line({{x + 3, y + 14}, {x + 9, y + 14}}, stroke: {1, color})
+    |> Primitives.line({{x + 3, y + 6}, {x + 11, y + 6}},
+      id: {:icon_text, id},
+      stroke: {1, color}
+    )
+    |> Primitives.line({{x + 3, y + 10}, {x + 11, y + 10}},
+      id: {:icon_text, id},
+      stroke: {1, color}
+    )
+    |> Primitives.line({{x + 3, y + 14}, {x + 9, y + 14}},
+      id: {:icon_text, id},
+      stroke: {1, color}
+    )
   end
 
   defp render_icon(graph, :edit, id, color, _theme, width, height) do
@@ -119,8 +133,8 @@ defmodule ScenicWidgets.IconMenu.Renderer do
 
     graph
     |> Primitives.line({{x - 7, y + 7}, {x + 6, y - 6}}, id: {:icon_text, id}, stroke: {3, color})
-    |> Primitives.line({{x - 8, y + 8}, {x - 3, y + 7}}, stroke: {2, color})
-    |> Primitives.line({{x + 4, y - 7}, {x + 7, y - 4}}, stroke: {2, color})
+    |> Primitives.line({{x - 8, y + 8}, {x - 3, y + 7}}, id: {:icon_text, id}, stroke: {2, color})
+    |> Primitives.line({{x + 4, y - 7}, {x + 7, y - 4}}, id: {:icon_text, id}, stroke: {2, color})
   end
 
   defp render_icon(graph, :view, id, color, _theme, width, height) do
@@ -134,7 +148,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       fill: :clear,
       translate: {x, y}
     )
-    |> Primitives.circle(2.5, fill: color, translate: {x, y})
+    |> Primitives.circle(2.5, id: {:icon_text, id}, fill: color, translate: {x, y})
   end
 
   defp render_icon(graph, icon, id, color, theme, width, height) do
@@ -148,6 +162,37 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       text_align: :center,
       translate: {width / 2, height / 2 + theme.icon_font_size / 3}
     )
+  end
+
+  # Recolour one primitive of an icon, in whatever way that primitive is
+  # actually drawn.
+  #
+  # The previous code set `fill:` on everything. Most of these icons are
+  # *stroked* outlines with `fill: :clear` — so hovering the File icon did not
+  # recolour its outline, it filled the page shape in solid, and the Edit
+  # pencil (pure lines) changed weight rather than colour. Hover should change
+  # colour and nothing else.
+  defp recolor_icon(primitive, color) do
+    primitive
+    |> restroke(color)
+    |> refill(color)
+  end
+
+  # Preserve the stroke WIDTH each primitive chose; swap only its colour.
+  defp restroke(primitive, color) do
+    case Scenic.Primitive.get_style(primitive, :stroke) do
+      {width, _old_color} -> Scenic.Primitive.put_style(primitive, :stroke, {width, color})
+      _ -> primitive
+    end
+  end
+
+  # `fill: :clear` is load-bearing — it is what makes an outline an outline.
+  defp refill(primitive, color) do
+    case Scenic.Primitive.get_style(primitive, :fill) do
+      nil -> primitive
+      :clear -> primitive
+      _ -> Scenic.Primitive.put_style(primitive, :fill, color)
+    end
   end
 
   defp render_dropdown(graph, %State{active_menu: nil}), do: graph
@@ -295,7 +340,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
             Primitives.update_opts(p, fill: bg_color)
           end)
           |> Graph.modify({:icon_text, old_state.hovered_menu}, fn p ->
-            Primitives.update_opts(p, fill: icon_color)
+            recolor_icon(p, icon_color)
           end)
         else
           graph
@@ -313,7 +358,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
             Primitives.update_opts(p, fill: bg_color)
           end)
           |> Graph.modify({:icon_text, new_state.hovered_menu}, fn p ->
-            Primitives.update_opts(p, fill: icon_color)
+            recolor_icon(p, icon_color)
           end)
         else
           graph
@@ -334,7 +379,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
                 Primitives.update_opts(p, fill: bg_color)
               end)
               |> Graph.modify({:icon_text, old_state.active_menu}, fn p ->
-                Primitives.update_opts(p, fill: icon_color)
+                recolor_icon(p, icon_color)
               end)
             else
               graph
@@ -347,7 +392,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
               Primitives.update_opts(p, fill: theme.icon_active_bg)
             end)
             |> Graph.modify({:icon_text, new_state.active_menu}, fn p ->
-              Primitives.update_opts(p, fill: theme.icon_active_color)
+              recolor_icon(p, theme.icon_active_color)
             end)
           else
             graph
