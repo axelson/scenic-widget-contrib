@@ -82,7 +82,7 @@ defmodule ScenicWidgets.PopupModal do
 
   @impl Scenic.Scene
   def handle_input({:key, {key, 1, _mods}}, _context, scene)
-      when key in [:key_enter, :key_escape] do
+      when key in [:key_enter, :key_esc] do
     respond(scene)
   end
 

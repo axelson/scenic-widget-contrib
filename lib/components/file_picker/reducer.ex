@@ -50,7 +50,7 @@ defmodule ScenicWidgets.FilePicker.Reducer do
       :key_end ->
         {:state, State.cursor_end(state)}
 
-      :key_escape ->
+      :key_esc ->
         {:action, :cancel}
 
       _ ->
@@ -89,7 +89,7 @@ defmodule ScenicWidgets.FilePicker.Reducer do
       :key_backspace ->
         {:state, State.navigate_up(state)}
 
-      :key_escape ->
+      :key_esc ->
         {:action, :cancel}
 
       _ ->

@@ -95,7 +95,7 @@ defmodule ScenicWidgets.ListSelectorDialog do
   # ─────────────────────────────────────────────────────────────
 
   @impl Scenic.Component
-  def handle_input({:key, {:key_escape, 1, _}}, _context, scene) do
+  def handle_input({:key, {:key_esc, 1, _}}, _context, scene) do
     emit_cancel(scene)
     {:noreply, scene}
   end

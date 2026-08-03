@@ -290,7 +290,14 @@ defmodule ScenicWidgets.TabBar do
       # store the rich metadata as a plain map under a dedicated key.
       register_tab_bar_aggregate(viewport, scene_name, state)
 
-      Enum.each(state.tabs, fn tab ->
+      # Only register tabs that are actually on screen. A scrolled-off tab's
+      # bounds are negative (or past the right edge), so registering it
+      # publishes a "clickable" element at a point OUTSIDE the bar — clicking
+      # it hits whatever happens to be there, or nothing. See
+      # State.tab_visible?/2.
+      state.tabs
+      |> Enum.filter(&State.tab_visible?(state, &1.id))
+      |> Enum.each(fn tab ->
         case State.get_tab_bounds(state, tab.id) do
           {tab_x, _tab_y, tab_w, tab_h} ->
             # Register the tab body as a clickable element
@@ -348,7 +355,10 @@ defmodule ScenicWidgets.TabBar do
             id: tab.id,
             label: tab.label,
             selected: tab.id == state.selected_id,
-            closeable: tab.closeable
+            closeable: tab.closeable,
+            # Scrolled out of the bar? Then it has no clickable element
+            # registered — consumers must scroll it into view first.
+            visible: State.tab_visible?(state, tab.id)
           }
         end)
     }

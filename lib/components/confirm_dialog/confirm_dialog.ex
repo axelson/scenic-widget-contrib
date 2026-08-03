@@ -180,7 +180,7 @@ defmodule ScenicWidgets.ConfirmDialog do
   # ─────────────────────────────────────────────────
 
   @impl Scenic.Scene
-  def handle_input({:key, {:key_escape, 1, _mods}}, _ctx, scene) do
+  def handle_input({:key, {:key_esc, 1, _mods}}, _ctx, scene) do
     emit_response(scene, :cancel)
   end
 

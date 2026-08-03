@@ -290,6 +290,29 @@ defmodule ScenicWidgets.TabBar.State do
   end
 
   @doc "Clamp scroll so the selected tab is fully visible."
+  @doc """
+  Is this tab actually on screen right now?
+
+  Tab positions are scroll-relative (`tab_x_position/2` subtracts the scroll
+  offset), so once the tabs overflow the bar, tabs scrolled off the left sit
+  at NEGATIVE x and tabs past the right edge sit beyond the frame. Such a tab
+  is not clickable, and anything that treats it as clickable — automation,
+  accessibility tooling, a test suite — ends up clicking empty space outside
+  the bar.
+
+  Requires the tab to be fully within the bar: a half-clipped tab is a
+  coin-flip for whoever clicks its midpoint.
+  """
+  def tab_visible?(%__MODULE__{frame: frame} = state, tab_id) do
+    case get_tab_bounds(state, tab_id) do
+      nil ->
+        false
+
+      {x, _y, width, _height} ->
+        x >= 0 and x + width <= frame.size.width
+    end
+  end
+
   def ensure_selected_visible(%__MODULE__{selected_id: nil} = state), do: state
 
   def ensure_selected_visible(state) do

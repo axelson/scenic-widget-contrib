@@ -239,7 +239,7 @@ defmodule ScenicWidgets.SearchBar do
   end
 
   # Handle Escape - close
-  def handle_input({:key, {:key_escape, @key_pressed, _}}, _context, scene) do
+  def handle_input({:key, {:key_esc, @key_pressed, _}}, _context, scene) do
     cast_parent(scene, {:search_close, scene.assigns.state.id})
     {:noreply, scene}
   end

@@ -363,7 +363,7 @@ defmodule ScenicWidgets.MenuBar do
     scene
   end
 
-  def handle_input({:key, {:key_escape, 1, _}}, _context, scene) do
+  def handle_input({:key, {:key_esc, 1, _}}, _context, scene) do
     state = scene.assigns.state
     new_state = Reducer.handle_escape(state)
 

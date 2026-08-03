@@ -417,7 +417,7 @@ defmodule ScenicWidgets.SideNav do
     handle_keyboard(scene, &Reducer.handle_key_end/1)
   end
 
-  def handle_input({:key, {:key_escape, 1, _}}, _context, scene) do
+  def handle_input({:key, {:key_esc, 1, _}}, _context, scene) do
     handle_keyboard(scene, &Reducer.handle_key_escape/1)
   end
 

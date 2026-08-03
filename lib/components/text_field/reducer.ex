@@ -111,13 +111,14 @@ defmodule ScenicWidgets.TextField.Reducer do
   end
 
   # Escape key - emit :escape_pressed event for parent to handle (close dialogs, etc.)
-  # Note: Scenic uses :key_esc not :key_escape
+  #
+  # The key is `:key_esc`. That is what the driver emits (scenic_driver_local
+  # maps X11 keysym 0xFF1B to :key_esc) and what
+  # ScenicWidgets.ScenicEventsDefinitions declares as @escape_key. There is no
+  # :key_escape — a clause matching it can only ever fire from a test harness
+  # sending the wrong atom, which makes a passing test prove nothing about
+  # what a user's keyboard does.
   def process_input(%State{focused: true} = state, {:key, {:key_esc, key_state, _mods}})
-      when key_state > 0 do
-    {:event, {:escape_pressed, state.id}, state}
-  end
-
-  def process_input(%State{focused: true} = state, {:key, {:key_escape, key_state, _mods}})
       when key_state > 0 do
     {:event, {:escape_pressed, state.id}, state}
   end
