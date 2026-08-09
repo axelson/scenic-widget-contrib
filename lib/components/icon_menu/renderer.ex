@@ -128,24 +128,58 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     x = width / 2
     y = height / 2
 
+    # A deliberately chunky pencil: broad shaft, visible eraser cap, and a
+    # tapered writing point. Fine outline art disappears in a 35px toolbar.
     graph
-    |> Primitives.line({{x - 7, y + 7}, {x + 6, y - 6}}, id: {:icon_text, id}, stroke: {3, color})
-    |> Primitives.line({{x - 8, y + 8}, {x - 3, y + 7}}, id: {:icon_text, id}, stroke: {2, color})
-    |> Primitives.line({{x + 4, y - 7}, {x + 7, y - 4}}, id: {:icon_text, id}, stroke: {2, color})
+    |> Primitives.line({{x - 5, y + 5}, {x + 5, y - 5}},
+      id: {:icon_text, id},
+      stroke: {6, color}
+    )
+    |> Primitives.line({{x + 3, y - 7}, {x + 7, y - 3}},
+      id: {:icon_text, id},
+      stroke: {4, color}
+    )
+    |> Primitives.line({{x - 8, y + 8}, {x - 5, y + 5}},
+      id: {:icon_text, id},
+      stroke: {4, color}
+    )
+    |> Primitives.line({{x - 10, y + 10}, {x - 7, y + 7}},
+      id: {:icon_text, id},
+      stroke: {2, color}
+    )
   end
 
   defp render_icon(graph, :view, id, color, _theme, width, height) do
     x = width / 2
     y = height / 2
 
+    # Spectacles communicate display/view controls without the surveillance
+    # connotation of an eye or the search connotation of a magnifying glass.
     graph
-    |> Primitives.ellipse({10, 6},
+    |> Primitives.circle(5.5,
       id: {:icon_text, id},
-      stroke: {1.5, color},
+      stroke: {2, color},
       fill: :clear,
-      translate: {x, y}
+      translate: {x - 6, y + 1}
     )
-    |> Primitives.circle(2.5, id: {:icon_text, id}, fill: color, translate: {x, y})
+    |> Primitives.circle(5.5,
+      id: {:icon_text, id},
+      stroke: {2, color},
+      fill: :clear,
+      translate: {x + 6, y + 1}
+    )
+    |> Primitives.line({{x - 1, y}, {x + 1, y}},
+      id: {:icon_text, id},
+      stroke: {2, color}
+    )
+    |> Primitives.line({{x - 11, y - 1}, {x - 14, y - 3}},
+      id: {:icon_text, id},
+      stroke: {2, color}
+    )
+    |> Primitives.line({{x + 11, y - 1}, {x + 14, y - 3}},
+      id: {:icon_text, id},
+      stroke: {2, color}
+    )
   end
 
   defp render_icon(graph, icon, id, color, theme, width, height) do
