@@ -128,24 +128,41 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     x = width / 2
     y = height / 2
 
-    # A deliberately chunky pencil: broad shaft, visible eraser cap, and a
-    # tapered writing point. Fine outline art disappears in a 35px toolbar.
+    # Classic sharpened wooden pencil: hexagonal outlined body, eraser band,
+    # exposed wooden tip, graphite point, and a center facet. The silhouette is
+    # intentionally broad enough to survive a 35px toolbar.
     graph
-    |> Primitives.line({{x - 5, y + 5}, {x + 5, y - 5}},
+    |> Primitives.path(
+      [
+        :begin,
+        {:move_to, x - 11, y + 10},
+        {:line_to, x - 8, y + 4},
+        {:line_to, x + 4, y - 8},
+        {:line_to, x + 8, y - 4},
+        {:line_to, x - 4, y + 8},
+        :close_path
+      ],
       id: {:icon_text, id},
-      stroke: {6, color}
+      stroke: {2.2, color},
+      fill: :clear,
+      join: :round
     )
-    |> Primitives.line({{x + 3, y - 7}, {x + 7, y - 3}},
-      id: {:icon_text, id},
-      stroke: {4, color}
-    )
-    |> Primitives.line({{x - 8, y + 8}, {x - 5, y + 5}},
-      id: {:icon_text, id},
-      stroke: {4, color}
-    )
-    |> Primitives.line({{x - 10, y + 10}, {x - 7, y + 7}},
+    |> Primitives.line({{x + 2, y - 6}, {x + 6, y - 2}},
       id: {:icon_text, id},
       stroke: {2, color}
+    )
+    |> Primitives.line({{x - 8, y + 4}, {x - 4, y + 8}},
+      id: {:icon_text, id},
+      stroke: {1.6, color}
+    )
+    |> Primitives.line({{x - 7, y + 6}, {x + 5, y - 6}},
+      id: {:icon_text, id},
+      stroke: {1.3, color}
+    )
+    |> Primitives.line({{x - 11, y + 10}, {x - 9, y + 8}},
+      id: {:icon_text, id},
+      stroke: {2.2, color},
+      cap: :round
     )
   end
 
@@ -179,6 +196,31 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     |> Primitives.line({{x + 11, y - 1}, {x + 14, y - 3}},
       id: {:icon_text, id},
       stroke: {2, color}
+    )
+  end
+
+  defp render_icon(graph, :help, id, color, _theme, width, height) do
+    x = width / 2
+    y = height / 2
+
+    graph
+    |> Primitives.path(
+      [
+        :begin,
+        {:move_to, x - 6, y - 5},
+        {:bezier_to, x - 5, y - 11, x + 7, y - 10, x + 7, y - 4},
+        {:bezier_to, x + 7, y + 1, x, y + 1, x, y + 5}
+      ],
+      id: {:icon_text, id},
+      stroke: {2.5, color},
+      fill: :clear,
+      cap: :round,
+      join: :round
+    )
+    |> Primitives.circle(1.7,
+      id: {:icon_text, id},
+      fill: color,
+      translate: {x, y + 10}
     )
   end
 
