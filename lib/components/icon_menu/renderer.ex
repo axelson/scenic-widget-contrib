@@ -100,27 +100,27 @@ defmodule ScenicWidgets.IconMenu.Renderer do
   # move the whole glyph — when only the first stroke was tagged, hovering
   # recoloured one line of the pencil and left the other two behind.
   defp render_icon(graph, :file, id, color, _theme, width, height) do
-    x = width / 2 - 7
-    y = height / 2 - 9
+    x = width / 2 - 7.5
+    y = height / 2 - 9.5
 
     graph
-    |> Primitives.rrect({14, 18, 1},
+    |> Primitives.rrect({15, 19, 1},
       id: {:icon_text, id},
-      stroke: {1.5, color},
+      stroke: {1.8, color},
       fill: :clear,
       translate: {x, y}
     )
-    |> Primitives.line({{x + 3, y + 6}, {x + 11, y + 6}},
+    |> Primitives.line({{x + 3, y + 6}, {x + 12, y + 6}},
       id: {:icon_text, id},
-      stroke: {1, color}
+      stroke: {1.2, color}
     )
-    |> Primitives.line({{x + 3, y + 10}, {x + 11, y + 10}},
+    |> Primitives.line({{x + 3, y + 10}, {x + 12, y + 10}},
       id: {:icon_text, id},
-      stroke: {1, color}
+      stroke: {1.2, color}
     )
-    |> Primitives.line({{x + 3, y + 14}, {x + 9, y + 14}},
+    |> Primitives.line({{x + 3, y + 14}, {x + 10, y + 14}},
       id: {:icon_text, id},
-      stroke: {1, color}
+      stroke: {1.2, color}
     )
   end
 
@@ -207,20 +207,20 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     |> Primitives.path(
       [
         :begin,
-        {:move_to, x - 6, y - 5},
-        {:bezier_to, x - 5, y - 11, x + 7, y - 10, x + 7, y - 4},
-        {:bezier_to, x + 7, y + 1, x, y + 1, x, y + 5}
+        {:move_to, x - 5, y - 4},
+        {:bezier_to, x - 4, y - 9, x + 6, y - 9, x + 6, y - 3},
+        {:bezier_to, x + 6, y + 1, x, y + 1, x, y + 4}
       ],
       id: {:icon_text, id},
-      stroke: {2.5, color},
+      stroke: {2.2, color},
       fill: :clear,
       cap: :round,
       join: :round
     )
-    |> Primitives.circle(1.7,
+    |> Primitives.circle(1.5,
       id: {:icon_text, id},
       fill: color,
-      translate: {x, y + 10}
+      translate: {x, y + 8.5}
     )
   end
 
