@@ -71,12 +71,9 @@ defmodule ScenicWidgets.IconMenu.Renderer do
         true -> theme.background
       end
 
-    icon_color =
-      cond do
-        is_active -> theme.icon_active_color
-        is_hovered -> theme.icon_hover_color
-        true -> theme.icon_color
-      end
+    # Hover is communicated by the subtle button background; the glyph itself
+    # stays steady. Active/open menus may still use the stronger active colour.
+    icon_color = if is_active, do: theme.icon_active_color, else: theme.icon_color
 
     graph
     |> Primitives.group(
@@ -191,6 +188,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     case Scenic.Primitive.get_style(primitive, :fill) do
       nil -> primitive
       :clear -> primitive
+      {:color, {:color_rgba, {_r, _g, _b, 0}}} -> primitive
       _ -> Scenic.Primitive.put_style(primitive, :fill, color)
     end
   end
@@ -333,14 +331,10 @@ defmodule ScenicWidgets.IconMenu.Renderer do
         if old_state.hovered_menu && old_state.hovered_menu != new_state.hovered_menu do
           is_active = old_state.hovered_menu == new_state.active_menu
           bg_color = if is_active, do: theme.icon_active_bg, else: theme.background
-          icon_color = if is_active, do: theme.icon_active_color, else: theme.icon_color
 
           graph
           |> Graph.modify({:icon_bg, old_state.hovered_menu}, fn p ->
             Primitives.update_opts(p, fill: bg_color)
-          end)
-          |> Graph.modify({:icon_text, old_state.hovered_menu}, fn p ->
-            recolor_icon(p, icon_color)
           end)
         else
           graph
@@ -351,14 +345,10 @@ defmodule ScenicWidgets.IconMenu.Renderer do
         if new_state.hovered_menu && old_state.hovered_menu != new_state.hovered_menu do
           is_active = new_state.hovered_menu == new_state.active_menu
           bg_color = if is_active, do: theme.icon_active_bg, else: theme.icon_hover_bg
-          icon_color = if is_active, do: theme.icon_active_color, else: theme.icon_hover_color
 
           graph
           |> Graph.modify({:icon_bg, new_state.hovered_menu}, fn p ->
             Primitives.update_opts(p, fill: bg_color)
-          end)
-          |> Graph.modify({:icon_text, new_state.hovered_menu}, fn p ->
-            recolor_icon(p, icon_color)
           end)
         else
           graph
@@ -372,7 +362,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
             if old_state.active_menu && old_state.active_menu != new_state.active_menu do
               is_hovered = old_state.active_menu == new_state.hovered_menu
               bg_color = if is_hovered, do: theme.icon_hover_bg, else: theme.background
-              icon_color = if is_hovered, do: theme.icon_hover_color, else: theme.icon_color
+              icon_color = theme.icon_color
 
               graph
               |> Graph.modify({:icon_bg, old_state.active_menu}, fn p ->

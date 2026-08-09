@@ -137,6 +137,15 @@ defmodule ScenicWidgets.IconMenu do
     update_scene_tuple(scene, state, new_state)
   end
 
+  def handle_put(:clear_hover, %{assigns: %{state: %{hovered_menu: nil}}} = scene) do
+    {:noreply, scene}
+  end
+
+  def handle_put(:clear_hover, scene) do
+    state = scene.assigns.state
+    update_scene_tuple(scene, state, %{state | hovered_menu: nil, hovered_item: nil})
+  end
+
   # Update menus (e.g., to change toggle states)
   def handle_put({:update_menus, menus}, scene) do
     state = scene.assigns.state

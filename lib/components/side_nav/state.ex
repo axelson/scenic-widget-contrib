@@ -33,6 +33,11 @@ defmodule ScenicWidgets.SideNav.State do
     :theme,
     # Pre-calculated bounds for hit-testing
     :item_bounds,
+    # Active scrollbar-thumb drag (:x | :y | nil), pointer origin, and the
+    # corresponding content offset at grab time.
+    :scrollbar_drag,
+    :scrollbar_drag_start,
+    :scrollbar_drag_offset,
     # Component-level keyboard focus — all key input is ignored while false
     focused: false
   ]
@@ -106,7 +111,10 @@ defmodule ScenicWidgets.SideNav.State do
       scroll:
         init_scroll(data.frame, content_width: content_width, content_height: content_height),
       theme: theme,
-      item_bounds: item_bounds
+      item_bounds: item_bounds,
+      scrollbar_drag: nil,
+      scrollbar_drag_start: nil,
+      scrollbar_drag_offset: nil
     }
   end
 

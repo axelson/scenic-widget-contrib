@@ -1,5 +1,4 @@
 defmodule ScenicWidgets.SideNav do
-
   @moduledoc """
   A hierarchical sidebar navigation component following HexDocs style.
 
@@ -56,6 +55,7 @@ defmodule ScenicWidgets.SideNav do
 
   alias ScenicWidgets.SideNav.{State, Renderizer, Reducer, Api, Item}
   alias Scenic.Graph
+  alias Widgex.Scroll.{ScrollController, ScrollState}
 
   # Override add_to_graph for custom initialization
   def add_to_graph(graph, data, opts \\ []) do
@@ -181,6 +181,29 @@ defmodule ScenicWidgets.SideNav do
     {:noreply, scene}
   end
 
+  def handle_put({:update_frame, frame}, scene) do
+    state = scene.assigns.state
+
+    resized_scroll = ScrollState.update_viewport_size(state.scroll, frame)
+
+    new_scroll = %{
+      resized_scroll
+      | offset_x: min(resized_scroll.offset_x, ScrollState.max_offset_x(resized_scroll)),
+        offset_y: min(resized_scroll.offset_y, ScrollState.max_offset_y(resized_scroll))
+    }
+
+    new_state = %{state | frame: frame, scroll: new_scroll}
+    graph = Renderizer.initial_render(Graph.build(), new_state)
+
+    scene =
+      scene
+      |> assign(state: new_state, graph: graph)
+      |> push_graph(graph)
+
+    register_semantic_elements(scene, new_state)
+    {:noreply, scene}
+  end
+
   # Component-level focus, granted/revoked by the parent scene — the same
   # :focus/:blur contract TextField uses. Keyboard input is ignored while
   # unfocused (see the {:key, _} gate in handle_input/3).
@@ -197,6 +220,51 @@ defmodule ScenicWidgets.SideNav do
   end
 
   @impl Scenic.Scene
+  def handle_input(
+        {:cursor_button, {:btn_left, 1, _mods, coords}},
+        {:scrollbar_y_thumb, _group_id},
+        scene
+      ) do
+    start_scrollbar_drag(scene, :y, coords)
+  end
+
+  def handle_input(
+        {:cursor_button, {:btn_left, 1, _mods, coords}},
+        {:scrollbar_x_thumb, _group_id},
+        scene
+      ) do
+    start_scrollbar_drag(scene, :x, coords)
+  end
+
+  def handle_input(
+        {:cursor_pos, coords},
+        _context,
+        %{assigns: %{state: %{scrollbar_drag: axis}}} = scene
+      )
+      when axis in [:x, :y] do
+    drag_scrollbar(scene, axis, coords)
+  end
+
+  def handle_input(
+        {:cursor_button, {:btn_left, 0, _mods, _coords}},
+        _context,
+        %{assigns: %{state: %{scrollbar_drag: axis}}} = scene
+      )
+      when axis in [:x, :y] do
+    :ok = release_input(scene, [:cursor_pos, :cursor_button])
+
+    state = scene.assigns.state
+
+    new_state = %{
+      state
+      | scrollbar_drag: nil,
+        scrollbar_drag_start: nil,
+        scrollbar_drag_offset: nil
+    }
+
+    {:noreply, assign(scene, state: new_state)}
+  end
+
   # Handle cursor position for hover effects (via hit-tested primitive)
   def handle_input({:cursor_pos, _coords}, {:row_click, item_id}, scene) do
     state = scene.assigns.state
@@ -227,12 +295,16 @@ defmodule ScenicWidgets.SideNav do
 
   # Handle click on CHEVRON - toggle expand/collapse
   # Note: Uses debounce to prevent double-click issues
-  def handle_input({:cursor_button, {:btn_left, 1, [], _coords}}, {:chevron_click, item_id}, scene) do
+  def handle_input(
+        {:cursor_button, {:btn_left, 1, [], _coords}},
+        {:chevron_click, item_id},
+        scene
+      ) do
     now = :erlang.monotonic_time(:millisecond)
     last_click = scene.assigns[:last_click_time]
 
     # Debounce: ignore clicks within 100ms of each other
-    should_debounce = last_click != nil and (now - last_click) < 100
+    should_debounce = last_click != nil and now - last_click < 100
 
     if should_debounce do
       {:noreply, scene}
@@ -251,7 +323,9 @@ defmodule ScenicWidgets.SideNav do
       end
 
       graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
-      scene = scene
+
+      scene =
+        scene
         |> assign(state: new_state, graph: graph, last_click_time: now)
         |> push_graph(graph)
 
@@ -270,7 +344,7 @@ defmodule ScenicWidgets.SideNav do
     last_click = scene.assigns[:last_click_time]
 
     # Debounce: ignore clicks within 100ms of each other
-    should_debounce = last_click != nil and (now - last_click) < 100
+    should_debounce = last_click != nil and now - last_click < 100
 
     if should_debounce do
       {:noreply, scene}
@@ -286,7 +360,10 @@ defmodule ScenicWidgets.SideNav do
 
     # Find the item to determine its type
     item = Item.find_by_id(state.tree, item_id)
-    Logger.debug("   Found item: #{inspect(item != nil)}, has_children: #{inspect(item && Item.has_children?(item))}")
+
+    Logger.debug(
+      "   Found item: #{inspect(item != nil)}, has_children: #{inspect(item && Item.has_children?(item))}"
+    )
 
     # If it's a group with children, toggle expansion instead of navigating
     if item && Item.has_children?(item) do
@@ -301,9 +378,12 @@ defmodule ScenicWidgets.SideNav do
       end
 
       graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
-      scene = scene
+
+      scene =
+        scene
         |> assign(state: new_state, graph: graph, last_click_time: now)
         |> push_graph(graph)
+
       register_semantic_elements(scene, new_state)
       {:noreply, scene}
     else
@@ -324,25 +404,36 @@ defmodule ScenicWidgets.SideNav do
 
       # Set as active and focused (a click inside the nav also grants the
       # component keyboard focus)
-      new_state = state
+      new_state =
+        state
         |> State.set_active(item_id)
         |> State.set_focused(item_id)
         |> Map.put(:focused, true)
 
       graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
-      scene = scene
+
+      scene =
+        scene
         |> assign(state: new_state, graph: graph, last_click_time: now)
         |> push_graph(graph)
+
       {:noreply, scene}
     end
   end
 
   # Click not on any recognized element - log for debugging
   def handle_input({:cursor_button, {:btn_left, 1, [], coords}}, context, scene) do
-    Logger.debug("🔴 SideNav cursor_button NOT MATCHED - context: #{inspect(context)}, coords: #{inspect(coords)}")
+    Logger.debug(
+      "🔴 SideNav cursor_button NOT MATCHED - context: #{inspect(context)}, coords: #{inspect(coords)}"
+    )
+
     # Log tree info for debugging
     state = scene.assigns.state
-    Logger.debug("   Tree items: #{inspect(Enum.map(state.tree, fn item -> {ScenicWidgets.SideNav.Item.get_id(item), ScenicWidgets.SideNav.Item.has_children?(item)} end))}")
+
+    Logger.debug(
+      "   Tree items: #{inspect(Enum.map(state.tree, fn item -> {ScenicWidgets.SideNav.Item.get_id(item), ScenicWidgets.SideNav.Item.has_children?(item)} end))}"
+    )
+
     {:noreply, scene}
   end
 
@@ -387,6 +478,75 @@ defmodule ScenicWidgets.SideNav do
     x >= px and x <= px + w and y >= py and y <= py + h
   end
 
+  defp start_scrollbar_drag(scene, axis, coords) do
+    :ok = capture_input(scene, [:cursor_pos, :cursor_button])
+    state = scene.assigns.state
+
+    start_offset =
+      case axis do
+        :x -> state.scroll.offset_x
+        :y -> state.scroll.offset_y
+      end
+
+    new_state = %{
+      state
+      | scrollbar_drag: axis,
+        scrollbar_drag_start: coords,
+        scrollbar_drag_offset: start_offset
+    }
+
+    {:noreply, assign(scene, state: new_state)}
+  end
+
+  defp drag_scrollbar(scene, axis, {x, y}) do
+    state = scene.assigns.state
+    {start_x, start_y} = state.scrollbar_drag_start
+
+    {track_length, content_size, viewport_size, max_offset, pointer_delta} =
+      scrollbar_drag_geometry(state, axis, x - start_x, y - start_y)
+
+    thumb_length =
+      ScrollController.thumb_length(track_length, content_size, viewport_size)
+
+    offset =
+      ScrollController.drag_offset(
+        state.scrollbar_drag_offset,
+        pointer_delta,
+        track_length,
+        thumb_length,
+        max_offset
+      )
+
+    new_scroll =
+      case axis do
+        :x -> %{state.scroll | offset_x: offset, scrollbar_visible: true, scrollbar_opacity: 255}
+        :y -> %{state.scroll | offset_y: offset, scrollbar_visible: true, scrollbar_opacity: 255}
+      end
+
+    new_state = %{state | scroll: new_scroll}
+    graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+
+    scene = scene |> assign(state: new_state, graph: graph) |> push_graph(graph)
+    register_semantic_elements(scene, new_state)
+    {:noreply, scene}
+  end
+
+  defp scrollbar_drag_geometry(state, :x, dx, _dy) do
+    track_length = state.frame.size.width - 4
+    scroll = state.scroll
+
+    {track_length, scroll.content_width, scroll.viewport_width, ScrollState.max_offset_x(scroll),
+     dx}
+  end
+
+  defp scrollbar_drag_geometry(state, :y, _dx, dy) do
+    track_length = state.frame.size.height - 4
+    scroll = state.scroll
+
+    {track_length, scroll.content_height, scroll.viewport_height,
+     ScrollState.max_offset_y(scroll), dy}
+  end
+
   # Keyboard navigation — gated on component focus. SideNav requests [:key]
   # globally, so without this gate every keystroke on screen reaches it:
   # Enter typed into an editor would also "open" the focused nav item
@@ -420,6 +580,7 @@ defmodule ScenicWidgets.SideNav do
 
         # Execute action callback if present
         item = Item.find_by_id(state.tree, item_id)
+
         if action = Item.get_action(item) do
           action.()
         end
@@ -512,7 +673,7 @@ defmodule ScenicWidgets.SideNav do
 
           # Calculate positions matching render_item logic
           depth = bounds.depth
-          indent_x = theme.padding_left + (depth * theme.indent)
+          indent_x = theme.padding_left + depth * theme.indent
           chevron_area_width = theme.chevron_size + theme.chevron_margin
 
           # Register chevron (if item has children)
@@ -533,8 +694,18 @@ defmodule ScenicWidgets.SideNav do
               module: nil,
               parent_id: nil,
               children: [],
-              local_bounds: %{left: local_left, top: local_top, width: theme.chevron_size, height: theme.item_height},
-              screen_bounds: %{left: screen_left, top: screen_top, width: theme.chevron_size, height: theme.item_height},
+              local_bounds: %{
+                left: local_left,
+                top: local_top,
+                width: theme.chevron_size,
+                height: theme.item_height
+              },
+              screen_bounds: %{
+                left: screen_left,
+                top: screen_top,
+                width: theme.chevron_size,
+                height: theme.item_height
+              },
               clickable: true,
               focusable: false,
               label: "Chevron for #{Item.get_title(item)}",
@@ -543,9 +714,13 @@ defmodule ScenicWidgets.SideNav do
               hidden: false,
               z_index: 0
             }
+
             :ets.insert(viewport.semantic_table, {{scene_name, chevron_id}, chevron_entry})
             :ets.insert(viewport.semantic_index, {chevron_id, {scene_name, chevron_id}})
-            Logger.debug("     ✅ Registered chevron: #{chevron_id} at screen (#{screen_left}, #{screen_top})")
+
+            Logger.debug(
+              "     ✅ Registered chevron: #{chevron_id} at screen (#{screen_left}, #{screen_top})"
+            )
           end
 
           # Register item text
@@ -566,8 +741,18 @@ defmodule ScenicWidgets.SideNav do
             module: nil,
             parent_id: nil,
             children: [],
-            local_bounds: %{left: local_text_left, top: local_text_top, width: text_width, height: theme.item_height},
-            screen_bounds: %{left: screen_text_left, top: screen_text_top, width: text_width, height: theme.item_height},
+            local_bounds: %{
+              left: local_text_left,
+              top: local_text_top,
+              width: text_width,
+              height: theme.item_height
+            },
+            screen_bounds: %{
+              left: screen_text_left,
+              top: screen_text_top,
+              width: text_width,
+              height: theme.item_height
+            },
             clickable: true,
             focusable: false,
             label: Item.get_title(item),
@@ -576,6 +761,7 @@ defmodule ScenicWidgets.SideNav do
             hidden: false,
             z_index: 0
           }
+
           :ets.insert(viewport.semantic_table, {{scene_name, text_id}, text_entry})
           :ets.insert(viewport.semantic_index, {text_id, {scene_name, text_id}})
         end
