@@ -98,14 +98,10 @@ defmodule ScenicWidgets.SideNav.Renderizer do
   # the scrollbars their own inset lane so they remain visually distinct from
   # that chrome instead of reading as a clipped piece of the border.
   defp scrollbar_frame(frame) do
-    %{
-      frame
-      | size: %{
-          frame.size
-          | width: max(frame.size.width - 6, 0),
-            height: max(frame.size.height - 6, 0)
-        }
-    }
+    Widgex.Frame.new(
+      pin: frame.pin.point,
+      size: {max(frame.size.width - 6, 0), max(frame.size.height - 6, 0)}
+    )
   end
 
   defp render_context_menu(graph, %{context_menu: nil}), do: graph
