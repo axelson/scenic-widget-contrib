@@ -186,11 +186,13 @@ defmodule ScenicWidgets.SideNav do
 
     resized_scroll = ScrollState.update_viewport_size(state.scroll, frame)
 
-    new_scroll = %{
-      resized_scroll
-      | offset_x: min(resized_scroll.offset_x, ScrollState.max_offset_x(resized_scroll)),
-        offset_y: min(resized_scroll.offset_y, ScrollState.max_offset_y(resized_scroll))
-    }
+    new_scroll =
+      %{
+        resized_scroll
+        | offset_x: min(resized_scroll.offset_x, ScrollState.max_offset_x(resized_scroll)),
+          offset_y: min(resized_scroll.offset_y, ScrollState.max_offset_y(resized_scroll))
+      }
+      |> State.sync_scrollbar_visibility()
 
     new_state = %{state | frame: frame, scroll: new_scroll}
     graph = Renderizer.initial_render(Graph.build(), new_state)

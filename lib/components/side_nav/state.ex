@@ -113,7 +113,11 @@ defmodule ScenicWidgets.SideNav.State do
       focused_id: Map.get(data, :focused_id),
       expanded: initial_expanded,
       scroll:
-        init_scroll(data.frame, content_width: content_width, content_height: content_height),
+        init_scroll(data.frame,
+          content_width: content_width,
+          content_height: content_height,
+          initially_visible: true
+        ),
       theme: theme,
       item_bounds: item_bounds,
       scrollbar_drag: nil,
@@ -256,6 +260,7 @@ defmodule ScenicWidgets.SideNav.State do
         content_width,
         content_height
       )
+      |> sync_scrollbar_visibility()
 
     %{state | expanded: new_expanded, item_bounds: new_bounds, scroll: new_scroll}
   end
@@ -278,6 +283,7 @@ defmodule ScenicWidgets.SideNav.State do
           content_width,
           content_height
         )
+        |> sync_scrollbar_visibility()
 
       %{state | expanded: new_expanded, item_bounds: new_bounds, scroll: new_scroll}
     end
@@ -299,6 +305,7 @@ defmodule ScenicWidgets.SideNav.State do
           content_width,
           content_height
         )
+        |> sync_scrollbar_visibility()
 
       %{state | expanded: new_expanded, item_bounds: new_bounds, scroll: new_scroll}
     else
@@ -331,6 +338,7 @@ defmodule ScenicWidgets.SideNav.State do
         content_width,
         content_height
       )
+      |> sync_scrollbar_visibility()
 
     %{
       state
@@ -339,6 +347,15 @@ defmodule ScenicWidgets.SideNav.State do
         item_bounds: new_bounds,
         scroll: new_scroll
     }
+  end
+
+  @doc false
+  def sync_scrollbar_visibility(scroll) do
+    if Widgex.Scroll.ScrollState.scrollable?(scroll) do
+      %{scroll | scrollbar_visible: true, scrollbar_opacity: 255}
+    else
+      %{scroll | scrollbar_visible: false, scrollbar_opacity: 0}
+    end
   end
 
   @doc """
