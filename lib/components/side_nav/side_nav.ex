@@ -304,9 +304,10 @@ defmodule ScenicWidgets.SideNav do
     :ok = release_input(scene, [:cursor_pos, :cursor_button])
 
     if state.dragging do
-      local = {x - state.frame.pin.x, y - state.frame.pin.y}
-
-      case State.hit_test(state, local) do
+      # Hit-tested/captured component input is already in SideNav-local
+      # coordinates. Subtracting the frame pin a second time makes drops near
+      # the top miss the tree entirely.
+      case State.hit_test(state, {x, y}) do
         {target_id, _region} ->
           target = Item.find_by_id(state.tree, target_id)
 
@@ -455,7 +456,7 @@ defmodule ScenicWidgets.SideNav do
 
     new_state = %{
       selected_state
-      | context_menu: %{x: x - state.frame.pin.x, y: y - state.frame.pin.y},
+      | context_menu: %{x: x, y: y},
         focused: true
     }
 
