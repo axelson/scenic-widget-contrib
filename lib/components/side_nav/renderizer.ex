@@ -50,7 +50,9 @@ defmodule ScenicWidgets.SideNav.Renderizer do
           id: :sidebar_scroll_group
         )
         # Scrollbars on top
-        |> render_scrollbars(state.scroll, state.frame)
+        |> render_scrollbars(state.scroll, state.frame,
+          color: Map.get(state.theme, :scrollbar_color, {160, 160, 160})
+        )
         |> render_context_menu(state)
       end,
       # Render at local origin - parent handles positioning via translate
@@ -75,7 +77,9 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       scroll_changed?(old_state.scroll, new_state.scroll) ->
         graph
         |> update_scroll_transform(:sidebar_scroll_group, old_state.scroll, new_state.scroll)
-        |> update_scrollbars(old_state.scroll, new_state.scroll, new_state.frame)
+        |> update_scrollbars(old_state.scroll, new_state.scroll, new_state.frame,
+          color: Map.get(new_state.theme, :scrollbar_color, {160, 160, 160})
+        )
 
       # Hover/focus/active changed - update individual item styling
       old_state.hovered_id != new_state.hovered_id ||
@@ -102,6 +106,12 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       graph,
       fn menu ->
         menu
+        |> Primitives.rect(frame.size.box,
+          id: :side_nav_context_menu_shield,
+          fill: :clear,
+          input: [:cursor_button],
+          translate: {-left, -top}
+        )
         |> Primitives.rrect({width, row_height, 4},
           fill: {45, 49, 58},
           stroke: {1, {105, 112, 126}}

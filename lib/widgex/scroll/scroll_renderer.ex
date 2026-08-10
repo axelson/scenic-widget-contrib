@@ -158,10 +158,11 @@ defmodule Widgex.Scroll.ScrollRenderer do
         opts \\ []
       ) do
     group_id = Keyword.get(opts, :group_id, :default)
+    color = Keyword.get(opts, :color, @scrollbar_color)
 
     graph
-    |> update_scrollbar_y(old_scroll, new_scroll, frame, group_id)
-    |> update_scrollbar_x(old_scroll, new_scroll, frame, group_id)
+    |> update_scrollbar_y(old_scroll, new_scroll, frame, group_id, color)
+    |> update_scrollbar_x(old_scroll, new_scroll, frame, group_id, color)
   end
 
   @doc """
@@ -292,7 +293,7 @@ defmodule Widgex.Scroll.ScrollRenderer do
   end
 
   # Update vertical scrollbar
-  defp update_scrollbar_y(graph, old_scroll, new_scroll, frame, group_id) do
+  defp update_scrollbar_y(graph, old_scroll, new_scroll, frame, group_id, color) do
     if ScrollState.scrollable_y?(new_scroll) do
       {old_thumb_y, _} = ScrollState.scrollbar_thumb(old_scroll, :y)
       {new_thumb_y_ratio, _new_thumb_height} = ScrollState.scrollbar_thumb(new_scroll, :y)
@@ -305,7 +306,7 @@ defmodule Widgex.Scroll.ScrollRenderer do
 
       if old_thumb_y != new_thumb_y_ratio ||
            old_scroll.scrollbar_opacity != new_scroll.scrollbar_opacity do
-        {r, g, b} = @scrollbar_color
+        {r, g, b} = color
 
         graph
         |> try_modify({:scrollbar_y_thumb, group_id}, fn primitive ->
@@ -328,7 +329,7 @@ defmodule Widgex.Scroll.ScrollRenderer do
   end
 
   # Update horizontal scrollbar
-  defp update_scrollbar_x(graph, old_scroll, new_scroll, frame, group_id) do
+  defp update_scrollbar_x(graph, old_scroll, new_scroll, frame, group_id, color) do
     if ScrollState.scrollable_x?(new_scroll) do
       {old_thumb_x, _} = ScrollState.scrollbar_thumb(old_scroll, :x)
       {new_thumb_x_ratio, _new_thumb_width} = ScrollState.scrollbar_thumb(new_scroll, :x)
@@ -348,7 +349,7 @@ defmodule Widgex.Scroll.ScrollRenderer do
 
       if old_thumb_x != new_thumb_x_ratio ||
            old_scroll.scrollbar_opacity != new_scroll.scrollbar_opacity do
-        {r, g, b} = @scrollbar_color
+        {r, g, b} = color
 
         graph
         |> try_modify({:scrollbar_x_thumb, group_id}, fn primitive ->

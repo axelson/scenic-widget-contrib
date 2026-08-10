@@ -9,6 +9,15 @@ defmodule ScenicWidgets.TabBarOverflowTest do
     assert moved.scroll_offset > 0
   end
 
+  test "driver scroll shape is ignored outside the tab bar" do
+    state = state_with_tabs()
+
+    assert {:noop, unchanged} =
+             Reducer.process_input(state, {:cursor_scroll, {{0, -1}, {50, 200}}})
+
+    assert unchanged.scroll_offset == state.scroll_offset
+  end
+
   test "selecting an offscreen tab reveals it" do
     state = state_with_tabs()
     assert {:tab_selected, :c, selected} = Reducer.select_tab(state, :c)

@@ -350,6 +350,24 @@ defmodule ScenicWidgets.SideNav do
     {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
   end
 
+  # Match the normal dropdown contract: drifting outside the popup dismisses
+  # it. Component input coordinates and context-menu coordinates are local.
+  def handle_input(
+        {:cursor_pos, {x, y}},
+        _context,
+        %{assigns: %{state: %State{context_menu: %{x: menu_x, y: menu_y}}}} = scene
+      ) do
+    %{frame: frame} = scene.assigns.state
+    left = min(menu_x, max(frame.size.width - 150 - 4, 4))
+    top = min(menu_y, max(frame.size.height - 30 - 4, 4))
+
+    if x >= left and x <= left + 150 and y >= top and y <= top + 30 do
+      {:noreply, scene}
+    else
+      close_context_menu(scene)
+    end
+  end
+
   # Handle cursor position for hover effects (via hit-tested primitive)
   def handle_input({:cursor_pos, _coords}, {:row_click, item_id}, scene) do
     state = scene.assigns.state
@@ -474,6 +492,14 @@ defmodule ScenicWidgets.SideNav do
     new_state = %{state | context_menu: nil}
     graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
     {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
+  end
+
+  def handle_input(
+        {:cursor_button, {:btn_left, 1, _mods, _coords}},
+        :side_nav_context_menu_shield,
+        scene
+      ) do
+    close_context_menu(scene)
   end
 
   # Actual row click handling (after debounce check)
@@ -758,6 +784,15 @@ defmodule ScenicWidgets.SideNav do
   # globally, so without this gate every keystroke on screen reaches it:
   # Enter typed into an editor would also "open" the focused nav item
   # (double-delivery). TextField has the equivalent gate in its handle_input.
+  def handle_input(
+        {:key, {:key_esc, 1, _}},
+        _context,
+        %{assigns: %{state: %State{context_menu: menu}}} = scene
+      )
+      when not is_nil(menu) do
+    close_context_menu(scene)
+  end
+
   def handle_input({:key, _}, _context, %{assigns: %{state: %State{focused: false}}} = scene) do
     {:noreply, scene}
   end
@@ -839,6 +874,13 @@ defmodule ScenicWidgets.SideNav do
     else
       {:noreply, scene}
     end
+  end
+
+  defp close_context_menu(scene) do
+    state = scene.assigns.state
+    new_state = %{state | context_menu: nil}
+    graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+    {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
   end
 
   # Register semantic elements for MCP interaction

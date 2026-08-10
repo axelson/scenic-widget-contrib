@@ -27,13 +27,13 @@ defmodule ScenicWidgets.TabBar.Reducer do
     handle_click(state, coords)
   end
 
-  def process_input(%State{} = state, {:cursor_scroll, {_dx, dy, _x, _y}}) do
-    handle_scroll(state, dy)
+  def process_input(%State{} = state, {:cursor_scroll, {_dx, dy, x, y}}) do
+    maybe_scroll(state, dy, {x, y})
   end
 
-  def process_input(%State{} = state, {:cursor_scroll, {{dx, dy}, _coords}}) do
+  def process_input(%State{} = state, {:cursor_scroll, {{dx, dy}, coords}}) do
     delta = if dx == 0, do: dy, else: dx
-    handle_scroll(state, delta)
+    maybe_scroll(state, delta, coords)
   end
 
   def process_input(%State{} = state, {:cursor_scroll, {_dx, dy}}) do
@@ -42,6 +42,12 @@ defmodule ScenicWidgets.TabBar.Reducer do
 
   def process_input(state, _input) do
     {:noop, state}
+  end
+
+  defp maybe_scroll(state, delta, coords) do
+    if State.point_inside?(state, coords),
+      do: handle_scroll(state, delta),
+      else: {:noop, state}
   end
 
   @doc """
