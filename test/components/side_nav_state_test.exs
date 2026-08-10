@@ -64,4 +64,17 @@ defmodule ScenicWidgets.SideNav.StateTest do
     assert ranged.selected_ids == MapSet.new(["file-2", "file-3", "file-4"])
     assert ranged.active_id == "file-5"
   end
+
+  test "active id may arrive before a refreshed tree contains it" do
+    state =
+      State.new(%{
+        frame: Frame.new(pin: {0, 0}, size: {200, 200}),
+        tree: [%Item{id: "old.txt", title: "old.txt", type: :page}]
+      })
+
+    updated = State.set_active(state, "renamed.txt")
+
+    assert updated.active_id == "renamed.txt"
+    assert updated.expanded == state.expanded
+  end
 end

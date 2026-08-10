@@ -338,7 +338,10 @@ defmodule ScenicWidgets.SideNav.State do
 
   def set_active(%__MODULE__{} = state, item_id) do
     # Find all ancestors and expand them
-    ancestors = find_ancestors(state.tree, item_id, [])
+    # A move can publish the active buffer's new path just before the
+    # asynchronously refreshed tree contains it. That is a valid transient
+    # state, so retain the id without trying to enumerate nil ancestors.
+    ancestors = find_ancestors(state.tree, item_id, []) || []
 
     new_expanded =
       Enum.reduce(ancestors, state.expanded, fn ancestor_id, acc ->
