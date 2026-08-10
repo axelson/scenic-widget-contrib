@@ -283,6 +283,50 @@ defmodule ScenicWidgets.SideNav do
     {:noreply, assign(scene, state: new_state)}
   end
 
+  def handle_input(
+        {:cursor_pos, {x, y}},
+        _context,
+        %{assigns: %{state: %State{drag_source: source}}} = scene
+      )
+      when not is_nil(source) do
+    {start_x, start_y} = scene.assigns.state.drag_start
+    dragging = scene.assigns.state.dragging or abs(x - start_x) + abs(y - start_y) >= 6
+    {:noreply, assign(scene, state: %{scene.assigns.state | dragging: dragging})}
+  end
+
+  def handle_input(
+        {:cursor_button, {:btn_left, 0, _mods, {x, y}}},
+        _context,
+        %{assigns: %{state: %State{drag_source: source}}} = scene
+      )
+      when not is_nil(source) do
+    state = scene.assigns.state
+    :ok = release_input(scene, [:cursor_pos, :cursor_button])
+
+    if state.dragging do
+      local = {x - state.frame.pin.x, y - state.frame.pin.y}
+
+      case State.hit_test(state, local) do
+        {target_id, _region} ->
+          target = Item.find_by_id(state.tree, target_id)
+
+          if target && Item.get_type(target) == :group &&
+               not MapSet.member?(state.selected_ids, target_id) do
+            send_parent_event(
+              scene,
+              {:sidebar, :move_requested, MapSet.to_list(state.selected_ids), target_id}
+            )
+          end
+
+        nil ->
+          :ok
+      end
+    end
+
+    new_state = %{state | drag_source: nil, drag_start: nil, dragging: false}
+    {:noreply, assign(scene, state: new_state)}
+  end
+
   # Handle cursor position for hover effects (via hit-tested primitive)
   def handle_input({:cursor_pos, _coords}, {:row_click, item_id}, scene) do
     state = scene.assigns.state
@@ -357,7 +401,11 @@ defmodule ScenicWidgets.SideNav do
   # Handle click on ROW - navigate to item (full row is clickable)
   # For GROUP items with children, toggle expansion instead of navigating
   # Note: Uses debounce to prevent double-click issues
-  def handle_input({:cursor_button, {:btn_left, 1, [], _coords}}, {:row_click, item_id}, scene) do
+  def handle_input(
+        {:cursor_button, {:btn_left, 1, mods, coords}},
+        {:row_click, item_id},
+        scene
+      ) do
     now = :erlang.monotonic_time(:millisecond)
     last_click = scene.assigns[:last_click_time]
 
@@ -367,12 +415,46 @@ defmodule ScenicWidgets.SideNav do
     if should_debounce do
       {:noreply, scene}
     else
-      handle_row_click(scene, item_id, now)
+      handle_row_click(scene, item_id, mods, coords, now)
     end
   end
 
+  def handle_input(
+        {:cursor_button, {:btn_right, 1, _mods, {x, y}}},
+        {:row_click, item_id},
+        scene
+      ) do
+    state = scene.assigns.state
+
+    selected_state =
+      if MapSet.member?(state.selected_ids, item_id),
+        do: State.set_focused(state, item_id),
+        else: State.select(state, item_id)
+
+    new_state = %{
+      selected_state
+      | context_menu: %{x: x - state.frame.pin.x, y: y - state.frame.pin.y},
+        focused: true
+    }
+
+    graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+    {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
+  end
+
+  def handle_input(
+        {:cursor_button, {:btn_left, 1, _mods, _coords}},
+        {:context_action, :delete},
+        scene
+      ) do
+    state = scene.assigns.state
+    send_parent_event(scene, {:sidebar, :delete_requested, MapSet.to_list(state.selected_ids)})
+    new_state = %{state | context_menu: nil}
+    graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+    {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
+  end
+
   # Actual row click handling (after debounce check)
-  defp handle_row_click(scene, item_id, now) do
+  defp handle_row_click(scene, item_id, mods, coords, now) do
     Logger.debug("🖱️ SideNav row clicked: #{item_id}")
     state = scene.assigns.state
 
@@ -384,9 +466,10 @@ defmodule ScenicWidgets.SideNav do
     )
 
     # If it's a group with children, toggle expansion instead of navigating
-    if item && Item.has_children?(item) do
+    if item && Item.get_type(item) == :group do
       Logger.debug("   📂 Group item - toggling expansion")
-      new_state = %{State.toggle_expanded(state, item_id) | focused: true}
+      new_state = state |> State.select(item_id, mods) |> State.toggle_expanded(item_id)
+      new_state = %{new_state | focused: true}
 
       # Send expand/collapse event to parent (informational only)
       if MapSet.member?(new_state.expanded, item_id) do
@@ -402,15 +485,21 @@ defmodule ScenicWidgets.SideNav do
         |> assign(state: new_state, graph: graph, last_click_time: now)
         |> push_graph(graph)
 
+      scene = begin_row_drag(scene, item_id, coords)
+
       register_semantic_elements(scene, new_state)
       {:noreply, scene}
     else
-      # Leaf item - navigate
+      # Leaf item - select. Modified clicks build an operation selection
+      # without changing the active editor buffer.
       action = Item.get_action(item)
 
       Logger.debug("📍 ITEM CLICKED: #{item_id}")
       Logger.debug("   📤 Sending parent message: {:sidebar, :navigate, #{inspect(item_id)}}")
-      send_parent_event(scene, {:sidebar, :navigate, item_id})
+
+      if Enum.all?(mods, &(&1 not in [:ctrl, :shift])) do
+        send_parent_event(scene, {:sidebar, :navigate, item_id})
+      end
 
       # Execute action callback if present (OPTIONAL)
       if action do
@@ -420,13 +509,17 @@ defmodule ScenicWidgets.SideNav do
         Logger.debug("   ℹ️  No action callback - parent message only")
       end
 
-      # Set as active and focused (a click inside the nav also grants the
-      # component keyboard focus)
-      new_state =
-        state
-        |> State.set_active(item_id)
-        |> State.set_focused(item_id)
-        |> Map.put(:focused, true)
+      # active_id is updated only from the application's active-buffer
+      # snapshot; selection and keyboard focus are independent.
+      selected_state =
+        if mods == [] and MapSet.size(state.selected_ids) > 1 and
+             MapSet.member?(state.selected_ids, item_id) do
+          State.set_focused(state, item_id)
+        else
+          State.select(state, item_id, mods)
+        end
+
+      new_state = Map.put(selected_state, :focused, true)
 
       graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
 
@@ -435,8 +528,24 @@ defmodule ScenicWidgets.SideNav do
         |> assign(state: new_state, graph: graph, last_click_time: now)
         |> push_graph(graph)
 
+      scene = begin_row_drag(scene, item_id, coords)
+
       {:noreply, scene}
     end
+  end
+
+  defp begin_row_drag(scene, item_id, coords) do
+    :ok = capture_input(scene, [:cursor_pos, :cursor_button])
+
+    assign(scene,
+      state: %{
+        scene.assigns.state
+        | drag_source: item_id,
+          drag_start: coords,
+          dragging: false,
+          context_menu: nil
+      }
+    )
   end
 
   # Click not on any recognized element - log for debugging

@@ -35,4 +35,33 @@ defmodule ScenicWidgets.SideNav.StateTest do
     assert expanded.scroll.scrollbar_visible
     assert expanded.scroll.scrollbar_opacity == 255
   end
+
+  test "plain, ctrl, and shift selection remain separate from the active item" do
+    tree =
+      for index <- 1..5 do
+        %Item{id: "file-#{index}", title: "file-#{index}", type: :page}
+      end
+
+    state =
+      State.new(%{
+        frame: Frame.new(pin: {0, 0}, size: {200, 200}),
+        tree: tree,
+        active_id: "file-5"
+      })
+
+    one = State.select(state, "file-1")
+    assert one.selected_ids == MapSet.new(["file-1"])
+    assert one.active_id == "file-5"
+
+    toggled = State.select(one, "file-3", [:ctrl])
+    assert toggled.selected_ids == MapSet.new(["file-1", "file-3"])
+
+    untoggled = State.select(toggled, "file-3", [:ctrl])
+    assert untoggled.selected_ids == MapSet.new(["file-1"])
+
+    anchored = State.select(one, "file-2")
+    ranged = State.select(anchored, "file-4", [:shift])
+    assert ranged.selected_ids == MapSet.new(["file-2", "file-3", "file-4"])
+    assert ranged.active_id == "file-5"
+  end
 end

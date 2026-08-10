@@ -51,6 +51,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
         )
         # Scrollbars on top
         |> render_scrollbars(state.scroll, state.frame)
+        |> render_context_menu(state)
       end,
       # Render at local origin - parent handles positioning via translate
       translate: {0, 0}
@@ -67,6 +68,9 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       old_state.expanded != new_state.expanded ->
         initial_render(Graph.build(), new_state)
 
+      old_state.context_menu != new_state.context_menu ->
+        initial_render(Graph.build(), new_state)
+
       # Scroll changed - use efficient transform update from Widgex.Scrollable
       scroll_changed?(old_state.scroll, new_state.scroll) ->
         graph
@@ -76,13 +80,46 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       # Hover/focus/active changed - update individual item styling
       old_state.hovered_id != new_state.hovered_id ||
         old_state.focused_id != new_state.focused_id ||
-          old_state.active_id != new_state.active_id ->
+        old_state.active_id != new_state.active_id ||
+          old_state.selected_ids != new_state.selected_ids ->
         update_item_states(graph, old_state, new_state)
 
       # No visual changes
       true ->
         graph
     end
+  end
+
+  defp render_context_menu(graph, %{context_menu: nil}), do: graph
+
+  defp render_context_menu(graph, %{context_menu: %{x: x, y: y}, frame: frame}) do
+    width = 150
+    row_height = 30
+    left = min(x, max(frame.size.width - width - 4, 4))
+    top = min(y, max(frame.size.height - row_height - 4, 4))
+
+    Primitives.group(
+      graph,
+      fn menu ->
+        menu
+        |> Primitives.rrect({width, row_height, 4},
+          fill: {45, 49, 58},
+          stroke: {1, {105, 112, 126}}
+        )
+        |> Primitives.rect({width, row_height},
+          id: {:context_action, :delete},
+          fill: :clear,
+          input: [:cursor_button, :cursor_pos]
+        )
+        |> Primitives.text("Delete…",
+          fill: :white,
+          font_size: 14,
+          translate: {12, 20}
+        )
+      end,
+      id: :side_nav_context_menu,
+      translate: {left, top}
+    )
   end
 
   # Recursively render tree structure
@@ -122,6 +159,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
     if bounds do
       theme = state.theme
       is_active = state.active_id == item_id
+      is_selected = MapSet.member?(state.selected_ids, item_id)
       is_focused = state.focused_id == item_id
       is_hovered = Map.get(state, :hovered_id) == item_id
       has_children = Item.has_children?(item)
@@ -143,6 +181,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       {bg_fill, text_fill} =
         cond do
           is_active -> {theme.active_bg, theme.text}
+          is_selected -> {theme.selection_bg, theme.text}
           is_hovered -> {theme.hover_bg, theme.text}
           true -> {theme.background, theme.text}
         end
@@ -156,7 +195,10 @@ defmodule ScenicWidgets.SideNav.Renderizer do
         fn g ->
           g
           # 1. Visual background
-          |> Primitives.rect({row_width, row_height}, fill: bg_fill)
+          |> Primitives.rect({row_width, row_height},
+            id: String.to_atom("item_bg_#{item_id}"),
+            fill: bg_fill
+          )
           # 2. Full-width clickable rect for row navigation (covers entire row)
           #    Also handles hover detection
           |> Primitives.rect({row_width, row_height},
@@ -280,12 +322,15 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       old_state.active_id,
       new_state.active_id
     ]
+    |> Kernel.++(MapSet.to_list(old_state.selected_ids))
+    |> Kernel.++(MapSet.to_list(new_state.selected_ids))
     |> Enum.filter(&(&1 != nil))
     |> Enum.uniq()
   end
 
   defp update_item_styling(graph, item_id, state) do
     is_active = state.active_id == item_id
+    is_selected = MapSet.member?(state.selected_ids, item_id)
     is_focused = state.focused_id == item_id
     is_hovered = Map.get(state, :hovered_id) == item_id
 
@@ -295,6 +340,9 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       cond do
         is_active ->
           {theme.active_bg, theme.text}
+
+        is_selected ->
+          {theme.selection_bg, theme.text}
 
         is_hovered ->
           {theme.hover_bg, theme.text}

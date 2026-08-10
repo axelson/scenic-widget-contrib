@@ -25,6 +25,13 @@ defmodule ScenicWidgets.SideNav.State do
     :tree,
     # Currently active/selected item ID
     :active_id,
+    # Filesystem-operation selection, distinct from the active editor buffer.
+    :selected_ids,
+    :selection_anchor,
+    :context_menu,
+    :drag_source,
+    :drag_start,
+    :dragging,
     # Currently focused item (for keyboard nav)
     :focused_id,
     # Currently hovered item (for hover effects)
@@ -58,6 +65,8 @@ defmodule ScenicWidgets.SideNav.State do
     active_bar: {76, 86, 106},
     # Slightly darker hover
     hover_bg: {240, 240, 240},
+    # Neutral operation selection; blue is reserved for the active buffer.
+    selection_bg: {214, 218, 224},
     # Dark gray for chevrons
     chevron: {80, 80, 80},
     # #0070D6
@@ -110,6 +119,12 @@ defmodule ScenicWidgets.SideNav.State do
       frame: data.frame,
       tree: tree,
       active_id: Map.get(data, :active_id),
+      selected_ids: MapSet.new(Map.get(data, :selected_ids, [])),
+      selection_anchor: nil,
+      context_menu: nil,
+      drag_source: nil,
+      drag_start: nil,
+      dragging: false,
       focused_id: Map.get(data, :focused_id),
       expanded: initial_expanded,
       scroll:
@@ -365,7 +380,42 @@ defmodule ScenicWidgets.SideNav.State do
     %{state | focused_id: item_id}
   end
 
-  defp scroll_content_height(item_bounds, content_width, frame) do
+  @doc "Apply conventional plain, Ctrl-toggle, or Shift-range selection."
+  def select(%__MODULE__{} = state, item_id, mods \\ []) do
+    visible_ids = visible_items(state)
+
+    cond do
+      :shift in mods and state.selection_anchor in visible_ids ->
+        range = selection_range(visible_ids, state.selection_anchor, item_id)
+        %{state | selected_ids: MapSet.new(range), focused_id: item_id}
+
+      :ctrl in mods ->
+        selected_ids =
+          if MapSet.member?(state.selected_ids, item_id),
+            do: MapSet.delete(state.selected_ids, item_id),
+            else: MapSet.put(state.selected_ids, item_id)
+
+        %{state | selected_ids: selected_ids, selection_anchor: item_id, focused_id: item_id}
+
+      true ->
+        %{
+          state
+          | selected_ids: MapSet.new([item_id]),
+            selection_anchor: item_id,
+            focused_id: item_id
+        }
+    end
+  end
+
+  defp selection_range(ids, from, to) do
+    from_index = Enum.find_index(ids, &(&1 == from))
+    to_index = Enum.find_index(ids, &(&1 == to))
+    {first, last} = Enum.min_max([from_index, to_index])
+    Enum.slice(ids, first..last)
+  end
+
+  @doc false
+  def scroll_content_height(item_bounds, content_width, frame) do
     clearance =
       if content_width > frame.size.width, do: @horizontal_scrollbar_clearance, else: 0
 
