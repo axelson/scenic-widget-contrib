@@ -34,6 +34,7 @@ defmodule Widgex.Scroll.ScrollRenderer do
   # @scrollbar_thumb_opacity 0x80  # Currently using scroll state opacity
   # Gray scrollbar color
   @scrollbar_color {160, 160, 160}
+  @scrollbar_inset @scrollbar_width + @scrollbar_padding * 2
 
   @doc """
   Create a scrollable group with scissor clipping.
@@ -64,7 +65,16 @@ defmodule Widgex.Scroll.ScrollRenderer do
         ) ::
           Graph.t()
   def scrollable_group(graph, %ScrollState{} = scroll, %Frame{} = frame, content_fn, opts \\ []) do
-    {width, height} = frame.size.box
+    content_width =
+      if ScrollState.scrollable_y?(scroll),
+        do: scroll.viewport_width - @scrollbar_inset,
+        else: scroll.viewport_width
+
+    content_height =
+      if ScrollState.scrollable_x?(scroll),
+        do: scroll.viewport_height - @scrollbar_inset,
+        else: scroll.viewport_height
+
     {tx, ty} = ScrollState.translate_offset(scroll)
 
     # Get the ID for the inner scrolling group
@@ -82,7 +92,11 @@ defmodule Widgex.Scroll.ScrollRenderer do
         )
       end,
       id: outer_id,
-      scissor: {width, height}
+      # Keep content (and, importantly, its pointer hit areas) out from under
+      # the scrollbar lanes. After an incremental scroll transform Scenic can
+      # compile the moved content above the unchanged bars in its input list;
+      # this clip guarantees the scrollbar remains the owner of that space.
+      scissor: {max(content_width, 0), max(content_height, 0)}
     )
   end
 

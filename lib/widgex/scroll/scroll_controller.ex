@@ -29,4 +29,24 @@ defmodule Widgex.Scroll.ScrollController do
       |> min(max_offset)
     end
   end
+
+  @doc """
+  Pages one viewport toward a click in the unoccupied scrollbar track.
+
+  A click inside the thumb is a no-op; the thumb primitive normally wins that
+  hit test, but keeping the math defensive makes it safe for every host.
+  """
+  @spec page_offset(number(), number(), number(), number(), number(), number()) :: number()
+  def page_offset(current_offset, pointer, thumb_start, thumb_length, viewport_size, max_offset) do
+    next_offset =
+      cond do
+        pointer < thumb_start -> current_offset - viewport_size
+        pointer > thumb_start + thumb_length -> current_offset + viewport_size
+        true -> current_offset
+      end
+
+    next_offset
+    |> max(0)
+    |> min(max_offset)
+  end
 end

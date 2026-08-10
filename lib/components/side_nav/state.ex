@@ -14,6 +14,10 @@ defmodule ScenicWidgets.SideNav.State do
 
   alias ScenicWidgets.SideNav.Item
 
+  # The horizontal bar occupies 16px (12px bar + 2px padding on each side).
+  # Keep a little breathing room so the final row never shares its hit strip.
+  @horizontal_scrollbar_clearance 20
+
   defstruct [
     # Component frame
     :frame,
@@ -99,8 +103,8 @@ defmodule ScenicWidgets.SideNav.State do
 
     # Calculate item bounds to determine content height
     item_bounds = calculate_item_bounds(tree, theme, initial_expanded)
-    content_height = calculate_content_height(item_bounds)
     content_width = calculate_content_width(tree, theme)
+    content_height = scroll_content_height(item_bounds, content_width, data.frame)
 
     %__MODULE__{
       frame: data.frame,
@@ -243,12 +247,13 @@ defmodule ScenicWidgets.SideNav.State do
 
     # Recalculate bounds with new expansion state
     new_bounds = calculate_item_bounds(state.tree, state.theme, new_expanded)
-    content_height = calculate_content_height(new_bounds)
+    content_width = calculate_content_width(state.tree, state.theme)
+    content_height = scroll_content_height(new_bounds, content_width, state.frame)
 
     new_scroll =
       update_content_size(
         state.scroll,
-        calculate_content_width(state.tree, state.theme),
+        content_width,
         content_height
       )
 
@@ -264,12 +269,13 @@ defmodule ScenicWidgets.SideNav.State do
     else
       new_expanded = MapSet.put(state.expanded, item_id)
       new_bounds = calculate_item_bounds(state.tree, state.theme, new_expanded)
-      content_height = calculate_content_height(new_bounds)
+      content_width = calculate_content_width(state.tree, state.theme)
+      content_height = scroll_content_height(new_bounds, content_width, state.frame)
 
       new_scroll =
         update_content_size(
           state.scroll,
-          calculate_content_width(state.tree, state.theme),
+          content_width,
           content_height
         )
 
@@ -284,12 +290,13 @@ defmodule ScenicWidgets.SideNav.State do
     if MapSet.member?(state.expanded, item_id) do
       new_expanded = MapSet.delete(state.expanded, item_id)
       new_bounds = calculate_item_bounds(state.tree, state.theme, new_expanded)
-      content_height = calculate_content_height(new_bounds)
+      content_width = calculate_content_width(state.tree, state.theme)
+      content_height = scroll_content_height(new_bounds, content_width, state.frame)
 
       new_scroll =
         update_content_size(
           state.scroll,
-          calculate_content_width(state.tree, state.theme),
+          content_width,
           content_height
         )
 
@@ -315,12 +322,13 @@ defmodule ScenicWidgets.SideNav.State do
       end)
 
     new_bounds = calculate_item_bounds(state.tree, state.theme, new_expanded)
-    content_height = calculate_content_height(new_bounds)
+    content_width = calculate_content_width(state.tree, state.theme)
+    content_height = scroll_content_height(new_bounds, content_width, state.frame)
 
     new_scroll =
       update_content_size(
         state.scroll,
-        calculate_content_width(state.tree, state.theme),
+        content_width,
         content_height
       )
 
@@ -338,6 +346,13 @@ defmodule ScenicWidgets.SideNav.State do
   """
   def set_focused(%__MODULE__{} = state, item_id) do
     %{state | focused_id: item_id}
+  end
+
+  defp scroll_content_height(item_bounds, content_width, frame) do
+    clearance =
+      if content_width > frame.size.width, do: @horizontal_scrollbar_clearance, else: 0
+
+    calculate_content_height(item_bounds) + clearance
   end
 
   @doc """

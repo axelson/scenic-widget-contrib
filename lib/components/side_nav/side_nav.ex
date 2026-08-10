@@ -237,6 +237,22 @@ defmodule ScenicWidgets.SideNav do
   end
 
   def handle_input(
+        {:cursor_button, {:btn_left, 1, _mods, coords}},
+        {:scrollbar_y_track, _group_id},
+        scene
+      ) do
+    page_scrollbar(scene, :y, coords)
+  end
+
+  def handle_input(
+        {:cursor_button, {:btn_left, 1, _mods, coords}},
+        {:scrollbar_x_track, _group_id},
+        scene
+      ) do
+    page_scrollbar(scene, :x, coords)
+  end
+
+  def handle_input(
         {:cursor_pos, coords},
         _context,
         %{assigns: %{state: %{scrollbar_drag: axis}}} = scene
@@ -531,8 +547,58 @@ defmodule ScenicWidgets.SideNav do
     {:noreply, scene}
   end
 
+  defp page_scrollbar(scene, axis, {x, y}) do
+    state = scene.assigns.state
+
+    {track_length, content_size, viewport_size, max_offset, pointer, current_offset} =
+      case axis do
+        :x ->
+          track_length = horizontal_track_length(state)
+
+          {track_length, state.scroll.content_width, state.scroll.viewport_width,
+           ScrollState.max_offset_x(state.scroll), x, state.scroll.offset_x}
+
+        :y ->
+          track_length = state.frame.size.height - 4
+
+          {track_length, state.scroll.content_height, state.scroll.viewport_height,
+           ScrollState.max_offset_y(state.scroll), y, state.scroll.offset_y}
+      end
+
+    thumb_length = ScrollController.thumb_length(track_length, content_size, viewport_size)
+
+    thumb_start =
+      if max_offset > 0 do
+        current_offset / max_offset * max(track_length - thumb_length, 0)
+      else
+        0
+      end
+
+    offset =
+      ScrollController.page_offset(
+        current_offset,
+        pointer,
+        thumb_start,
+        thumb_length,
+        viewport_size,
+        max_offset
+      )
+
+    new_scroll =
+      case axis do
+        :x -> %{state.scroll | offset_x: offset, scrollbar_visible: true, scrollbar_opacity: 255}
+        :y -> %{state.scroll | offset_y: offset, scrollbar_visible: true, scrollbar_opacity: 255}
+      end
+
+    new_state = %{state | scroll: new_scroll}
+    graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+    scene = scene |> assign(state: new_state, graph: graph) |> push_graph(graph)
+    register_semantic_elements(scene, new_state)
+    {:noreply, scene}
+  end
+
   defp scrollbar_drag_geometry(state, :x, dx, _dy) do
-    track_length = state.frame.size.width - 4
+    track_length = horizontal_track_length(state)
     scroll = state.scroll
 
     {track_length, scroll.content_width, scroll.viewport_width, ScrollState.max_offset_x(scroll),
@@ -545,6 +611,16 @@ defmodule ScenicWidgets.SideNav do
 
     {track_length, scroll.content_height, scroll.viewport_height,
      ScrollState.max_offset_y(scroll), dy}
+  end
+
+  defp horizontal_track_length(state) do
+    # ScrollRenderer shortens the horizontal track when the vertical bar is
+    # present: width - scrollbar width (12) - three 2px padding gaps.
+    if ScrollState.scrollable_y?(state.scroll) do
+      state.frame.size.width - 18
+    else
+      state.frame.size.width - 4
+    end
   end
 
   # Keyboard navigation — gated on component focus. SideNav requests [:key]

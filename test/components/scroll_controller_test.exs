@@ -23,4 +23,12 @@ defmodule Widgex.Scroll.ScrollControllerTest do
     assert ScrollController.thumb_length(100, 10_000, 100) == 20
     assert ScrollController.thumb_length(100, 100, 100) == 100
   end
+
+  test "track clicks page by one viewport and clamp at both ends" do
+    assert ScrollController.page_offset(300, 10, 40, 20, 100, 500) == 200
+    assert ScrollController.page_offset(300, 90, 40, 20, 100, 500) == 400
+    assert ScrollController.page_offset(300, 50, 40, 20, 100, 500) == 300
+    assert ScrollController.page_offset(20, 0, 40, 20, 100, 500) == 0
+    assert ScrollController.page_offset(480, 90, 40, 20, 100, 500) == 500
+  end
 end
