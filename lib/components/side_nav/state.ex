@@ -31,6 +31,7 @@ defmodule ScenicWidgets.SideNav.State do
     :context_menu,
     :drag_source,
     :drag_start,
+    :drag_mods,
     :dragging,
     # Currently focused item (for keyboard nav)
     :focused_id,
@@ -124,6 +125,7 @@ defmodule ScenicWidgets.SideNav.State do
       context_menu: nil,
       drag_source: nil,
       drag_start: nil,
+      drag_mods: [],
       dragging: false,
       focused_id: Map.get(data, :focused_id),
       expanded: initial_expanded,

@@ -321,10 +321,32 @@ defmodule ScenicWidgets.SideNav do
         nil ->
           :ok
       end
+    else
+      item = Item.find_by_id(state.tree, source)
+
+      if item && Item.get_type(item) != :group &&
+           Enum.all?(state.drag_mods, &(&1 not in [:ctrl, :shift])) do
+        send_parent_event(scene, {:sidebar, :navigate, source})
+      end
     end
 
-    new_state = %{state | drag_source: nil, drag_start: nil, dragging: false}
-    {:noreply, assign(scene, state: new_state)}
+    selected_state =
+      if not state.dragging && state.drag_mods == [] do
+        State.select(state, source)
+      else
+        state
+      end
+
+    new_state = %{
+      selected_state
+      | drag_source: nil,
+        drag_start: nil,
+        drag_mods: [],
+        dragging: false
+    }
+
+    graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+    {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
   end
 
   # Handle cursor position for hover effects (via hit-tested primitive)
@@ -485,7 +507,7 @@ defmodule ScenicWidgets.SideNav do
         |> assign(state: new_state, graph: graph, last_click_time: now)
         |> push_graph(graph)
 
-      scene = begin_row_drag(scene, item_id, coords)
+      scene = begin_row_drag(scene, item_id, mods, coords)
 
       register_semantic_elements(scene, new_state)
       {:noreply, scene}
@@ -496,10 +518,6 @@ defmodule ScenicWidgets.SideNav do
 
       Logger.debug("📍 ITEM CLICKED: #{item_id}")
       Logger.debug("   📤 Sending parent message: {:sidebar, :navigate, #{inspect(item_id)}}")
-
-      if Enum.all?(mods, &(&1 not in [:ctrl, :shift])) do
-        send_parent_event(scene, {:sidebar, :navigate, item_id})
-      end
 
       # Execute action callback if present (OPTIONAL)
       if action do
@@ -528,13 +546,13 @@ defmodule ScenicWidgets.SideNav do
         |> assign(state: new_state, graph: graph, last_click_time: now)
         |> push_graph(graph)
 
-      scene = begin_row_drag(scene, item_id, coords)
+      scene = begin_row_drag(scene, item_id, mods, coords)
 
       {:noreply, scene}
     end
   end
 
-  defp begin_row_drag(scene, item_id, coords) do
+  defp begin_row_drag(scene, item_id, mods, coords) do
     :ok = capture_input(scene, [:cursor_pos, :cursor_button])
 
     assign(scene,
@@ -542,6 +560,7 @@ defmodule ScenicWidgets.SideNav do
         scene.assigns.state
         | drag_source: item_id,
           drag_start: coords,
+          drag_mods: mods,
           dragging: false,
           context_menu: nil
       }
