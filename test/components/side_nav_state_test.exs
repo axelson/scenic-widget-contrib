@@ -36,6 +36,25 @@ defmodule ScenicWidgets.SideNav.StateTest do
     assert expanded.scroll.scrollbar_opacity == 255
   end
 
+  test "collapsed descendants do not create phantom horizontal overflow" do
+    long_child = %Item{
+      id: "long-child",
+      title: String.duplicate("very-long-name-", 8),
+      type: :page
+    }
+
+    directory = %Item{id: "dir", title: "dir", type: :group, children: [long_child]}
+    state = State.new(%{frame: Frame.new(pin: {0, 0}, size: {250, 120}), tree: [directory]})
+
+    assert state.scroll.content_width <= state.scroll.viewport_width
+    assert state.scroll.content_height == 28
+
+    expanded = State.toggle_expanded(state, "dir")
+
+    assert expanded.scroll.content_width > expanded.scroll.viewport_width
+    assert expanded.scroll.content_height == 76
+  end
+
   test "plain, ctrl, and shift selection remain separate from the active item" do
     tree =
       for index <- 1..5 do

@@ -100,7 +100,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
   defp scrollbar_frame(frame) do
     Widgex.Frame.new(
       pin: frame.pin.point,
-      size: {max(frame.size.width - 6, 0), max(frame.size.height - 6, 0)}
+      size: {max(frame.size.width - 12, 0), max(frame.size.height - 12, 0)}
     )
   end
 
