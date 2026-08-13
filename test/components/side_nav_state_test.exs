@@ -55,6 +55,25 @@ defmodule ScenicWidgets.SideNav.StateTest do
     assert expanded.scroll.content_height == 76
   end
 
+  test "vertical scrollbar adds end clearance to an existing horizontal overflow" do
+    long_title = String.duplicate("wide-", 12)
+    wide_item = %Item{id: "wide", title: long_title, type: :page}
+    frame = Frame.new(pin: {0, 0}, size: {200, 100})
+
+    horizontal_only = State.new(%{frame: frame, tree: [wide_item]})
+
+    both_axes =
+      State.new(%{
+        frame: frame,
+        tree: [wide_item | for(index <- 1..8, do: %Item{id: index, title: "short", type: :page})]
+      })
+
+    assert horizontal_only.scroll.content_width > horizontal_only.scroll.viewport_width
+    assert horizontal_only.scroll.content_height <= horizontal_only.scroll.viewport_height
+    assert both_axes.scroll.content_height > both_axes.scroll.viewport_height
+    assert both_axes.scroll.content_width == horizontal_only.scroll.content_width + 16
+  end
+
   test "plain, ctrl, and shift selection remain separate from the active item" do
     tree =
       for index <- 1..5 do

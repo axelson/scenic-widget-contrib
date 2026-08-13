@@ -90,7 +90,12 @@ defmodule ScenicWidgets.SideNav.Api do
 
     # Recalculate bounds
     new_bounds = State.calculate_item_bounds(new_tree, state.theme, new_expanded)
-    content_width = State.calculate_content_width(new_tree, state.theme, new_expanded)
+
+    content_width =
+      new_tree
+      |> State.calculate_content_width(state.theme, new_expanded)
+      |> State.scroll_content_width(new_bounds, state.frame)
+
     content_height = State.scroll_content_height(new_bounds, content_width, state.frame)
 
     new_scroll =
