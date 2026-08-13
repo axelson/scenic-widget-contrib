@@ -16,7 +16,7 @@ defmodule ScenicWidgets.SideNav.State do
 
   # The horizontal bar occupies 16px (12px bar + 2px padding on each side).
   # Keep a little breathing room so the final row never shares its hit strip.
-  @horizontal_scrollbar_clearance 26
+  @horizontal_scrollbar_clearance 27
 
   defstruct [
     # Component frame
