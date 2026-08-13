@@ -47,7 +47,8 @@ defmodule ScenicWidgets.SideNav.Renderizer do
             scroll_g
             |> render_tree(state.tree, state, 0)
           end,
-          id: :sidebar_scroll_group
+          id: :sidebar_scroll_group,
+          overlay_scrollbars: true
         )
         # Scrollbars on top
         |> render_scrollbars(state.scroll, state.frame,
