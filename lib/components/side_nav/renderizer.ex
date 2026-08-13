@@ -50,7 +50,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
           id: :sidebar_scroll_group
         )
         # Scrollbars on top
-        |> render_scrollbars(state.scroll, scrollbar_frame(state.frame),
+        |> render_scrollbars(state.scroll, state.frame,
           color: Map.get(state.theme, :scrollbar_color, {160, 160, 160})
         )
         |> render_context_menu(state)
@@ -77,7 +77,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       scroll_changed?(old_state.scroll, new_state.scroll) ->
         graph
         |> update_scroll_transform(:sidebar_scroll_group, old_state.scroll, new_state.scroll)
-        |> update_scrollbars(old_state.scroll, new_state.scroll, scrollbar_frame(new_state.frame),
+        |> update_scrollbars(old_state.scroll, new_state.scroll, new_state.frame,
           color: Map.get(new_state.theme, :scrollbar_color, {160, 160, 160})
         )
 
@@ -92,16 +92,6 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       true ->
         graph
     end
-  end
-
-  # The navigator has its pane border and resize grip on its outer edges. Give
-  # the scrollbars their own inset lane so they remain visually distinct from
-  # that chrome instead of reading as a clipped piece of the border.
-  defp scrollbar_frame(frame) do
-    Widgex.Frame.new(
-      pin: frame.pin.point,
-      size: {max(frame.size.width - 12, 0), max(frame.size.height - 12, 0)}
-    )
   end
 
   defp render_context_menu(graph, %{context_menu: nil}), do: graph
