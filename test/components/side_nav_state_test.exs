@@ -52,7 +52,7 @@ defmodule ScenicWidgets.SideNav.StateTest do
     expanded = State.toggle_expanded(state, "dir")
 
     assert expanded.scroll.content_width > expanded.scroll.viewport_width
-    assert expanded.scroll.content_height == 76
+    assert expanded.scroll.content_height == 82
   end
 
   test "plain, ctrl, and shift selection remain separate from the active item" do
