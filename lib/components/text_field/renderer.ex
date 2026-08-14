@@ -1,4 +1,6 @@
 defmodule ScenicWidgets.TextField.Renderer do
+  @multiline_row_y_offset 4
+
   @moduledoc """
   Rendering logic for the TextField component.
 
@@ -433,7 +435,7 @@ defmodule ScenicWidgets.TextField.Renderer do
 
         _ ->
           # Standard multi-line: position at line top + small offset
-          (display_line - 1) * line_height + 4
+          (display_line - 1) * line_height + @multiline_row_y_offset
       end
 
     # Calculate cursor width based on mode
@@ -505,7 +507,10 @@ defmodule ScenicWidgets.TextField.Renderer do
     selection_color = {:color_rgba, {70, 130, 180, 180}}
 
     Enum.reduce(sel_start_line..sel_end_line, graph, fn line_num, acc_graph ->
-      y_position = (line_num - 1) * line_height
+      # Keep the selection rectangle on exactly the same row origin as the
+      # multiline cursor.  These used to differ by four pixels, making a
+      # selection look as though it floated above the insertion point.
+      y_position = (line_num - 1) * line_height + @multiline_row_y_offset
       line_text = Enum.at(display_lines, line_num - 1, "")
 
       {start_col_on_line, end_col_on_line} =
@@ -1137,7 +1142,7 @@ defmodule ScenicWidgets.TextField.Renderer do
 
         _ ->
           # Standard multi-line: position at line top + small offset
-          (display_line - 1) * line_height + 4
+          (display_line - 1) * line_height + @multiline_row_y_offset
       end
 
     should_show_cursor = new_state.focused and new_state.cursor_visible
