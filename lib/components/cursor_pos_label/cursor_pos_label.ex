@@ -89,6 +89,12 @@ defmodule ScenicWidgets.CursorPosLabel do
   def handle_info({{Scenic.PubSub, :registered}, _}, scene), do: {:noreply, scene}
   def handle_info({{Scenic.PubSub, :unregistered}, _}, scene), do: {:noreply, scene}
 
+  def handle_put({:update_frame, frame}, scene) do
+    scene = assign(scene, frame: frame)
+    graph = render(scene.assigns)
+    {:noreply, scene |> assign(graph: graph) |> push_graph(graph)}
+  end
+
   defp render(%{frame: frame, font: font, color: color, cursor: {line, col}}) do
     %{size: %{width: w, height: h}} = frame
 
