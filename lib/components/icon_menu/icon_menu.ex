@@ -128,11 +128,11 @@ defmodule ScenicWidgets.IconMenu do
 
   @impl true
   def handle_info(
-        {:show_menu_tooltip, token, text, coords},
+        {:show_menu_tooltip, token, text, anchor},
         %{assigns: %{tooltip_token: token}} = scene
       ) do
     state = scene.assigns.state
-    new_state = %{state | tooltip: %{text: text, at: coords}}
+    new_state = %{state | tooltip: %{text: text, at: anchor}}
     graph = Renderer.initial_render(Graph.build(), new_state)
 
     scene =
@@ -143,7 +143,7 @@ defmodule ScenicWidgets.IconMenu do
     {:noreply, scene}
   end
 
-  def handle_info({:show_menu_tooltip, _token, _text, _coords}, scene), do: {:noreply, scene}
+  def handle_info({:show_menu_tooltip, _token, _text, _anchor}, scene), do: {:noreply, scene}
 
   @impl Scenic.Scene
   def handle_put({:open_menu, menu_id}, scene) do
@@ -153,18 +153,22 @@ defmodule ScenicWidgets.IconMenu do
   end
 
   def handle_put({:close_menu}, scene) do
+    scene = cancel_tooltip_timer(scene)
     state = scene.assigns.state
-    new_state = %{state | active_menu: nil, hovered_item: nil}
+    new_state = %{state | active_menu: nil, hovered_item: nil, tooltip: nil}
     update_scene_tuple(scene, state, new_state)
   end
 
-  def handle_put(:clear_hover, %{assigns: %{state: %{hovered_menu: nil}}} = scene) do
-    {:noreply, scene}
-  end
-
   def handle_put(:clear_hover, scene) do
+    scene = cancel_tooltip_timer(scene)
     state = scene.assigns.state
-    update_scene_tuple(scene, state, %{state | hovered_menu: nil, hovered_item: nil})
+
+    update_scene_tuple(scene, state, %{
+      state
+      | hovered_menu: nil,
+        hovered_item: nil,
+        tooltip: nil
+    })
   end
 
   # Update menus (e.g., to change toggle states)
@@ -274,19 +278,19 @@ defmodule ScenicWidgets.IconMenu do
     {:noreply, scene}
   end
 
-  defp track_tooltip(result, {:cursor_pos, coords}, scene) do
+  defp track_tooltip(result, {:cursor_pos, _coords}, scene) do
     state = result_state(result)
     scene = cancel_tooltip_timer(scene)
     state = %{state | tooltip: nil}
 
-    case tooltip_text(state) do
-      text when is_binary(text) and text != "" ->
+    case {tooltip_text(state), tooltip_anchor(state)} do
+      {text, anchor} when is_binary(text) and text != "" and not is_nil(anchor) ->
         token = make_ref()
 
         timer =
           Process.send_after(
             self(),
-            {:show_menu_tooltip, token, text, coords},
+            {:show_menu_tooltip, token, text, anchor},
             state.tooltip_delay_ms
           )
 
@@ -314,6 +318,23 @@ defmodule ScenicWidgets.IconMenu do
   end
 
   defp tooltip_text(_state), do: nil
+
+  defp tooltip_anchor(%State{hovered_item: item_id, active_menu: menu_id} = state)
+       when not is_nil(item_id) and not is_nil(menu_id) do
+    case get_in(state.dropdown_bounds, [menu_id, :items, item_id]) do
+      %{x: x, y: y, height: height} -> {x, y + height}
+      _ -> nil
+    end
+  end
+
+  defp tooltip_anchor(%State{hovered_menu: menu_id} = state) when not is_nil(menu_id) do
+    case State.get_icon_button_bounds(state, menu_id) do
+      {x, y, _width, height} -> {x, y + height}
+      _ -> nil
+    end
+  end
+
+  defp tooltip_anchor(_state), do: nil
 
   defp cancel_tooltip_timer(%{assigns: %{tooltip_timer: timer}} = scene)
        when is_reference(timer) do

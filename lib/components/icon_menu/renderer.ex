@@ -28,9 +28,13 @@ defmodule ScenicWidgets.IconMenu.Renderer do
   Update render - only modify elements that changed.
   """
   def update_render(graph, %State{} = old_state, %State{} = new_state) do
-    graph
-    |> update_icon_buttons(old_state, new_state)
-    |> update_dropdown(old_state, new_state)
+    if old_state.tooltip != new_state.tooltip do
+      initial_render(Graph.build(), new_state)
+    else
+      graph
+      |> update_icon_buttons(old_state, new_state)
+      |> update_dropdown(old_state, new_state)
+    end
   end
 
   # ===========================================================================
@@ -56,11 +60,15 @@ defmodule ScenicWidgets.IconMenu.Renderer do
 
   defp render_tooltip(graph, %State{tooltip: nil}), do: graph
 
-  defp render_tooltip(graph, %State{tooltip: %{text: text, at: {x, y}}, theme: theme}) do
+  defp render_tooltip(
+         graph,
+         %State{tooltip: %{text: text, at: {x, y}}, theme: theme, frame: frame}
+       ) do
     font_size = Map.get(theme, :tooltip_font_size, 12)
     padding = 7
     width = max(70, ceil(String.length(text) * font_size * 0.62) + padding * 2)
     height = font_size + padding * 2
+    tooltip_x = fit_tooltip_x(x + 10, width, get_frame_width(frame))
 
     Primitives.group(
       graph,
@@ -80,8 +88,13 @@ defmodule ScenicWidgets.IconMenu.Renderer do
         )
       end,
       id: :menu_tooltip,
-      translate: {x + 10, y + 14}
+      translate: {tooltip_x, y + 4}
     )
+  end
+
+  @doc false
+  def fit_tooltip_x(preferred_x, tooltip_width, component_width) do
+    min(preferred_x, component_width - tooltip_width - 4)
   end
 
   defp render_icon_buttons(graph, %State{menus: menus} = state) do
@@ -657,43 +670,16 @@ defmodule ScenicWidgets.IconMenu.Renderer do
         |> Graph.delete(:dropdown_group)
         |> render_dropdown(new_state)
 
-      # Same dropdown, but hover changed
+      # Hover affects every part of compound rows (slider label, value, track,
+      # fill, and thumb), so rebuild the small dropdown to restore all colours
+      # symmetrically when the pointer leaves.
       new_state.active_menu && old_state.hovered_item != new_state.hovered_item ->
-        update_dropdown_hover(graph, old_state, new_state)
+        graph
+        |> Graph.delete(:dropdown_group)
+        |> render_dropdown(new_state)
 
       true ->
         graph
-    end
-  end
-
-  defp update_dropdown_hover(graph, old_state, new_state) do
-    theme = new_state.theme
-
-    # Un-hover old item
-    graph =
-      if old_state.hovered_item do
-        graph
-        |> Graph.modify({:item_bg, old_state.hovered_item}, fn p ->
-          Primitives.update_opts(p, fill: :clear)
-        end)
-        |> Graph.modify({:item_text, old_state.hovered_item}, fn p ->
-          Primitives.update_opts(p, fill: theme.item_text_color)
-        end)
-      else
-        graph
-      end
-
-    # Hover new item
-    if new_state.hovered_item do
-      graph
-      |> Graph.modify({:item_bg, new_state.hovered_item}, fn p ->
-        Primitives.update_opts(p, fill: theme.item_hover_bg)
-      end)
-      |> Graph.modify({:item_text, new_state.hovered_item}, fn p ->
-        Primitives.update_opts(p, fill: theme.item_hover_text_color)
-      end)
-    else
-      graph
     end
   end
 end

@@ -127,6 +127,19 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
 
     assert Primitive.get_style(hovered_track, :fill) ==
              {:color, {:color_rgba, {255, 255, 255, 255}}}
+
+    restored =
+      Renderer.update_render(
+        hovered,
+        %{state | active_menu: :file, hovered_item: :tab_width},
+        %{state | active_menu: :file}
+      )
+
+    assert Primitive.get_style(Graph.get!(restored, {:slider_fill, :tab_width}), :fill) ==
+             Primitive.get_style(normal_fill, :fill)
+
+    assert Primitive.get_style(Graph.get!(restored, {:slider_label, :tab_width}), :fill) ==
+             {:color, {:color_rgba, {220, 220, 220, 255}}}
   end
 
   test "shortcut columns can be hidden in place and dropdown bounds are recalculated" do
@@ -141,5 +154,11 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
     hidden_graph = Renderer.initial_render(Graph.build(), %{hidden | active_menu: :file})
     assert Graph.get(shown_graph, {:item_shortcut, :save_as}) != []
     assert Graph.get(hidden_graph, {:item_shortcut, :save_as}) == []
+  end
+
+  test "a tooltip near the right edge flips left instead of overflowing" do
+    x = Renderer.fit_tooltip_x(130, 180, 140)
+    assert x + 180 <= 136
+    assert x < 0
   end
 end
