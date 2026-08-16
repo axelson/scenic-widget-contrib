@@ -646,7 +646,7 @@ defmodule ScenicWidgets.TextField.Reducer do
   # platform we are about to support. Known gap: AltGr on X11/Windows is
   # reported as ctrl+alt, so AltGr characters are still swallowed by the :ctrl
   # clause below.
-  @command_mods [:ctrl, :meta]
+  @command_mods [:ctrl, :meta, :super]
 
   def input_to_buffer_action(%State{focused: true}, {:codepoint, {char, mods}})
       when is_bitstring(char) and is_list(mods) do

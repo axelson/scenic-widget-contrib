@@ -6,9 +6,12 @@ defmodule ScenicWidgets.TextField.ReducerTest do
   test "store-backed command codepoints are ignored" do
     state = %State{focused: true}
 
-    for modifier <- [[:ctrl], [:alt], [:super], [:ctrl, :shift]] do
+    for modifier <- [[:ctrl], [:meta], [:super], [:ctrl, :shift]] do
       assert :ignore = Reducer.input_to_buffer_action(state, {:codepoint, {"s", modifier}})
     end
+
+    assert {:insert, "é", :at_cursor} =
+             Reducer.input_to_buffer_action(state, {:codepoint, {"é", [:alt]}})
   end
 
   test "store-backed unmodified codepoints remain insert actions" do
