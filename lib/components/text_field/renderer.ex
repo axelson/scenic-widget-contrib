@@ -33,6 +33,7 @@ defmodule ScenicWidgets.TextField.Renderer do
   alias Scenic.Graph
   alias Scenic.Primitives
   alias ScenicWidgets.TextField.State
+  alias ScenicWidgets.TextField.MatchingBrace
   alias ScenicWidgets.TextField.Wrapping
   require Logger
 
@@ -65,6 +66,7 @@ defmodule ScenicWidgets.TextField.Renderer do
       |> update_fold_gutter_if_changed(old_state, new_state)
       |> update_selection_if_changed(old_state, new_state)
       |> update_search_matches_if_changed(old_state, new_state)
+      |> update_matching_braces_if_changed(old_state, new_state)
       |> update_cursor_if_changed(old_state, new_state)
       |> update_scrollbars_if_changed(old_state, new_state)
     end
@@ -284,6 +286,7 @@ defmodule ScenicWidgets.TextField.Renderer do
             |> render_semantic_content(state)
             |> render_selection(state)
             |> render_search_matches(state)
+            |> render_matching_braces(state, text_padding, line_height)
             |> render_text_lines(state, display_lines, text_padding, line_height, text_y_offset)
             |> render_cursor(state, text_padding, line_height, text_y_offset)
           end,
@@ -297,6 +300,48 @@ defmodule ScenicWidgets.TextField.Renderer do
       translate: {x_offset, 0},
       scissor: {content_width, frame_height}
     )
+  end
+
+  defp render_matching_braces(graph, state, padding, line_height) do
+    geometries = matching_brace_geometries(state, padding, line_height)
+
+    [:matching_brace_current, :matching_brace_partner]
+    |> Enum.reduce(graph, fn id, acc ->
+      {size, translate, hidden?} = Map.get(geometries, id, {{1, line_height}, {0, 0}, true})
+
+      Primitives.rect(acc, size,
+        id: id,
+        translate: translate,
+        fill: :clear,
+        stroke: {1, {255, 215, 0}},
+        hidden: hidden?
+      )
+    end)
+  end
+
+  defp matching_brace_geometries(%State{show_matching_brace: false}, _padding, _height),
+    do: %{}
+
+  defp matching_brace_geometries(state, padding, line_height) do
+    case MatchingBrace.find(state.lines, state.cursor) do
+      nil ->
+        %{}
+
+      {current, partner} ->
+        [{current, :matching_brace_current}, {partner, :matching_brace_partner}]
+        |> Map.new(fn {{line, col}, id} ->
+          {display_line, display_col} = source_to_display_cursor(state, {line, col})
+          display_text = Enum.at(wrap_lines(state), display_line - 1, "")
+          before = String.slice(display_text, 0, max(0, display_col - 1))
+          x = padding + State.string_width(state, before)
+          y = (display_line - 1) * line_height + @multiline_row_y_offset
+
+          width =
+            max(2, State.string_width(state, String.at(display_text, display_col - 1) || " "))
+
+          {id, {{width, line_height}, {x, y}, false}}
+        end)
+    end
   end
 
   # Render scrollbars inside content_group (positioned relative to content area)
@@ -1175,6 +1220,26 @@ defmodule ScenicWidgets.TextField.Renderer do
   end
 
   defp update_search_matches_if_changed(graph, _old_state, _new_state), do: graph
+
+  defp update_matching_braces_if_changed(graph, old_state, new_state) do
+    if old_state.cursor != new_state.cursor or old_state.lines != new_state.lines or
+         old_state.show_matching_brace != new_state.show_matching_brace do
+      geometries = matching_brace_geometries(new_state, 10, State.line_height(new_state))
+
+      Enum.reduce([:matching_brace_current, :matching_brace_partner], graph, fn id, acc ->
+        {size, translate, hidden?} =
+          Map.get(geometries, id, {{1, State.line_height(new_state)}, {0, 0}, true})
+
+        Graph.modify(acc, id, fn primitive ->
+          primitive
+          |> Scenic.Primitive.put(size)
+          |> Primitives.update_opts(translate: translate, hidden: hidden?)
+        end)
+      end)
+    else
+      graph
+    end
+  end
 
   defp update_cursor_if_changed(
          graph,

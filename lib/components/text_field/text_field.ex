@@ -593,7 +593,7 @@ defmodule ScenicWidgets.TextField do
   requested input, and any keystroke or click arriving in that window is
   lost. (Symptom: a character vanishes if you type while toggling a setting.)
 
-  Recognised keys: `:show_line_numbers`, `:wrap_mode`, `:tab_width`,
+  Recognised keys: `:show_line_numbers`, `:show_matching_brace`, `:wrap_mode`, `:tab_width`,
   `:frame`, `:colors`, `:font`. Unknown keys are ignored.
   """
   @doc """
@@ -615,7 +615,16 @@ defmodule ScenicWidgets.TextField do
 
     new_state =
       Enum.reduce(
-        [:show_line_numbers, :wrap_mode, :tab_width, :frame, :colors, :font, :overlay_open],
+        [
+          :show_line_numbers,
+          :show_matching_brace,
+          :wrap_mode,
+          :tab_width,
+          :frame,
+          :colors,
+          :font,
+          :overlay_open
+        ],
         old_state,
         fn
           key, acc ->

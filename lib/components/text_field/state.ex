@@ -49,6 +49,7 @@ defmodule ScenicWidgets.TextField.State do
     :input_mode,
     # Boolean
     :show_line_numbers,
+    :show_matching_brace,
     # Pixels (default 40)
     :line_number_width,
     # Number of spaces per tab (default 4)
@@ -224,6 +225,7 @@ defmodule ScenicWidgets.TextField.State do
       mode: Map.get(data, :mode, :multi_line),
       input_mode: Map.get(data, :input_mode, :direct),
       show_line_numbers: show_line_numbers,
+      show_matching_brace: Map.get(data, :show_matching_brace, true),
       line_number_width: line_number_width,
       tab_width: Map.get(data, :tab_width, 4),
       font: font,
