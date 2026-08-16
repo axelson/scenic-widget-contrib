@@ -39,6 +39,7 @@ defmodule ScenicWidgets.SideNav.State do
     :pending_path_moves,
     :renaming_id,
     :rename_value,
+    :rename_replace_on_input,
     # Currently focused item (for keyboard nav)
     :focused_id,
     # Currently hovered item (for hover effects)
@@ -143,6 +144,7 @@ defmodule ScenicWidgets.SideNav.State do
       pending_path_moves: [],
       renaming_id: nil,
       rename_value: "",
+      rename_replace_on_input: false,
       focused_id: Map.get(data, :focused_id),
       expanded: initial_expanded,
       scroll:

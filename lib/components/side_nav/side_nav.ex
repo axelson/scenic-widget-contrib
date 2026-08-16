@@ -534,6 +534,7 @@ defmodule ScenicWidgets.SideNav do
       | context_menu: nil,
         renaming_id: item_id,
         rename_value: Path.basename(item_id),
+        rename_replace_on_input: true,
         focused: true
     }
 
@@ -884,7 +885,12 @@ defmodule ScenicWidgets.SideNav do
       )
       when not is_nil(id) do
     state = scene.assigns.state
-    value = String.slice(state.rename_value, 0, max(String.length(state.rename_value) - 1, 0))
+
+    value =
+      if state.rename_replace_on_input,
+        do: "",
+        else: String.slice(state.rename_value, 0, max(String.length(state.rename_value) - 1, 0))
+
     update_rename(scene, value)
   end
 
@@ -894,7 +900,9 @@ defmodule ScenicWidgets.SideNav do
         %{assigns: %{state: %State{renaming_id: id}}} = scene
       )
       when not is_nil(id) and is_binary(codepoint) do
-    update_rename(scene, scene.assigns.state.rename_value <> codepoint)
+    state = scene.assigns.state
+    value = if state.rename_replace_on_input, do: codepoint, else: state.rename_value <> codepoint
+    update_rename(scene, value)
   end
 
   def handle_input({:key, _}, _context, %{assigns: %{state: %State{focused: false}}} = scene) do
@@ -989,14 +997,21 @@ defmodule ScenicWidgets.SideNav do
 
   defp update_rename(scene, value) do
     state = scene.assigns.state
-    new_state = %{state | rename_value: value}
+    new_state = %{state | rename_value: value, rename_replace_on_input: false}
     graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
     {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
   end
 
   defp finish_rename(scene) do
     state = scene.assigns.state
-    new_state = %{state | renaming_id: nil, rename_value: ""}
+
+    new_state = %{
+      state
+      | renaming_id: nil,
+        rename_value: "",
+        rename_replace_on_input: false
+    }
+
     graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
     {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
   end
