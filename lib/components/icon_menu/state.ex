@@ -55,6 +55,7 @@ defmodule ScenicWidgets.IconMenu.State do
           active_menu: atom() | nil,
           hovered_menu: atom() | nil,
           hovered_item: String.t() | nil,
+          dragging_slider: String.t() | atom() | nil,
           theme: map(),
           dropdown_bounds: map(),
           align: :left | :right
@@ -66,6 +67,7 @@ defmodule ScenicWidgets.IconMenu.State do
     active_menu: nil,
     hovered_menu: nil,
     hovered_item: nil,
+    dragging_slider: nil,
     theme: %{},
     dropdown_bounds: %{},
     # Default to right alignment (flush with right edge of frame)
@@ -94,6 +96,7 @@ defmodule ScenicWidgets.IconMenu.State do
     dropdown_max_width: 420,
     dropdown_column_gap: 24,
     dropdown_item_height: 28,
+    dropdown_slider_height: 52,
     dropdown_padding: 4,
 
     # Typography
@@ -119,6 +122,7 @@ defmodule ScenicWidgets.IconMenu.State do
       active_menu: nil,
       hovered_menu: nil,
       hovered_item: nil,
+      dragging_slider: nil,
       theme: theme,
       dropdown_bounds: %{},
       align: align
@@ -180,7 +184,6 @@ defmodule ScenicWidgets.IconMenu.State do
   """
   def calculate_dropdown_bounds(%__MODULE__{menus: menus, theme: theme, align: align} = state) do
     button_size = theme.icon_button_size
-    item_height = theme.dropdown_item_height
     padding = theme.dropdown_padding
     x_offset = alignment_offset(state)
 
@@ -201,23 +204,27 @@ defmodule ScenicWidgets.IconMenu.State do
         end
 
       # Calculate dropdown height based on items
-      dropdown_height = length(menu.items) * item_height + 2 * padding
+      dropdown_height = Enum.sum(Enum.map(menu.items, &item_height(&1, theme))) + 2 * padding
 
       # Calculate item bounds within dropdown (relative to dropdown origin)
       item_bounds =
         menu.items
-        |> Enum.with_index()
-        |> Enum.map(fn {item, item_index} ->
+        |> Enum.map_reduce(0, fn item, y_offset ->
           item_id = get_item_id(item)
+          height = item_height(item, theme)
 
-          {item_id,
-           %{
-             x: dropdown_x + padding,
-             y: y + padding + item_index * item_height,
-             width: dropdown_width - 2 * padding,
-             height: item_height
-           }}
+          entry =
+            {item_id,
+             %{
+               x: dropdown_x + padding,
+               y: y + padding + y_offset,
+               width: dropdown_width - 2 * padding,
+               height: height
+             }}
+
+          {entry, y_offset + height}
         end)
+        |> elem(0)
         |> Enum.into(%{})
 
       {menu.id,
@@ -382,6 +389,12 @@ defmodule ScenicWidgets.IconMenu.State do
   @doc "Returns a menu item's shortcut as a separate, right-aligned column."
   def item_shortcut(%{shortcut: shortcut}) when is_binary(shortcut), do: shortcut
   def item_shortcut(_item), do: nil
+
+  @doc "Returns the row height for an item; interactive sliders receive extra vertical space."
+  def item_height(%ScenicWidgets.Menu.Model.Slider{}, theme),
+    do: Map.get(theme, :dropdown_slider_height, 52)
+
+  def item_height(_item, theme), do: theme.dropdown_item_height
 
   @doc "Calculates a content-aware dropdown width, bounded by the component theme and frame."
   def dropdown_width(items, theme, state) do

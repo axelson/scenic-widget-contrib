@@ -3,7 +3,7 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
 
   alias ScenicWidgets.IconMenu.State
   alias ScenicWidgets.IconMenu.Renderer
-  alias ScenicWidgets.Menu.Model.Item
+  alias ScenicWidgets.Menu.Model.{Item, Slider}
   alias Scenic.{Graph, Primitive}
   alias Widgex.Frame
 
@@ -88,5 +88,20 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
     assert primitive.data != shortcut
     assert String.ends_with?(primitive.data, "…")
     assert Primitive.get_style(primitive, :text_align) == :right
+  end
+
+  test "slider rows are taller and render a label, value, track, and thumb" do
+    slider = %Slider{id: :tab_width, label: "Tab Width", value: 4, min: 2, max: 12}
+    state = state([slider, %Item{id: :after, label: "After"}])
+    bounds = state.dropdown_bounds.file.items
+
+    assert bounds.tab_width.height == state.theme.dropdown_slider_height
+    assert bounds.after.y == bounds.tab_width.y + bounds.tab_width.height
+
+    graph = Renderer.initial_render(Graph.build(), %{state | active_menu: :file})
+    assert Graph.get!(graph, {:slider_label, :tab_width}).data == "Tab Width"
+    assert Graph.get!(graph, {:slider_value, :tab_width}).data == "4"
+    assert Graph.get!(graph, {:slider_track, :tab_width})
+    assert Graph.get!(graph, {:slider_thumb, :tab_width})
   end
 end

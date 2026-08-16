@@ -314,20 +314,20 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     # Space reserved for checkmark on the left
     checkmark_width = 20
 
-    items
-    |> Enum.with_index()
-    |> Enum.reduce(graph, fn {item, index}, acc ->
+    Enum.reduce(items, graph, fn item, acc ->
       item_id = State.get_item_id(item)
       label = State.display_label(item)
       shortcut = State.item_shortcut(item)
       is_toggle = State.is_toggle_item?(item)
       is_checked = State.is_item_checked?(item)
+      item_bounds = Map.fetch!(dropdown.items, item_id)
 
       is_hovered = hovered_item == item_id
 
       # Position relative to dropdown origin
       item_x = padding
-      item_y = padding + index * theme.dropdown_item_height
+      item_y = item_bounds.y - dropdown.y
+      row_height = item_bounds.height
 
       bg_color = if is_hovered, do: theme.item_hover_bg, else: :clear
       enabled? = State.item_enabled?(item)
@@ -346,7 +346,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
             g
             # Item background (for hover)
             |> Primitives.rrect(
-              {dropdown.width - 2 * padding, theme.dropdown_item_height, 3},
+              {dropdown.width - 2 * padding, row_height, 3},
               id: {:item_bg, item_id},
               fill: bg_color
             )
@@ -367,57 +367,102 @@ defmodule ScenicWidgets.IconMenu.Renderer do
               g
             end
 
-          text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
-          shortcut_right = dropdown.width - 2 * padding - 8
-          column_gap = Map.get(theme, :dropdown_column_gap, 24)
-          available_width = shortcut_right - text_x
-          measured_shortcut_width = measure_width(shortcut || "", theme)
-
-          shortcut_width =
-            if shortcut do
-              min(measured_shortcut_width, max(40, available_width * 0.55))
-            else
-              0
-            end
-
-          label_max_width =
-            max(
-              0,
-              shortcut_right - text_x - if(shortcut, do: shortcut_width + column_gap, else: 0)
-            )
-
-          display_label = truncate(label, label_max_width, theme)
-          display_shortcut = shortcut && truncate(shortcut, shortcut_width, theme)
-
-          g =
-            Primitives.text(g, display_label,
-              id: {:item_text, item_id},
-              fill: text_color,
-              font: theme.font,
-              font_size: theme.dropdown_font_size,
-              translate: {text_x, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
-            )
-
-          if display_shortcut do
-            Primitives.text(g, display_shortcut,
-              id: {:item_shortcut, item_id},
-              fill: text_color,
-              font: theme.font,
-              font_size: theme.dropdown_font_size,
-              text_align: :right,
-              translate: {
-                shortcut_right,
-                theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3
-              }
-            )
+          if match?(%ScenicWidgets.Menu.Model.Slider{}, item) do
+            render_slider(g, item, dropdown.width - 2 * padding, text_color, theme)
           else
-            g
+            text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
+            shortcut_right = dropdown.width - 2 * padding - 8
+            column_gap = Map.get(theme, :dropdown_column_gap, 24)
+            available_width = shortcut_right - text_x
+            measured_shortcut_width = measure_width(shortcut || "", theme)
+
+            shortcut_width =
+              if shortcut do
+                min(measured_shortcut_width, max(40, available_width * 0.55))
+              else
+                0
+              end
+
+            label_max_width =
+              max(
+                0,
+                shortcut_right - text_x - if(shortcut, do: shortcut_width + column_gap, else: 0)
+              )
+
+            display_label = truncate(label, label_max_width, theme)
+            display_shortcut = shortcut && truncate(shortcut, shortcut_width, theme)
+
+            g =
+              Primitives.text(g, display_label,
+                id: {:item_text, item_id},
+                fill: text_color,
+                font: theme.font,
+                font_size: theme.dropdown_font_size,
+                translate: {text_x, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
+              )
+
+            if display_shortcut do
+              Primitives.text(g, display_shortcut,
+                id: {:item_shortcut, item_id},
+                fill: text_color,
+                font: theme.font,
+                font_size: theme.dropdown_font_size,
+                text_align: :right,
+                translate: {
+                  shortcut_right,
+                  theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3
+                }
+              )
+            else
+              g
+            end
           end
         end,
         id: {:dropdown_item, item_id},
         translate: {item_x, item_y}
       )
     end)
+  end
+
+  defp render_slider(graph, slider, row_width, text_color, theme) do
+    track_x = 10
+    track_width = max(1, row_width - 20)
+    track_y = Map.get(theme, :dropdown_slider_height, 52) - 13
+    ratio = (slider.value - slider.min) / max(slider.max - slider.min, 1)
+    thumb_x = track_x + ratio * track_width
+    font_y = theme.dropdown_font_size + 5
+
+    graph
+    |> Primitives.text(slider.label,
+      id: {:slider_label, slider.id},
+      fill: text_color,
+      font: theme.font,
+      font_size: theme.dropdown_font_size,
+      translate: {8, font_y}
+    )
+    |> Primitives.text(to_string(slider.value),
+      id: {:slider_value, slider.id},
+      fill: text_color,
+      font: theme.font,
+      font_size: theme.dropdown_font_size,
+      text_align: :right,
+      translate: {row_width - 8, font_y}
+    )
+    |> Primitives.rrect({track_width, 4, 2},
+      id: {:slider_track, slider.id},
+      fill: Map.get(theme, :dropdown_border, {70, 70, 70}),
+      translate: {track_x, track_y}
+    )
+    |> Primitives.rrect({max(0, thumb_x - track_x), 4, 2},
+      id: {:slider_fill, slider.id},
+      fill: Map.get(theme, :item_hover_bg, {0, 122, 204}),
+      translate: {track_x, track_y}
+    )
+    |> Primitives.circle(6,
+      id: {:slider_thumb, slider.id},
+      fill: text_color,
+      translate: {thumb_x, track_y + 2}
+    )
   end
 
   # Check if any item in the list is a toggle type (to align text consistently)
@@ -546,6 +591,14 @@ defmodule ScenicWidgets.IconMenu.Renderer do
         else
           graph
         end
+
+      # Interactive controls (notably sliders) update their model while the
+      # dropdown remains open. Rebuild that small overlay so thumb and value
+      # feedback track the pointer in real time.
+      new_state.active_menu && old_state.menus != new_state.menus ->
+        graph
+        |> Graph.delete(:dropdown_group)
+        |> render_dropdown(new_state)
 
       # Same dropdown, but hover changed
       new_state.active_menu && old_state.hovered_item != new_state.hovered_item ->

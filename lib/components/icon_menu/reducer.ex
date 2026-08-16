@@ -18,8 +18,16 @@ defmodule ScenicWidgets.IconMenu.Reducer do
     handle_cursor_pos(state, coords)
   end
 
-  def process_input(%State{} = state, {:cursor_button, {:btn_left, 1, [], coords}}) do
+  def process_input(%State{} = state, {:cursor_button, {:btn_left, 1, _mods, coords}}) do
     handle_click(state, coords)
+  end
+
+  def process_input(
+        %State{dragging_slider: slider_id} = state,
+        {:cursor_button, {:btn_left, 0, _mods, _coords}}
+      )
+      when not is_nil(slider_id) do
+    {:noop, %{state | dragging_slider: nil}}
   end
 
   def process_input(%State{} = state, {:key, {:key_esc, key_state, _mods}})
@@ -35,6 +43,14 @@ defmodule ScenicWidgets.IconMenu.Reducer do
   Handle cursor position for hover effects.
   """
   def handle_cursor_pos(%State{} = state, coords) do
+    if state.dragging_slider do
+      update_slider(state, state.dragging_slider, coords, true)
+    else
+      do_handle_cursor_pos(state, coords)
+    end
+  end
+
+  defp do_handle_cursor_pos(%State{} = state, coords) do
     cond do
       # Check if cursor is over icon buttons
       State.point_in_icon_bar?(state, coords) ->
@@ -126,9 +142,32 @@ defmodule ScenicWidgets.IconMenu.Reducer do
     end
   end
 
-  defp activate_item(state, %ScenicWidgets.Menu.Model.Slider{} = slider, item_id, {x, _y}) do
+  defp activate_item(state, %ScenicWidgets.Menu.Model.Slider{}, item_id, {x, _y}) do
+    update_slider(state, item_id, {x, 0}, true)
+  end
+
+  defp activate_item(state, _item, item_id, _coords) do
+    # Execute action callback if present
+    action = State.get_item_action(state, item_id)
+    if is_function(action, 0), do: action.()
+
+    # Close menu and notify parent
+    new_state = %{
+      state
+      | active_menu: nil,
+        hovered_menu: nil,
+        hovered_item: nil,
+        dragging_slider: nil
+    }
+
+    {:menu_item_clicked, item_id, new_state}
+  end
+
+  defp update_slider(state, item_id, {x, _y}, dragging?) do
+    slider = State.find_item(state, item_id)
     bounds = state.dropdown_bounds[state.active_menu].items[item_id]
-    ratio = (x - bounds.x) / max(bounds.width, 1)
+    track_inset = 10
+    ratio = (x - bounds.x - track_inset) / max(bounds.width - 2 * track_inset, 1)
     raw = slider.min + min(1.0, max(0.0, ratio)) * (slider.max - slider.min)
     steps = round((raw - slider.min) / slider.step)
     value = min(slider.max, max(slider.min, slider.min + steps * slider.step))
@@ -149,17 +188,14 @@ defmodule ScenicWidgets.IconMenu.Reducer do
           menu
       end)
 
-    {:menu_value_changed, item_id, value, %{state | menus: menus, hovered_item: item_id}}
-  end
+    new_state = %{
+      state
+      | menus: menus,
+        hovered_item: item_id,
+        dragging_slider: if(dragging?, do: item_id, else: state.dragging_slider)
+    }
 
-  defp activate_item(state, _item, item_id, _coords) do
-    # Execute action callback if present
-    action = State.get_item_action(state, item_id)
-    if is_function(action, 0), do: action.()
-
-    # Close menu and notify parent
-    new_state = %{state | active_menu: nil, hovered_menu: nil, hovered_item: nil}
-    {:menu_item_clicked, item_id, new_state}
+    {:menu_value_changed, item_id, value, new_state}
   end
 
   @doc """
@@ -170,6 +206,7 @@ defmodule ScenicWidgets.IconMenu.Reducer do
   end
 
   def handle_escape(%State{} = state) do
-    {:noop, %{state | active_menu: nil, hovered_menu: nil, hovered_item: nil}}
+    {:noop,
+     %{state | active_menu: nil, hovered_menu: nil, hovered_item: nil, dragging_slider: nil}}
   end
 end

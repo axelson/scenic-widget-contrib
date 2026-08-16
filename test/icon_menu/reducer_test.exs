@@ -23,6 +23,7 @@ defmodule ScenicWidgets.IconMenu.ReducerTest do
   use ExUnit.Case, async: true
 
   alias ScenicWidgets.IconMenu.{Reducer, State}
+  alias ScenicWidgets.Menu.Model.Slider
   alias Widgex.Frame
 
   defp build_state do
@@ -78,6 +79,40 @@ defmodule ScenicWidgets.IconMenu.ReducerTest do
       Toggle-close must clear hovered_menu, but it was #{inspect(new_state.hovered_menu)}.
       Bug 002 V2: reducer.ex:91-93 only clears active_menu/hovered_item.
       """
+    end
+  end
+
+  describe "reusable slider rows" do
+    test "pressing and dragging continuously changes the stepped value" do
+      slider = %Slider{id: :tab_width, label: "Tab Width", value: 2, min: 2, max: 12, step: 1}
+
+      state =
+        State.new(%{
+          frame: Frame.new(pin: {0, 0}, size: {300, 35}),
+          align: :left,
+          menus: [%{id: :view, icon: :view, items: [slider]}]
+        })
+
+      state = %{state | active_menu: :view}
+      bounds = state.dropdown_bounds.view.items.tab_width
+      middle = {bounds.x + bounds.width / 2, bounds.y + bounds.height / 2}
+
+      assert {:menu_value_changed, :tab_width, 7, dragging} =
+               Reducer.process_input(state, {:cursor_button, {:btn_left, 1, [], middle}})
+
+      assert dragging.dragging_slider == :tab_width
+
+      assert {:menu_value_changed, :tab_width, 12, dragged} =
+               Reducer.process_input(dragging, {:cursor_pos, {bounds.x + bounds.width, bounds.y}})
+
+      assert {:noop, released} =
+               Reducer.process_input(
+                 dragged,
+                 {:cursor_button, {:btn_left, 0, [], {bounds.x + bounds.width, bounds.y}}}
+               )
+
+      assert released.dragging_slider == nil
+      assert State.find_item(released, :tab_width).value == 12
     end
   end
 end
