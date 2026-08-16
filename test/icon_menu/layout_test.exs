@@ -161,4 +161,10 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
     assert x + 180 <= 136
     assert x < 0
   end
+
+  test "tooltip width uses measured text plus symmetric padding" do
+    width = Renderer.tooltip_width("File commands", :roboto_mono, 12, 7)
+    assert width > 14
+    assert width < 120
+  end
 end

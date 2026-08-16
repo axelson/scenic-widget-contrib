@@ -66,7 +66,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
        ) do
     font_size = Map.get(theme, :tooltip_font_size, 12)
     padding = 7
-    width = max(70, ceil(String.length(text) * font_size * 0.62) + padding * 2)
+    width = tooltip_width(text, theme.font, font_size, padding)
     height = font_size + padding * 2
     tooltip_x = fit_tooltip_x(x + 10, width, get_frame_width(frame))
 
@@ -95,6 +95,17 @@ defmodule ScenicWidgets.IconMenu.Renderer do
   @doc false
   def fit_tooltip_x(preferred_x, tooltip_width, component_width) do
     min(preferred_x, component_width - tooltip_width - 4)
+  end
+
+  @doc false
+  def tooltip_width(text, font, font_size, padding) do
+    measured =
+      case TextHelper.measure_text(text, font: font, font_size: font_size) do
+        {:ok, width} -> width
+        {:error, _} -> String.length(text) * font_size * 0.6
+      end
+
+    ceil(measured) + padding * 2
   end
 
   defp render_icon_buttons(graph, %State{menus: menus} = state) do
