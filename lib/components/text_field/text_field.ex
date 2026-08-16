@@ -799,6 +799,9 @@ defmodule ScenicWidgets.TextField do
       pane_view = Map.get(buf_state, :pane_view, %{})
       incoming_folds = Map.get(pane_view, :folds, MapSet.to_list(state.folds || MapSet.new()))
       new_state = %{new_state | folds: MapSet.new(incoming_folds)}
+      incoming_uuid = Map.get(buf_state, :uuid)
+      buffer_switched? = is_binary(incoming_uuid) and incoming_uuid != state.buffer_id
+      cursor_or_content_changed? = cursor != state.cursor or buf_state.data != state.lines
 
       # Update scroll content size when lines change (critical for horizontal scrolling)
       # This ensures the scroll state knows the actual content dimensions
@@ -815,7 +818,7 @@ defmodule ScenicWidgets.TextField do
       # every click would land offset by the stale scroll. Reset to origin.
       # Same-document updates keep scroll: typing must not yank the view.
       new_state =
-        case Map.get(buf_state, :uuid) do
+        case incoming_uuid do
           nil ->
             new_state
 
@@ -823,14 +826,16 @@ defmodule ScenicWidgets.TextField do
             new_state
 
           uuid ->
+            restored_scroll = %{
+              new_state.scroll
+              | offset_x: Map.get(pane_view, :offset_x, 0),
+                offset_y: Map.get(pane_view, :offset_y, 0)
+            }
+
             %{
               new_state
               | buffer_id: uuid,
-                scroll: %{
-                  new_state.scroll
-                  | offset_x: Map.get(pane_view, :offset_x, 0),
-                    offset_y: Map.get(pane_view, :offset_y, 0)
-                }
+                scroll: Widgex.Scroll.ScrollState.clamp(restored_scroll)
             }
         end
 
@@ -853,8 +858,19 @@ defmodule ScenicWidgets.TextField do
         send_parent_event(scene, {:search_navigated, state.id, new_search_index, total})
       end
 
-      # Ensure cursor is visible after update
-      new_state = State.ensure_cursor_visible(new_state)
+      # A document switch restores that document's independent viewport. Wheel
+      # scrolling intentionally does not move the text cursor, so forcing the
+      # cursor visible here would immediately destroy the restored offset.
+      # Same-document cursor moves and edits still keep the live cursor on
+      # screen. Retained PubSub snapshots and metadata-only republishes are
+      # deliberately inert: a duplicate snapshot commonly follows a pane
+      # switch and must not destroy the viewport we just restored.
+      new_state =
+        if buffer_switched? or not cursor_or_content_changed? do
+          new_state
+        else
+          State.ensure_cursor_visible(new_state)
+        end
 
       update_scene(scene, state, new_state)
     else
