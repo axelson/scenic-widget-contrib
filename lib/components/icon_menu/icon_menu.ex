@@ -174,6 +174,22 @@ defmodule ScenicWidgets.IconMenu do
     {:noreply, scene}
   end
 
+  def handle_put({:show_shortcuts, show?}, scene) when is_boolean(show?) do
+    state = scene.assigns.state
+
+    if state.show_shortcuts == show? do
+      {:noreply, scene}
+    else
+      new_state = %{state | show_shortcuts: show?}
+      new_state = %{new_state | dropdown_bounds: State.calculate_dropdown_bounds(new_state)}
+      graph = Renderer.initial_render(Graph.build(), new_state)
+
+      scene = scene |> assign(state: new_state, graph: graph) |> push_graph(graph)
+      notify_dropdown_state(scene, state, new_state)
+      {:noreply, scene}
+    end
+  end
+
   def handle_put(_msg, scene) do
     {:noreply, scene}
   end
@@ -189,7 +205,12 @@ defmodule ScenicWidgets.IconMenu do
   # it. Without this signal they can only guess (badly) from geometry
   # whether a click was theirs. Emitted from the single place every menu
   # transition passes through, so open/close can never be missed.
-  defp notify_dropdown_state(scene, %{active_menu: same}, %{active_menu: same}), do: scene
+  defp notify_dropdown_state(
+         scene,
+         %{active_menu: same, dropdown_bounds: bounds},
+         %{active_menu: same, dropdown_bounds: bounds}
+       ),
+       do: scene
 
   defp notify_dropdown_state(scene, _old_state, %{active_menu: nil}) do
     send_parent_event(scene, {:dropdown_closed})

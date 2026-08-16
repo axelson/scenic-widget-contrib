@@ -146,6 +146,19 @@ defmodule ScenicWidgets.IconMenu.Reducer do
     update_slider(state, item_id, {x, 0}, true)
   end
 
+  defp activate_item(
+         state,
+         %ScenicWidgets.Menu.Model.Toggle{checked?: checked} = toggle,
+         item_id,
+         _coords
+       ) do
+    updated = %{toggle | checked?: not checked}
+    menus = replace_active_item(state, item_id, updated)
+
+    {:menu_value_changed, item_id, updated.checked?,
+     %{state | menus: menus, hovered_item: item_id}}
+  end
+
   defp activate_item(state, _item, item_id, _coords) do
     # Execute action callback if present
     action = State.get_item_action(state, item_id)
@@ -173,20 +186,7 @@ defmodule ScenicWidgets.IconMenu.Reducer do
     value = min(slider.max, max(slider.min, slider.min + steps * slider.step))
     updated = %{slider | value: value}
 
-    menus =
-      Enum.map(state.menus, fn
-        %{id: id, items: items} = menu when id == state.active_menu ->
-          %{
-            menu
-            | items:
-                Enum.map(items, fn item ->
-                  if State.get_item_id(item) == item_id, do: updated, else: item
-                end)
-          }
-
-        menu ->
-          menu
-      end)
+    menus = replace_active_item(state, item_id, updated)
 
     new_state = %{
       state
@@ -196,6 +196,19 @@ defmodule ScenicWidgets.IconMenu.Reducer do
     }
 
     {:menu_value_changed, item_id, value, new_state}
+  end
+
+  defp replace_active_item(state, item_id, updated) do
+    Enum.map(state.menus, fn
+      %{id: id, items: items} = menu when id == state.active_menu ->
+        %{
+          menu
+          | items: Enum.map(items, &if(State.get_item_id(&1) == item_id, do: updated, else: &1))
+        }
+
+      menu ->
+        menu
+    end)
   end
 
   @doc """

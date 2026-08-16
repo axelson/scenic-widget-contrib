@@ -56,6 +56,7 @@ defmodule ScenicWidgets.IconMenu.State do
           hovered_menu: atom() | nil,
           hovered_item: String.t() | nil,
           dragging_slider: String.t() | atom() | nil,
+          show_shortcuts: boolean(),
           theme: map(),
           dropdown_bounds: map(),
           align: :left | :right
@@ -68,6 +69,7 @@ defmodule ScenicWidgets.IconMenu.State do
     hovered_menu: nil,
     hovered_item: nil,
     dragging_slider: nil,
+    show_shortcuts: true,
     theme: %{},
     dropdown_bounds: %{},
     # Default to right alignment (flush with right edge of frame)
@@ -123,6 +125,7 @@ defmodule ScenicWidgets.IconMenu.State do
       hovered_menu: nil,
       hovered_item: nil,
       dragging_slider: nil,
+      show_shortcuts: Map.get(data, :show_shortcuts, true),
       theme: theme,
       dropdown_bounds: %{},
       align: align
@@ -387,8 +390,9 @@ defmodule ScenicWidgets.IconMenu.State do
   def display_label(item), do: get_item_label(item)
 
   @doc "Returns a menu item's shortcut as a separate, right-aligned column."
-  def item_shortcut(%{shortcut: shortcut}) when is_binary(shortcut), do: shortcut
-  def item_shortcut(_item), do: nil
+  def item_shortcut(item), do: item_shortcut(item, true)
+  def item_shortcut(%{shortcut: shortcut}, true) when is_binary(shortcut), do: shortcut
+  def item_shortcut(_item, _show_shortcuts), do: nil
 
   @doc "Returns the row height for an item; interactive sliders receive extra vertical space."
   def item_height(%ScenicWidgets.Menu.Model.Slider{}, theme),
@@ -408,7 +412,7 @@ defmodule ScenicWidgets.IconMenu.State do
 
     shortcut_width =
       items
-      |> Enum.map(&(item_shortcut(&1) || ""))
+      |> Enum.map(&(item_shortcut(&1, state.show_shortcuts) || ""))
       |> Enum.map(&text_width(&1, font_opts))
       |> Enum.max(fn -> 0 end)
 

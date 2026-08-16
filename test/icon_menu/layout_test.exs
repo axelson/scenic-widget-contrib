@@ -128,4 +128,18 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
     assert Primitive.get_style(hovered_track, :fill) ==
              {:color, {:color_rgba, {255, 255, 255, 255}}}
   end
+
+  test "shortcut columns can be hidden in place and dropdown bounds are recalculated" do
+    item = %Item{id: :save_as, label: "Save As…", shortcut: "Ctrl+Shift+S"}
+    shown = state([item], %{dropdown_width: 100})
+    hidden = %{shown | show_shortcuts: false}
+    hidden = %{hidden | dropdown_bounds: State.calculate_dropdown_bounds(hidden)}
+
+    assert hidden.dropdown_bounds.file.width < shown.dropdown_bounds.file.width
+
+    shown_graph = Renderer.initial_render(Graph.build(), %{shown | active_menu: :file})
+    hidden_graph = Renderer.initial_render(Graph.build(), %{hidden | active_menu: :file})
+    assert Graph.get(shown_graph, {:item_shortcut, :save_as}) != []
+    assert Graph.get(hidden_graph, {:item_shortcut, :save_as}) == []
+  end
 end

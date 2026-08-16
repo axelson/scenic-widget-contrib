@@ -23,7 +23,7 @@ defmodule ScenicWidgets.IconMenu.ReducerTest do
   use ExUnit.Case, async: true
 
   alias ScenicWidgets.IconMenu.{Reducer, State}
-  alias ScenicWidgets.Menu.Model.Slider
+  alias ScenicWidgets.Menu.Model.{Slider, Toggle}
   alias Widgex.Frame
 
   defp build_state do
@@ -113,6 +113,29 @@ defmodule ScenicWidgets.IconMenu.ReducerTest do
 
       assert released.dragging_slider == nil
       assert State.find_item(released, :tab_width).value == 12
+    end
+  end
+
+  describe "reusable toggle rows" do
+    test "toggle changes value without closing its dropdown" do
+      toggle = %Toggle{id: :shortcuts, label: "Shortcuts", checked?: true}
+
+      state =
+        State.new(%{
+          frame: Frame.new(pin: {0, 0}, size: {300, 35}),
+          align: :left,
+          menus: [%{id: :view, icon: :view, items: [toggle]}]
+        })
+
+      state = %{state | active_menu: :view}
+      bounds = state.dropdown_bounds.view.items.shortcuts
+      coords = {bounds.x + bounds.width / 2, bounds.y + bounds.height / 2}
+
+      assert {:menu_value_changed, :shortcuts, false, updated} =
+               Reducer.process_input(state, {:cursor_button, {:btn_left, 1, [], coords}})
+
+      assert updated.active_menu == :view
+      refute State.find_item(updated, :shortcuts).checked?
     end
   end
 end

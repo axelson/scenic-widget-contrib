@@ -302,12 +302,16 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     end
   end
 
-  defp render_dropdown_items(graph, items, %State{
-         theme: theme,
-         active_menu: menu_id,
-         dropdown_bounds: bounds,
-         hovered_item: hovered_item
-       }) do
+  defp render_dropdown_items(
+         graph,
+         items,
+         %State{
+           theme: theme,
+           active_menu: menu_id,
+           dropdown_bounds: bounds,
+           hovered_item: hovered_item
+         } = state
+       ) do
     dropdown = Map.get(bounds, menu_id)
     padding = theme.dropdown_padding
 
@@ -317,7 +321,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     Enum.reduce(items, graph, fn item, acc ->
       item_id = State.get_item_id(item)
       label = State.display_label(item)
-      shortcut = State.item_shortcut(item)
+      shortcut = State.item_shortcut(item, state.show_shortcuts)
       is_toggle = State.is_toggle_item?(item)
       is_checked = State.is_item_checked?(item)
       item_bounds = Map.fetch!(dropdown.items, item_id)
