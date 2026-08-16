@@ -151,6 +151,37 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
              Reducer.handle_click(state, {bounds.x + bounds.width - 5, bounds.y + 10})
 
     assert State.find_item(updated, :zoom).value == 110
+
+    graph = Renderer.initial_render(Graph.build(), state)
+    minus_bg = Graph.get!(graph, {:stepper_minus_bg, :zoom})
+    plus = Graph.get!(graph, {:stepper_plus, :zoom})
+    value = Graph.get!(graph, {:stepper_value, :zoom})
+    refute Primitive.get_style(minus_bg, :fill) == {:color, {:color_rgba, {0, 0, 0, 0}}}
+    assert Primitive.get_style(plus, :text_base) == :middle
+    assert Primitive.get_style(value, :text_base) == :middle
+  end
+
+  test "select popovers show four options and scroll longer choice lists" do
+    select = %Select{id: :level, label: "Level", value: 1, options: Enum.to_list(1..8)}
+    state = %{state([select]) | active_menu: :file}
+    bounds = state.dropdown_bounds.file.items.level
+    {:noop, expanded} = Reducer.handle_click(state, {bounds.x + 10, bounds.y + 10})
+
+    assert expanded.dropdown_bounds.file.items.level.height ==
+             expanded.theme.dropdown_item_height * 5
+
+    graph = Renderer.initial_render(Graph.build(), expanded)
+    assert Graph.get!(graph, {:select_option, :level, 1})
+    assert Graph.get!(graph, {:select_option, :level, 4})
+    assert Graph.get(graph, {:select_option, :level, 5}) == []
+
+    assert {:noop, scrolled} =
+             Reducer.process_input(expanded, {
+               :cursor_scroll,
+               {{0, 1}, {bounds.x + 10, bounds.y + expanded.theme.dropdown_item_height * 2}}
+             })
+
+    assert State.find_item(scrolled, :level).scroll_offset == 1
   end
 
   test "hovered sliders invert their controls against the blue row highlight" do

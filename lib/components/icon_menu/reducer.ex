@@ -18,6 +18,17 @@ defmodule ScenicWidgets.IconMenu.Reducer do
     handle_cursor_pos(state, coords)
   end
 
+  def process_input(
+        %State{} = state,
+        {:cursor_scroll, {{_dx, dy}, coords}}
+      ) do
+    scroll_open_select(state, dy, coords)
+  end
+
+  def process_input(%State{} = state, {:cursor_scroll, {_dx, dy, x, y}}) do
+    scroll_open_select(state, dy, {x, y})
+  end
+
   def process_input(%State{} = state, {:cursor_button, {:btn_left, 1, _mods, coords}}) do
     handle_click(state, coords)
   end
@@ -151,7 +162,8 @@ defmodule ScenicWidgets.IconMenu.Reducer do
     row_height = state.theme.dropdown_item_height
 
     if select.expanded? and y >= bounds.y + row_height do
-      option = Enum.at(select.options, floor((y - bounds.y - row_height) / row_height))
+      visible_index = floor((y - bounds.y - row_height) / row_height)
+      option = Enum.at(select.options, select.scroll_offset + visible_index)
 
       if is_nil(option) do
         {:noop, state}
@@ -165,13 +177,44 @@ defmodule ScenicWidgets.IconMenu.Reducer do
     end
   end
 
+  defp scroll_open_select(state, dy, coords) do
+    case State.point_in_dropdown?(state, coords) do
+      {true, item_id} ->
+        case State.find_item(state, item_id) do
+          %ScenicWidgets.Menu.Model.Select{expanded?: true} = select ->
+            max_offset = max(0, length(select.options) - 4)
+            direction = if dy > 0, do: 1, else: -1
+            offset = min(max_offset, max(0, select.scroll_offset + direction))
+            updated = %{select | scroll_offset: offset}
+            {:noop, replace_and_recalculate(state, item_id, updated)}
+
+          _ ->
+            {:noop, state}
+        end
+
+      _ ->
+        {:noop, state}
+    end
+  end
+
   defp activate_item(state, %ScenicWidgets.Menu.Model.Stepper{} = stepper, item_id, {x, _y}) do
     bounds = state.dropdown_bounds[state.active_menu].items[item_id]
     local_x = x - bounds.x
-    delta = if local_x >= bounds.width - 38, do: stepper.step, else: -stepper.step
-    value = min(stepper.max, max(stepper.min, stepper.value + delta))
-    updated = %{stepper | value: value}
-    {:menu_value_changed, item_id, value, replace_and_recalculate(state, item_id, updated)}
+
+    delta =
+      cond do
+        local_x >= bounds.width - 40 -> stepper.step
+        local_x >= bounds.width - 128 and local_x <= bounds.width - 92 -> -stepper.step
+        true -> 0
+      end
+
+    if delta == 0 do
+      {:noop, state}
+    else
+      value = min(stepper.max, max(stepper.min, stepper.value + delta))
+      updated = %{stepper | value: value}
+      {:menu_value_changed, item_id, value, replace_and_recalculate(state, item_id, updated)}
+    end
   end
 
   defp activate_item(

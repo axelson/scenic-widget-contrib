@@ -30,7 +30,16 @@ defmodule ScenicWidgets.Menu.Model do
   defmodule Select do
     @moduledoc "An inline dropdown selector with a finite set of choices."
     @enforce_keys [:id, :label, :value, :options]
-    defstruct [:id, :label, :value, :options, :tooltip, expanded?: false, enabled?: true]
+    defstruct [
+      :id,
+      :label,
+      :value,
+      :options,
+      :tooltip,
+      expanded?: false,
+      scroll_offset: 0,
+      enabled?: true
+    ]
   end
 
   defmodule Stepper do

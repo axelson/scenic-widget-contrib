@@ -412,7 +412,7 @@ defmodule ScenicWidgets.IconMenu.State do
     do: Map.get(theme, :dropdown_divider_height, 13)
 
   def item_height(%ScenicWidgets.Menu.Model.Select{expanded?: true, options: options}, theme),
-    do: theme.dropdown_item_height * (length(options) + 1)
+    do: theme.dropdown_item_height * (min(length(options), 4) + 1)
 
   def item_height(_item, theme), do: theme.dropdown_item_height
 

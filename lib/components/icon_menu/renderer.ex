@@ -514,7 +514,10 @@ defmodule ScenicWidgets.IconMenu.Renderer do
 
   defp render_stepper(graph, stepper, row_width, text_color, theme) do
     baseline = theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3
-    controls_x = row_width - 82
+    center_y = theme.dropdown_item_height / 2
+    controls_width = 116
+    controls_x = row_width - controls_width - 8
+    button_fill = Map.get(theme, :stepper_button_bg, {72, 78, 92})
 
     graph
     |> Primitives.text(stepper.label,
@@ -524,11 +527,11 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       font_size: theme.dropdown_font_size,
       translate: {8, baseline}
     )
-    |> Primitives.rrect({22, 20, 3},
+    |> Primitives.rrect({28, 22, 4},
       id: {:stepper_minus_bg, stepper.id},
-      fill: :clear,
+      fill: button_fill,
       stroke: {1, theme.dropdown_border},
-      translate: {controls_x, 4}
+      translate: {controls_x, center_y - 11}
     )
     |> Primitives.text("−",
       id: {:stepper_minus, stepper.id},
@@ -536,7 +539,8 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       font: theme.font,
       font_size: theme.dropdown_font_size,
       text_align: :center,
-      translate: {controls_x + 11, baseline}
+      text_base: :middle,
+      translate: {controls_x + 14, center_y}
     )
     |> Primitives.text("#{stepper.value}%",
       id: {:stepper_value, stepper.id},
@@ -544,13 +548,14 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       font: theme.font,
       font_size: theme.dropdown_font_size,
       text_align: :center,
-      translate: {controls_x + 41, baseline}
+      text_base: :middle,
+      translate: {controls_x + 58, center_y}
     )
-    |> Primitives.rrect({22, 20, 3},
+    |> Primitives.rrect({28, 22, 4},
       id: {:stepper_plus_bg, stepper.id},
-      fill: :clear,
+      fill: button_fill,
       stroke: {1, theme.dropdown_border},
-      translate: {controls_x + 60, 4}
+      translate: {controls_x + 88, center_y - 11}
     )
     |> Primitives.text("+",
       id: {:stepper_plus, stepper.id},
@@ -558,13 +563,14 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       font: theme.font,
       font_size: theme.dropdown_font_size,
       text_align: :center,
-      translate: {controls_x + 71, baseline}
+      text_base: :middle,
+      translate: {controls_x + 102, center_y}
     )
   end
 
   defp render_select(graph, select, row_width, text_color, theme) do
     row_height = theme.dropdown_item_height
-    box_width = 52
+    box_width = 76
     box_x = row_width - box_width - 8
     baseline = row_height / 2 + theme.dropdown_font_size / 3
 
@@ -582,13 +588,21 @@ defmodule ScenicWidgets.IconMenu.Renderer do
       stroke: {1, theme.dropdown_border},
       translate: {box_x, 4}
     )
-    |> Primitives.text("#{select.value} ▾",
+    |> Primitives.text(to_string(select.value),
       id: {:select_value, select.id},
       fill: text_color,
       font: theme.font,
       font_size: theme.dropdown_font_size,
       text_align: :center,
-      translate: {box_x + box_width / 2, baseline}
+      translate: {box_x + box_width / 2 - 7, baseline}
+    )
+    |> Primitives.text("▾",
+      id: {:select_arrow, select.id},
+      fill: text_color,
+      font: theme.font,
+      font_size: theme.dropdown_font_size,
+      text_align: :center,
+      translate: {box_x + box_width - 13, baseline}
     )
     |> render_select_options(select, row_width, row_height, text_color, theme)
   end
@@ -597,22 +611,26 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     do: graph
 
   defp render_select_options(graph, select, row_width, row_height, text_color, theme) do
-    Enum.with_index(select.options)
+    select.options
+    |> Enum.drop(select.scroll_offset)
+    |> Enum.take(4)
+    |> Enum.with_index()
     |> Enum.reduce(graph, fn {value, index}, acc ->
       y = row_height * (index + 1)
 
       acc
-      |> Primitives.rect({row_width - 16, row_height},
+      |> Primitives.rect({76, row_height},
         id: {:select_option_bg, select.id, value},
         fill: if(value == select.value, do: theme.item_hover_bg, else: theme.dropdown_bg),
-        translate: {8, y}
+        translate: {row_width - 84, y}
       )
       |> Primitives.text(to_string(value),
         id: {:select_option, select.id, value},
         fill: text_color,
         font: theme.font,
         font_size: theme.dropdown_font_size,
-        translate: {16, y + row_height / 2 + theme.dropdown_font_size / 3}
+        text_align: :center,
+        translate: {row_width - 46, y + row_height / 2 + theme.dropdown_font_size / 3}
       )
     end)
   end
