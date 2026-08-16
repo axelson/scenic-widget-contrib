@@ -164,6 +164,11 @@ defmodule ScenicWidgets.SideNav do
       |> assign(state: new_state, graph: graph)
       |> push_graph(graph)
 
+    # The rows changed, so the semantic map of rows must too — otherwise
+    # tooling still sees the old tree (rows added by the update are
+    # unclickable by id, removed ones linger).
+    register_semantic_elements(scene, new_state)
+
     {:noreply, scene}
   end
 

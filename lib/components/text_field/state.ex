@@ -147,6 +147,17 @@ defmodule ScenicWidgets.TextField.State do
     # {line, col} of last click for double-click detection
     :last_click_pos,
 
+    # Syntax/structural highlighting. `highlights` is what a highlight source
+    # last published for THIS document: %{line_no => {line_text, spans}} with
+    # spans [{start_idx, end_idx, class}] in 0-based graphemes, end exclusive.
+    # `highlight_styles` maps a class to how it is drawn:
+    # %{font: face_atom | nil, underline: boolean, fill: color | nil}.
+    # A row is styled only while its current text equals the published text,
+    # so a lexer that lags typing can never colour the wrong characters.
+    :highlight_source,
+    :highlights,
+    :highlight_styles,
+
     # Search state
     # Current search string (nil = not searching)
     :search_query,
@@ -297,6 +308,11 @@ defmodule ScenicWidgets.TextField.State do
       scrollbar_drag: nil,
       scrollbar_drag_start: nil,
       scrollbar_drag_offset: nil,
+
+      # Highlighting
+      highlight_source: Map.get(data, :highlight_source),
+      highlights: nil,
+      highlight_styles: Map.get(data, :highlight_styles, %{}),
 
       # Search state
       search_query: nil,

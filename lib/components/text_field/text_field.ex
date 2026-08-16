@@ -238,6 +238,10 @@ defmodule ScenicWidgets.TextField do
     # Update state with timer reference
     state = %{state | cursor_timer: timer}
 
+    # An optional second store: token spans for the document being shown.
+    # Retained values arrive on subscribe like any other source.
+    if state.highlight_source, do: Scenic.PubSub.subscribe(state.highlight_source)
+
     # Request input for direct mode or store_backed mode
     # Only request keyboard input if editable - otherwise just register for mouse/scroll
     # This prevents read-only TextFields from stealing keyboard input
@@ -662,7 +666,8 @@ defmodule ScenicWidgets.TextField do
           :frame,
           :colors,
           :font,
-          :overlay_open
+          :overlay_open,
+          :highlight_styles
         ],
         old_state,
         fn
@@ -781,6 +786,21 @@ defmodule ScenicWidgets.TextField do
   Handle buffer state snapshots pushed by the buffer's Scenic.PubSub source
   (store_backed mode). Delegates to the :buf_state_changes update path.
   """
+  # Highlight-source snapshots: token spans for one document. Applied only
+  # when they describe the document currently shown; the per-row text guard
+  # in the renderer covers any lag between typing and re-lexing.
+  def handle_info(
+        {{Scenic.PubSub, :data}, {source, %{buffer_id: buffer_id, lines: lines}, _ts}},
+        %{assigns: %{state: %State{highlight_source: source} = state}} = scene
+      )
+      when source != nil do
+    if buffer_id == state.buffer_id and lines != state.highlights do
+      update_scene(scene, state, %{state | highlights: lines})
+    else
+      {:noreply, scene}
+    end
+  end
+
   def handle_info({{Scenic.PubSub, :data}, {source, buf_state, _ts}}, scene) do
     if source == scene.assigns.state.source do
       handle_info({:buf_state_changes, buf_state}, scene)
@@ -887,6 +907,9 @@ defmodule ScenicWidgets.TextField do
             switched =
               new_state
               |> Map.put(:buffer_id, uuid)
+              # The previous document's spans do not describe this one; the
+              # highlight source republishes for the new document shortly.
+              |> Map.put(:highlights, nil)
               |> Map.put(:scroll, Widgex.Scroll.ScrollState.clamp(restored_scroll))
               |> State.reset_render_window()
 

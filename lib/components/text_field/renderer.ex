@@ -106,6 +106,7 @@ defmodule ScenicWidgets.TextField.Renderer do
       |> update_gutter_scroll(old_state, new_state)
       |> update_content_scroll(old_state, new_state)
       |> update_lines_if_changed(old_state, new_state)
+      |> update_highlights_if_changed(old_state, new_state)
       |> update_semantic_if_changed(old_state, new_state)
       |> update_line_numbers_if_changed(old_state, new_state)
       |> update_fold_gutter_if_changed(old_state, new_state)
@@ -545,16 +546,12 @@ defmodule ScenicWidgets.TextField.Renderer do
     # keeps working unchanged. Rendering an entire document builds one
     # primitive per line — seconds of work on a large file.
     {first, last} = State.visible_display_range(state, length(display_lines))
+    row_segments = highlight_row_segments(state, display_lines, first, last)
 
     display_lines
     |> Enum.slice(first - 1, max(last - first + 1, 0))
     |> Enum.with_index(first)
     |> Enum.reduce(graph, fn {line_text, line_num}, g ->
-      # Expand tabs and get indent width + trimmed content
-      # Scenic renders leading spaces as zero-width, so we position explicitly
-      {indent_width, content} = State.expand_tabs_with_indent(state, line_text)
-      line_x = x_offset + indent_width
-
       # For single-line mode, use text_base: :middle and center in frame
       # For multi-line, use standard baseline positioning
       # Small +2 adjustment accounts for visual centering vs typographic middle
@@ -567,19 +564,181 @@ defmodule ScenicWidgets.TextField.Renderer do
             {(line_num - 1) * line_height + line_height, []}
         end
 
-      g
-      |> Primitives.text(
-        content,
-        [
-          {:translate, {line_x, y_pos}},
-          {:fill, state.colors.text},
-          {:font_size, state.font.size},
-          {:font, state.font.name},
-          {:id, {:text_line, line_num}}
-          | text_opts
-        ]
-      )
+      case Map.get(row_segments, line_num) do
+        {segment_text, spans} when spans != [] ->
+          render_highlighted_row(g, state, line_num, segment_text, spans, x_offset, y_pos)
+
+        _ ->
+          # Expand tabs and get indent width + trimmed content
+          # Scenic renders leading spaces as zero-width, so we position explicitly
+          {indent_width, content} = State.expand_tabs_with_indent(state, line_text)
+          line_x = x_offset + indent_width
+
+          Primitives.text(
+            g,
+            content,
+            [
+              {:translate, {line_x, y_pos}},
+              {:fill, state.colors.text},
+              {:font_size, state.font.size},
+              {:font, state.font.name},
+              {:id, {:text_line, line_num}}
+              | text_opts
+            ]
+          )
+      end
     end)
+  end
+
+  # ===== HIGHLIGHTED ROWS =====
+  #
+  # A row with token spans is drawn as one text primitive per RUN — Scenic
+  # text has a single fill and font, so a keyword in bold next to plain text
+  # is two primitives. Positions come from measured widths (every face of
+  # the family shares the monospace advance), so runs sit on the same grid
+  # as the plain row they replace. Only the rows in the render window are
+  # ever split, and only while the published text still equals the row's
+  # current text — a lexer that lags typing colours nothing wrong.
+
+  # %{display_row => {segment_text_with_tabs_expanded, [{start, end, style}]}}
+  # for the visible rows whose source line has current, non-empty highlights.
+  defp highlight_row_segments(
+         %State{highlights: highlights, highlight_styles: styles} = state,
+         display_lines,
+         first,
+         last
+       )
+       when is_map(highlights) and map_size(highlights) > 0 and map_size(styles) > 0 and
+              state.mode != :single_line do
+    {_lines, mapping} = projection(state)
+
+    display_lines
+    |> windowed_source_runs(mapping, first, last)
+    |> Enum.reduce(%{}, fn {source, {first_row, segments}}, acc ->
+      source_text = Enum.at(state.lines, source - 1, "")
+
+      case Map.get(highlights, source) do
+        {^source_text, spans} when spans != [] ->
+          segments
+          |> segment_source_starts(source_text)
+          |> Enum.with_index(first_row)
+          |> Enum.reduce(acc, fn {{segment, seg_start}, row}, acc2 ->
+            case row_spans(state, segment, seg_start, spans, styles) do
+              {_expanded, []} -> acc2
+              entry -> Map.put(acc2, row, entry)
+            end
+          end)
+
+        _stale_or_missing ->
+          acc
+      end
+    end)
+  end
+
+  defp highlight_row_segments(_state, _display_lines, _first, _last), do: %{}
+
+  # Clip a source line's spans to one wrapped segment, translate them into
+  # the segment's tab-expanded coordinates, and resolve their styles.
+  defp row_spans(state, segment, seg_start, spans, styles) do
+    seg_len = String.length(segment)
+    {expanded, positions} = expand_tabs_positions(segment, state.tab_width || 4)
+
+    clipped =
+      spans
+      |> Enum.flat_map(fn {s, e, class} ->
+        a = max(s - seg_start, 0)
+        b = min(e - seg_start, seg_len)
+
+        case {b > a, Map.get(styles, class)} do
+          {true, %{} = style} -> [{elem(positions, a), elem(positions, b), style}]
+          _ -> []
+        end
+      end)
+
+    {expanded, clipped}
+  end
+
+  # {expanded_text, positions} — positions is a tuple mapping every raw
+  # grapheme index (and the end index) to its expanded column, so span
+  # boundaries survive tab expansion.
+  defp expand_tabs_positions(text, tab_width) do
+    {chunks, positions, _col} =
+      text
+      |> String.graphemes()
+      |> Enum.reduce({[], [], 0}, fn
+        "\t", {chunks, positions, col} ->
+          width = tab_width - rem(col, tab_width)
+          {[String.duplicate(" ", width) | chunks], [col | positions], col + width}
+
+        grapheme, {chunks, positions, col} ->
+          {[grapheme | chunks], [col | positions], col + 1}
+      end)
+
+    expanded = chunks |> Enum.reverse() |> IO.iodata_to_binary()
+    end_col = String.length(expanded)
+    positions_tuple = positions |> Enum.reverse() |> Kernel.++([end_col]) |> List.to_tuple()
+    {expanded, positions_tuple}
+  end
+
+  defp render_highlighted_row(graph, state, line_num, expanded, spans, x_offset, y_pos) do
+    total = String.length(expanded)
+
+    # Styled spans plus the plain gaps between them, in order.
+    {runs, cursor} =
+      Enum.reduce(spans, {[], 0}, fn {s, e, style}, {acc, pos} ->
+        acc = if s > pos, do: [{pos, s, nil} | acc], else: acc
+        {[{s, e, style} | acc], max(e, pos)}
+      end)
+
+    runs = if cursor < total, do: [{cursor, total, nil} | runs], else: runs
+
+    Primitives.group(
+      graph,
+      fn g ->
+        Enum.reduce(Enum.reverse(runs), g, fn {s, e, style}, g2 ->
+          text = String.slice(expanded, s, e - s)
+          run_x = x_offset + State.string_width(state, String.slice(expanded, 0, s))
+          run_width = State.string_width(state, text)
+          render_run(g2, state, text, style, run_x, run_width, y_pos)
+        end)
+      end,
+      id: {:text_line, line_num}
+    )
+  end
+
+  defp render_run(graph, state, text, style, run_x, run_width, y_pos) do
+    style = style || %{}
+    fill = Map.get(style, :fill) || state.colors.text
+    font = Map.get(style, :font) || state.font.name
+
+    # Scenic draws leading spaces zero-width: shift the text start instead.
+    trimmed = String.trim_leading(text, " ")
+
+    lead_x =
+      State.string_width(
+        state,
+        String.duplicate(" ", String.length(text) - String.length(trimmed))
+      )
+
+    graph =
+      if trimmed == "" do
+        graph
+      else
+        Primitives.text(graph, trimmed,
+          translate: {run_x + lead_x, y_pos},
+          fill: fill,
+          font_size: state.font.size,
+          font: font
+        )
+      end
+
+    if Map.get(style, :underline) do
+      y = y_pos + 3
+
+      Primitives.line(graph, {{run_x, y}, {run_x + run_width, y}}, stroke: {1, fill})
+    else
+      graph
+    end
   end
 
   # Render the cursor
@@ -1164,12 +1323,34 @@ defmodule ScenicWidgets.TextField.Renderer do
       # every keystroke O(document) — typing into a long file could not keep
       # up. Lines outside the window have no primitive and need none; they
       # are rendered from current state whenever the window next moves.
-      {first, last} = State.visible_display_range(new_state, length(new_display))
-      update_visible_line_primitives(graph, new_state, new_display, first, last)
+      #
+      # Highlighted rows are groups of runs, not one text primitive, so with
+      # highlighting on the (virtualised, screenful-sized) rebuild is the
+      # simple correct path.
+      if highlighting_active?(new_state) do
+        rebuild_content_area(graph, new_state)
+      else
+        {first, last} = State.visible_display_range(new_state, length(new_display))
+        update_visible_line_primitives(graph, new_state, new_display, first, last)
+      end
     end
   end
 
   defp update_lines_if_changed(graph, _old_state, _new_state), do: graph
+
+  defp highlighting_active?(%State{highlights: highlights, highlight_styles: styles}) do
+    is_map(highlights) and map_size(highlights) > 0 and is_map(styles) and map_size(styles) > 0
+  end
+
+  # New token spans (or a new style map) redraw the visible rows.
+  defp update_highlights_if_changed(graph, old_state, new_state) do
+    if old_state.highlights != new_state.highlights or
+         old_state.highlight_styles != new_state.highlight_styles do
+      rebuild_content_area(graph, new_state)
+    else
+      graph
+    end
+  end
 
   defp rebuild_gutter_if_shown(graph, %State{show_line_numbers: true} = state),
     do: rebuild_gutter(graph, state)
