@@ -122,6 +122,12 @@ defmodule ScenicWidgets.TabBar do
         # Internal state changed (hover, scroll)
         update_scene(scene, state, new_state)
 
+      {:tabs_dragged, new_state} ->
+        graph = Renderer.initial_render(Graph.build(), new_state)
+        scene = scene |> assign(state: new_state, graph: graph) |> push_graph(graph)
+        register_semantic_elements(scene, new_state)
+        {:noreply, scene}
+
       {:tab_selected, tab_id, new_state} ->
         send_parent_event(scene, {:tab_selected, tab_id})
         update_scene(scene, state, new_state)
@@ -133,6 +139,13 @@ defmodule ScenicWidgets.TabBar do
         # its own state update (which triggers a rebuild) or via an explicit
         # `put({:close_tab, tab_id}, ...)` message.
         send_parent_event(scene, {:tab_closed, tab_id})
+        {:noreply, scene}
+
+      {:tabs_reordered, tab_ids, new_state} ->
+        send_parent_event(scene, {:tabs_reordered, tab_ids})
+        graph = Renderer.initial_render(Graph.build(), new_state)
+        scene = scene |> assign(state: new_state, graph: graph) |> push_graph(graph)
+        register_semantic_elements(scene, new_state)
         {:noreply, scene}
     end
   end

@@ -26,6 +26,29 @@ defmodule ScenicWidgets.TabBarOverflowTest do
     assert x + width <= selected.frame.size.width
   end
 
+  test "dragging a tab across its neighbour reorders and commits on release" do
+    state = state_with_tabs()
+    {x, _y, _w, h} = State.get_tab_bounds(state, :a)
+
+    assert {:noop, pressed} =
+             Reducer.process_input(state, {:cursor_button, {:btn_left, 1, [], {x + 20, h / 2}}})
+
+    {_bx, _by, bw, _bh} = State.get_tab_bounds(pressed, :b)
+
+    assert {:tabs_dragged, dragged} =
+             Reducer.process_input(pressed, {:cursor_pos, {bw * 1.8, h / 2}})
+
+    assert Enum.map(dragged.tabs, & &1.id) == [:b, :a, :c]
+
+    assert {:tabs_reordered, [:b, :a, :c], released} =
+             Reducer.process_input(
+               dragged,
+               {:cursor_button, {:btn_left, 0, [], {bw * 1.8, h / 2}}}
+             )
+
+    assert released.dragging_tab_id == nil
+  end
+
   defp state_with_tabs do
     frame = Widgex.Frame.new(pin: {0, 0}, size: {150, 35})
 

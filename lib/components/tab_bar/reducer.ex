@@ -20,11 +20,23 @@ defmodule ScenicWidgets.TabBar.Reducer do
   - `{:tab_closed, tab_id, state}` - Tab was closed
   """
   def process_input(%State{} = state, {:cursor_pos, coords}) do
-    handle_hover(state, coords)
+    if state.dragging_tab_id, do: handle_drag(state, coords), else: handle_hover(state, coords)
   end
 
-  def process_input(%State{} = state, {:cursor_button, {:btn_left, 1, [], coords}}) do
-    handle_click(state, coords)
+  def process_input(%State{} = state, {:cursor_button, {:btn_left, 1, _mods, coords}}) do
+    handle_press(state, coords)
+  end
+
+  def process_input(
+        %State{dragging_tab_id: id} = state,
+        {:cursor_button, {:btn_left, 0, _mods, _coords}}
+      )
+      when not is_nil(id) do
+    new_state = %{state | dragging_tab_id: nil, drag_reordered?: false}
+
+    if state.drag_reordered?,
+      do: {:tabs_reordered, Enum.map(state.tabs, & &1.id), new_state},
+      else: select_tab(new_state, id)
   end
 
   def process_input(%State{} = state, {:cursor_scroll, {_dx, dy, x, y}}) do
@@ -96,6 +108,50 @@ defmodule ScenicWidgets.TabBar.Reducer do
     else
       {:noop, state}
     end
+  end
+
+  defp handle_press(state, coords) do
+    case State.hit_test(state, coords) do
+      {:close, _id} -> handle_click(state, coords)
+      {:tab, id} -> {:noop, %{state | dragging_tab_id: id, drag_reordered?: false}}
+      :none -> {:noop, state}
+    end
+  end
+
+  defp handle_drag(state, {x, _y} = coords) do
+    index = Enum.find_index(state.tabs, &(&1.id == state.dragging_tab_id))
+    left = index > 0 && Enum.at(state.tabs, index - 1)
+    right = index < length(state.tabs) - 1 && Enum.at(state.tabs, index + 1)
+
+    target_index =
+      cond do
+        left && x < tab_center(state, left.id) -> index - 1
+        right && x > tab_center(state, right.id) -> index + 1
+        true -> index
+      end
+
+    if target_index == index do
+      handle_hover(state, coords)
+      |> then(fn {:noop, hovered} ->
+        {:noop,
+         %{
+           hovered
+           | dragging_tab_id: state.dragging_tab_id,
+             drag_reordered?: state.drag_reordered?
+         }}
+      end)
+    else
+      tab = Enum.at(state.tabs, index)
+      tabs = state.tabs |> List.delete_at(index) |> List.insert_at(target_index, tab)
+      new_state = %{state | tabs: tabs, drag_reordered?: true}
+      new_state = %{new_state | tab_widths: State.calculate_tab_widths(new_state)}
+      {:tabs_dragged, new_state}
+    end
+  end
+
+  defp tab_center(state, id) do
+    {x, _y, width, _height} = State.get_tab_bounds(state, id)
+    x + width / 2
   end
 
   @doc """

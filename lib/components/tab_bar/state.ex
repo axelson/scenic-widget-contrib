@@ -40,6 +40,8 @@ defmodule ScenicWidgets.TabBar.State do
     scroll_offset: 0,
     hovered_tab_id: nil,
     hovered_close_id: nil,
+    dragging_tab_id: nil,
+    drag_reordered?: false,
     theme: %{},
     tab_widths: %{}
   ]
@@ -114,6 +116,8 @@ defmodule ScenicWidgets.TabBar.State do
       scroll_offset: 0,
       hovered_tab_id: nil,
       hovered_close_id: nil,
+      dragging_tab_id: nil,
+      drag_reordered?: false,
       theme: theme,
       tab_widths: %{}
     }
