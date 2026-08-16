@@ -884,11 +884,10 @@ defmodule ScenicWidgets.TextField do
                 offset_y: Map.get(pane_view, :offset_y, 0)
             }
 
-            %{
-              new_state
-              | buffer_id: uuid,
-                scroll: Widgex.Scroll.ScrollState.clamp(restored_scroll)
-            }
+            new_state
+            |> Map.put(:buffer_id, uuid)
+            |> Map.put(:scroll, Widgex.Scroll.ScrollState.clamp(restored_scroll))
+            |> State.reset_render_window()
         end
 
       # Emit search_complete if search results changed

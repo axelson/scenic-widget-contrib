@@ -82,4 +82,22 @@ defmodule ScenicWidgets.TextFieldScrollPerformanceTest do
     assert final.display_line_mapping === initial.display_line_mapping
     assert final.display_cache_key === initial.display_cache_key
   end
+
+  test "a buffer switch resets a retained off-screen render window" do
+    scrolled =
+      state(:word)
+      |> Map.put(:scroll, %{state(:word).scroll | offset_y: 12_000})
+      |> State.reset_render_window()
+
+    {old_first, _old_last} = scrolled.render_window
+    assert old_first > 1
+
+    switched =
+      scrolled
+      |> Map.put(:scroll, %{scrolled.scroll | offset_y: 0})
+      |> State.reset_render_window()
+
+    assert {1, _last} = switched.render_window
+    assert {1, _last} = State.visible_display_range(switched, 2_000)
+  end
 end

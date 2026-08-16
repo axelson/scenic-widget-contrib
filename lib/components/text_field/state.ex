@@ -967,6 +967,13 @@ defmodule ScenicWidgets.TextField.State do
     end
   end
 
+  @doc false
+  def reset_render_window(%__MODULE__{} = state) do
+    state
+    |> Map.put(:render_window, nil)
+    |> advance_render_window()
+  end
+
   @doc """
   Calculate which lines should be rendered based on viewport and scroll position.
   Returns {render_start, render_end} tuple (1-indexed, inclusive).
