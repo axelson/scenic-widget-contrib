@@ -72,4 +72,21 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
     assert Primitive.get_transform(first, :translate) ==
              Primitive.get_transform(second, :translate)
   end
+
+  test "renderer truncates an extreme shortcut at the configured width cap" do
+    shortcut = String.duplicate("Ctrl+Shift+", 12) <> "S"
+
+    state =
+      state(
+        [%Item{id: :extreme, label: "Run", shortcut: shortcut}],
+        %{dropdown_max_width: 220}
+      )
+
+    graph = Renderer.initial_render(Graph.build(), %{state | active_menu: :file})
+    primitive = Graph.get!(graph, {:item_shortcut, :extreme})
+
+    assert primitive.data != shortcut
+    assert String.ends_with?(primitive.data, "…")
+    assert Primitive.get_style(primitive, :text_align) == :right
+  end
 end

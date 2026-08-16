@@ -370,7 +370,15 @@ defmodule ScenicWidgets.IconMenu.Renderer do
           text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
           shortcut_right = dropdown.width - 2 * padding - 8
           column_gap = Map.get(theme, :dropdown_column_gap, 24)
-          shortcut_width = measure_width(shortcut || "", theme)
+          available_width = shortcut_right - text_x
+          measured_shortcut_width = measure_width(shortcut || "", theme)
+
+          shortcut_width =
+            if shortcut do
+              min(measured_shortcut_width, max(40, available_width * 0.55))
+            else
+              0
+            end
 
           label_max_width =
             max(
