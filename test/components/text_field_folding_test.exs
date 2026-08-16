@@ -75,4 +75,33 @@ defmodule ScenicWidgets.TextField.FoldingTest do
 
     assert {:noop, ^unfolded} = Reducer.process_action(unfolded, {:toggle_fold, 6})
   end
+
+  test "fold summary rows participate in scroll height and unfolding restores the full extent" do
+    frame = Frame.new(%{pin: {0, 0}, size: {500, 40}})
+
+    state =
+      State.new(%{
+        id: :editor,
+        frame: frame,
+        initial_text: Enum.join(@lines, "\n"),
+        wrap_mode: :none,
+        tab_width: 2,
+        font: %{
+          name: :ibm_plex_mono,
+          size: 16,
+          path: Path.expand("../../assets/fonts/IBMPlexMono-Regular.ttf", __DIR__)
+        }
+      })
+
+    assert {:event, _event, folded} = Reducer.process_action(state, {:toggle_fold, 1})
+    folded = Reducer.update_scroll_content_size(folded)
+
+    # Header + synthetic summary + the two lines after the folded region.
+    assert folded.scroll.content_height == 4 * State.line_height(folded) + 8
+
+    assert {:event, _event, unfolded} = Reducer.process_action(folded, :unfold_all)
+    unfolded = Reducer.update_scroll_content_size(unfolded)
+
+    assert unfolded.scroll.content_height == length(@lines) * State.line_height(unfolded) + 8
+  end
 end

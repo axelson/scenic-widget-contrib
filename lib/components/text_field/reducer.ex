@@ -1578,9 +1578,9 @@ defmodule ScenicWidgets.TextField.Reducer do
 
     visible_lines =
       ScenicWidgets.TextField.Folding.projection(lines, state.folds || MapSet.new())
-      |> Enum.map(fn
-        {_line, text, 0} -> text
-        {_line, text, count} -> text <> "  … #{count} lines"
+      |> Enum.flat_map(fn
+        {_line, text, 0} -> [text]
+        {_line, text, count} -> [text, fold_summary_line(text, count, state.tab_width || 2)]
       end)
 
     # Calculate content dimensions based on wrap mode
@@ -1632,6 +1632,16 @@ defmodule ScenicWidgets.TextField.Reducer do
       state.lines,
       new_lines
     )
+  end
+
+  defp fold_summary_line(text, count, tab_width) do
+    leading =
+      case Regex.run(~r/^[\t ]*/, text) do
+        [indent] -> indent
+        _ -> ""
+      end
+
+    leading <> String.duplicate(" ", tab_width) <> "… #{count} lines"
   end
 
   # Count how many display lines a single source line will wrap into

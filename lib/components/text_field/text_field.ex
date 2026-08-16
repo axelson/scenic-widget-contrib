@@ -274,10 +274,11 @@ defmodule ScenicWidgets.TextField do
 
       {:cursor_button, {:btn_left, 1, _mods, {x, y}}}
       when state.show_line_numbers == true ->
-        local_x = x - state.frame.pin.x
-
-        if local_x >= 0 and local_x <= state.line_number_width do
-          local_y = y - state.frame.pin.y + state.scroll.offset_y
+        # Scenic has already transformed pointer coordinates into the
+        # component's local space. Subtracting frame.pin here made gutter
+        # controls work only when the TextField happened to sit at {0, 0}.
+        if x >= 0 and x <= state.line_number_width do
+          local_y = y + state.scroll.offset_y
           display_line = max(1, div(max(trunc(local_y), 0), State.line_height(state)) + 1)
           source_line = Renderer.display_to_source_line(state, display_line)
 
@@ -530,11 +531,9 @@ defmodule ScenicWidgets.TextField do
   defp fold_action?(_), do: false
 
   defp handle_fold_hover(input, scene, state, x, y) do
-    local_x = x - state.frame.pin.x
-
     hover_line =
-      if local_x >= 0 and local_x <= state.line_number_width do
-        local_y = y - state.frame.pin.y + state.scroll.offset_y
+      if x >= 0 and x <= state.line_number_width do
+        local_y = y + state.scroll.offset_y
         display_line = max(1, div(max(trunc(local_y), 0), State.line_height(state)) + 1)
         source_line = Renderer.display_to_source_line(state, display_line)
         if ScenicWidgets.TextField.Folding.foldable?(state.lines, source_line), do: source_line
