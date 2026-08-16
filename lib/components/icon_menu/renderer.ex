@@ -21,6 +21,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     |> render_background(state)
     |> render_icon_buttons(state)
     |> render_dropdown(state)
+    |> render_tooltip(state)
   end
 
   @doc """
@@ -52,6 +53,36 @@ defmodule ScenicWidgets.IconMenu.Renderer do
   defp get_frame_width(%{size: {w, _h}}), do: w
   defp get_frame_width(%{size: %{width: w}}), do: w
   defp get_frame_width(_), do: 0
+
+  defp render_tooltip(graph, %State{tooltip: nil}), do: graph
+
+  defp render_tooltip(graph, %State{tooltip: %{text: text, at: {x, y}}, theme: theme}) do
+    font_size = Map.get(theme, :tooltip_font_size, 12)
+    padding = 7
+    width = max(70, ceil(String.length(text) * font_size * 0.62) + padding * 2)
+    height = font_size + padding * 2
+
+    Primitives.group(
+      graph,
+      fn g ->
+        g
+        |> Primitives.rect({width, height},
+          fill: Map.get(theme, :tooltip_bg, {25, 25, 25}),
+          stroke: {1, Map.get(theme, :tooltip_border, {95, 95, 95})},
+          id: :menu_tooltip_bg
+        )
+        |> Primitives.text(text,
+          fill: Map.get(theme, :tooltip_text, :white),
+          font: theme.font,
+          font_size: font_size,
+          translate: {padding, font_size + div(padding, 2)},
+          id: :menu_tooltip_text
+        )
+      end,
+      id: :menu_tooltip,
+      translate: {x + 10, y + 14}
+    )
+  end
 
   defp render_icon_buttons(graph, %State{menus: menus} = state) do
     Enum.reduce(menus, graph, fn menu, acc ->

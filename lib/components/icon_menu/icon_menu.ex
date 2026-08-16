@@ -89,7 +89,7 @@ defmodule ScenicWidgets.IconMenu do
 
     scene =
       scene
-      |> assign(state: state, graph: graph)
+      |> assign(state: state, graph: graph, tooltip_timer: nil, tooltip_token: nil)
       |> push_graph(graph)
 
     # Request input for mouse and keyboard interaction
@@ -104,8 +104,10 @@ defmodule ScenicWidgets.IconMenu do
   @impl Scenic.Scene
   def handle_input(input, _context, scene) do
     state = scene.assigns.state
+    result = Reducer.process_input(state, input)
+    {result, scene} = track_tooltip(result, input, scene)
 
-    case Reducer.process_input(state, input) do
+    case result do
       {:noop, ^state} ->
         # No change
         {:noreply, scene}
@@ -123,6 +125,25 @@ defmodule ScenicWidgets.IconMenu do
         update_scene(scene, state, new_state)
     end
   end
+
+  @impl true
+  def handle_info(
+        {:show_menu_tooltip, token, text, coords},
+        %{assigns: %{tooltip_token: token}} = scene
+      ) do
+    state = scene.assigns.state
+    new_state = %{state | tooltip: %{text: text, at: coords}}
+    graph = Renderer.initial_render(Graph.build(), new_state)
+
+    scene =
+      scene
+      |> assign(state: new_state, graph: graph, tooltip_timer: nil)
+      |> push_graph(graph)
+
+    {:noreply, scene}
+  end
+
+  def handle_info({:show_menu_tooltip, _token, _text, _coords}, scene), do: {:noreply, scene}
 
   @impl Scenic.Scene
   def handle_put({:open_menu, menu_id}, scene) do
@@ -252,6 +273,67 @@ defmodule ScenicWidgets.IconMenu do
 
     {:noreply, scene}
   end
+
+  defp track_tooltip(result, {:cursor_pos, coords}, scene) do
+    state = result_state(result)
+    scene = cancel_tooltip_timer(scene)
+    state = %{state | tooltip: nil}
+
+    case tooltip_text(state) do
+      text when is_binary(text) and text != "" ->
+        token = make_ref()
+
+        timer =
+          Process.send_after(
+            self(),
+            {:show_menu_tooltip, token, text, coords},
+            state.tooltip_delay_ms
+          )
+
+        {replace_result_state(result, state),
+         assign(scene, tooltip_timer: timer, tooltip_token: token)}
+
+      _ ->
+        {replace_result_state(result, state), assign(scene, tooltip_token: nil)}
+    end
+  end
+
+  defp track_tooltip(result, {:cursor_button, _}, scene) do
+    state = %{result_state(result) | tooltip: nil}
+    {replace_result_state(result, state), cancel_tooltip_timer(scene)}
+  end
+
+  defp track_tooltip(result, _input, scene), do: {result, scene}
+
+  defp tooltip_text(%State{hovered_item: item_id} = state) when not is_nil(item_id) do
+    state |> State.find_item(item_id) |> State.item_tooltip()
+  end
+
+  defp tooltip_text(%State{hovered_menu: menu_id, menus: menus}) when not is_nil(menu_id) do
+    menus |> Enum.find(&(&1.id == menu_id)) |> State.menu_tooltip()
+  end
+
+  defp tooltip_text(_state), do: nil
+
+  defp cancel_tooltip_timer(%{assigns: %{tooltip_timer: timer}} = scene)
+       when is_reference(timer) do
+    Process.cancel_timer(timer)
+    assign(scene, tooltip_timer: nil, tooltip_token: nil)
+  end
+
+  defp cancel_tooltip_timer(scene), do: scene
+
+  defp result_state({:noop, state}), do: state
+  defp result_state({:menu_item_clicked, _id, state}), do: state
+  defp result_state({:menu_value_changed, _id, _value, state}), do: state
+
+  defp replace_result_state({:noop, _}, state), do: {:noop, state}
+
+  defp replace_result_state({:menu_item_clicked, id, _}, state),
+    do: {:menu_item_clicked, id, state}
+
+  defp replace_result_state({:menu_value_changed, id, value, _}, state),
+    do: {:menu_value_changed, id, value, state}
 
   # ===========================================================================
   # Semantic Registration (for MCP automation/testing)

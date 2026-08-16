@@ -4,6 +4,20 @@ defmodule ScenicWidgets.Menu.ModelTest do
   alias ScenicWidgets.Menu.Model.{Item, Section, Slider, Submenu, Toggle}
   alias ScenicWidgets.IconMenu.{Reducer, State}
 
+  test "IconMenu exposes optional tooltips for icon buttons and typed rows" do
+    menu = %{id: :file, icon: :file, tooltip: "File commands", items: []}
+
+    item = %ScenicWidgets.Menu.Model.Item{
+      id: "save",
+      label: "Save",
+      tooltip: "Write changes to disk"
+    }
+
+    assert State.menu_tooltip(menu) == "File commands"
+    assert State.item_tooltip(item) == "Write changes to disk"
+    assert State.item_tooltip({"plain", "Plain item"}) == nil
+  end
+
   test "validates nested typed rows and emits semantic events" do
     item = %Item{id: :save, label: "Save"}
     slider = %Slider{id: :size, label: "Text size", value: 16, min: 12, max: 32}

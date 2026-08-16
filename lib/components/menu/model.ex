@@ -3,27 +3,27 @@ defmodule ScenicWidgets.Menu.Model do
 
   defmodule Item do
     @enforce_keys [:id, :label]
-    defstruct [:id, :label, :icon, :shortcut, enabled?: true]
+    defstruct [:id, :label, :icon, :shortcut, :tooltip, enabled?: true]
   end
 
   defmodule Toggle do
     @enforce_keys [:id, :label, :checked?]
-    defstruct [:id, :label, :checked?, enabled?: true]
+    defstruct [:id, :label, :checked?, :tooltip, enabled?: true]
   end
 
   defmodule Radio do
     @enforce_keys [:id, :label, :group, :value, :selected?]
-    defstruct [:id, :label, :group, :value, :selected?, enabled?: true]
+    defstruct [:id, :label, :group, :value, :selected?, :tooltip, enabled?: true]
   end
 
   defmodule Slider do
     @enforce_keys [:id, :label, :value, :min, :max]
-    defstruct [:id, :label, :value, :min, :max, step: 1, enabled?: true]
+    defstruct [:id, :label, :value, :min, :max, :tooltip, step: 1, enabled?: true]
   end
 
   defmodule Submenu do
     @enforce_keys [:id, :label, :rows]
-    defstruct [:id, :label, :rows, enabled?: true]
+    defstruct [:id, :label, :rows, :tooltip, enabled?: true]
   end
 
   defmodule Section do
@@ -52,9 +52,14 @@ defmodule ScenicWidgets.Menu.Model do
   defp row_ids(%{id: id}), do: [id]
   defp row_ids(_), do: []
 
-  defp valid_rows(rows), do: if(Enum.all?(rows, &valid_row?/1), do: :ok, else: {:error, :invalid_row})
+  defp valid_rows(rows),
+    do: if(Enum.all?(rows, &valid_row?/1), do: :ok, else: {:error, :invalid_row})
+
   defp valid_row?(%Submenu{rows: rows}), do: valid_rows(rows) == :ok
-  defp valid_row?(%Slider{min: min, max: max, value: value, step: step}), do: is_number(value) and is_number(step) and step > 0 and value >= min and value <= max
+
+  defp valid_row?(%Slider{min: min, max: max, value: value, step: step}),
+    do: is_number(value) and is_number(step) and step > 0 and value >= min and value <= max
+
   defp valid_row?(%module{}) when module in [Item, Toggle, Radio, Section], do: true
   defp valid_row?(row) when row in [:divider, :space], do: true
   defp valid_row?(_), do: false

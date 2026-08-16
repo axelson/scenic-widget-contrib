@@ -35,7 +35,8 @@ defmodule ScenicWidgets.IconMenu.State do
   @type menu_item_opts :: %{
           optional(:type) => :toggle | :normal,
           optional(:checked) => boolean(),
-          optional(:enabled) => boolean()
+          optional(:enabled) => boolean(),
+          optional(:tooltip) => String.t()
         }
 
   @type menu_item ::
@@ -56,6 +57,8 @@ defmodule ScenicWidgets.IconMenu.State do
           hovered_menu: atom() | nil,
           hovered_item: String.t() | nil,
           dragging_slider: String.t() | atom() | nil,
+          tooltip: map() | nil,
+          tooltip_delay_ms: non_neg_integer(),
           show_shortcuts: boolean(),
           theme: map(),
           dropdown_bounds: map(),
@@ -69,6 +72,8 @@ defmodule ScenicWidgets.IconMenu.State do
     hovered_menu: nil,
     hovered_item: nil,
     dragging_slider: nil,
+    tooltip: nil,
+    tooltip_delay_ms: 600,
     show_shortcuts: true,
     theme: %{},
     dropdown_bounds: %{},
@@ -125,6 +130,8 @@ defmodule ScenicWidgets.IconMenu.State do
       hovered_menu: nil,
       hovered_item: nil,
       dragging_slider: nil,
+      tooltip: nil,
+      tooltip_delay_ms: Map.get(data, :tooltip_delay_ms, 600),
       show_shortcuts: Map.get(data, :show_shortcuts, true),
       theme: theme,
       dropdown_bounds: %{},
@@ -447,6 +454,15 @@ defmodule ScenicWidgets.IconMenu.State do
     do: %{type: :slider, enabled: enabled}
 
   def get_item_opts(%{enabled?: enabled}), do: %{enabled: enabled}
+
+  @doc "Returns optional explanatory text for a dropdown row."
+  def item_tooltip({_id, _label, opts}) when is_map(opts), do: Map.get(opts, :tooltip)
+  def item_tooltip(%{tooltip: tooltip}) when is_binary(tooltip), do: tooltip
+  def item_tooltip(_item), do: nil
+
+  @doc "Returns optional explanatory text for a top-level icon button."
+  def menu_tooltip(%{tooltip: tooltip}) when is_binary(tooltip), do: tooltip
+  def menu_tooltip(_menu), do: nil
 
   @doc """
   Check if a menu item is a toggle type.
