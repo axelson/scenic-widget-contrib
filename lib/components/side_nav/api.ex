@@ -85,10 +85,24 @@ defmodule ScenicWidgets.SideNav.Api do
       |> Enum.map(&Item.get_id/1)
       |> MapSet.new()
 
-    # Keep only expanded IDs that still exist
+    # Keep only expanded IDs that still exist. Items the caller did not have
+    # before arrive with their own `expanded:` preference (a search-results
+    # tree wants each file open); items the user already collapsed stay so.
     remap = fn id -> remap_path(id, state.pending_path_moves) end
     remapped_expanded = MapSet.new(state.expanded, remap)
-    new_expanded = MapSet.intersection(remapped_expanded, new_ids)
+    old_ids = state.tree |> Item.flatten() |> Enum.map(&Item.get_id/1) |> MapSet.new()
+
+    newly_expanded =
+      new_tree
+      |> Item.flatten()
+      |> Enum.filter(&(Item.is_expanded?(&1) and not MapSet.member?(old_ids, Item.get_id(&1))))
+      |> Enum.map(&Item.get_id/1)
+      |> MapSet.new()
+
+    new_expanded =
+      remapped_expanded
+      |> MapSet.intersection(new_ids)
+      |> MapSet.union(newly_expanded)
 
     # Recalculate bounds
     new_bounds = State.calculate_item_bounds(new_tree, state.theme, new_expanded)

@@ -13,7 +13,6 @@ defmodule ScenicWidgets.TextField.Reducer do
   """
 
   alias ScenicWidgets.TextField.State
-  alias ScenicWidgets.TextField.Wrapping
   alias Widgex.Scroll.ScrollController
   use ScenicWidgets.ScenicEventsDefinitions
   use Widgex.Scrollable
@@ -651,7 +650,7 @@ defmodule ScenicWidgets.TextField.Reducer do
   def input_to_buffer_action(%State{focused: true}, {:codepoint, {char, mods}})
       when is_bitstring(char) and is_list(mods) do
     if Enum.any?(mods, &(&1 in @command_mods)) do
-      :ignore
+      nil
     else
       {:insert, char, :at_cursor}
     end
@@ -1581,9 +1580,9 @@ defmodule ScenicWidgets.TextField.Reducer do
   Update scroll content size based on current wrapped line count and max line width.
   Should be called after text changes that affect line count or line length.
   """
-  def update_scroll_content_size(
-        %State{lines: lines, scroll: scroll, wrap_mode: wrap_mode} = state
-      ) do
+  def update_scroll_content_size(%State{} = state) do
+    state = ScenicWidgets.TextField.Renderer.prepare_display_cache(state)
+    %State{lines: lines, scroll: scroll, wrap_mode: wrap_mode} = state
     line_height = State.line_height(state)
 
     visible_lines =
@@ -1611,17 +1610,10 @@ defmodule ScenicWidgets.TextField.Reducer do
           {content_w, length(visible_lines)}
 
         _wrap ->
-          # Word/char wrapping: content fits viewport width, but height depends on wrapped lines
-          # Use the same wrapping logic as the renderer for accurate line count
-          # Account for padding and scrollbar
-          max_width = scroll.viewport_width - 40
-
-          wrapped_count =
-            visible_lines
-            |> Enum.map(fn line -> count_wrapped_lines(state, line, max_width) end)
-            |> Enum.sum()
-
-          {scroll.viewport_width, wrapped_count}
+          # Word/char wrapping: content fits the viewport width; the height is
+          # the projected row count. Ask the display cache rather than
+          # wrapping the document here and again at render time.
+          {scroll.viewport_width, length(state.display_lines)}
       end
 
     # Add half line height of bottom padding so last line isn't jammed against frame edge
@@ -1652,17 +1644,6 @@ defmodule ScenicWidgets.TextField.Reducer do
       end
 
     leading <> String.duplicate(" ", tab_width) <> "… #{count} lines"
-  end
-
-  # Count how many display lines a single source line will wrap into
-  defp count_wrapped_lines(state, line, max_width) do
-    measure = &State.string_width(state, &1)
-
-    case state.wrap_mode do
-      :char -> Wrapping.character(line, max_width, measure)
-      :word -> Wrapping.word(line, max_width, measure)
-    end
-    |> length()
   end
 
   defp drag_offset(start_offset, pointer_delta, track_length, content_size, viewport_size) do

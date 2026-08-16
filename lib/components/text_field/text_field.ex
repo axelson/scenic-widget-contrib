@@ -884,10 +884,18 @@ defmodule ScenicWidgets.TextField do
                 offset_y: Map.get(pane_view, :offset_y, 0)
             }
 
-            new_state
-            |> Map.put(:buffer_id, uuid)
-            |> Map.put(:scroll, Widgex.Scroll.ScrollState.clamp(restored_scroll))
-            |> State.reset_render_window()
+            switched =
+              new_state
+              |> Map.put(:buffer_id, uuid)
+              |> Map.put(:scroll, Widgex.Scroll.ScrollState.clamp(restored_scroll))
+              |> State.reset_render_window()
+
+            # A document with no remembered viewport (never shown before) has
+            # nothing to restore: show its cursor — which is wherever the
+            # opener put it, e.g. on a project-search match — not its top.
+            if Map.get(pane_view, :viewed?, true),
+              do: switched,
+              else: State.reveal_cursor_centered(switched)
         end
 
       # Emit search_complete if search results changed
@@ -916,11 +924,16 @@ defmodule ScenicWidgets.TextField do
       # screen. Retained PubSub snapshots and metadata-only republishes are
       # deliberately inert: a duplicate snapshot commonly follows a pane
       # switch and must not destroy the viewport we just restored.
+      search_jump? =
+        new_search_query != nil and
+          (new_search_index != state.search_current_index or
+             new_search_matches != state.search_matches)
+
       new_state =
-        if buffer_switched? or not cursor_or_content_changed? do
-          new_state
-        else
-          State.ensure_cursor_visible(new_state)
+        cond do
+          buffer_switched? or not cursor_or_content_changed? -> new_state
+          search_jump? -> State.reveal_cursor_centered(new_state)
+          true -> State.ensure_cursor_visible(new_state)
         end
 
       update_scene(scene, state, new_state)
@@ -974,7 +987,16 @@ defmodule ScenicWidgets.TextField do
 
   defp update_scene(scene, old_state, new_state) do
     old_state = Renderer.prepare_display_cache(old_state)
-    new_state = Renderer.prepare_display_cache(new_state)
+
+    # Whatever moved the scroll (wheel, cursor-follow, a jump to a search
+    # match) the render window must cover the viewport before drawing, or the
+    # rows the user just scrolled to have no primitives. A no-op when the
+    # viewport is still inside the buffered window.
+    new_state =
+      new_state
+      |> State.advance_render_window()
+      |> Renderer.prepare_display_cache()
+
     graph = Renderer.update_render(scene.assigns.graph, old_state, new_state)
 
     scene =

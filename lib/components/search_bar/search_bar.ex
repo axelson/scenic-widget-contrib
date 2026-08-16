@@ -27,6 +27,7 @@ defmodule ScenicWidgets.SearchBar do
   - `{:search_next, id}` - when clicking next button or pressing Enter
   - `{:search_prev, id}` - when clicking previous button or pressing Shift+Enter
   - `{:search_close, id}` - when clicking close button or pressing Escape
+  - `{:replace_mode_requested, id}` - when pressing Ctrl+H while the bar has focus
 
   ## Updating Match Count
 
@@ -251,6 +252,22 @@ defmodule ScenicWidgets.SearchBar do
     {:noreply, scene}
   end
 
+  # Ctrl+H while the bar owns the keyboard: the editor pane is blurred, so
+  # its own Ctrl+H binding cannot fire. Ask the parent to grow the bar into
+  # find-and-replace (a no-op if it already is) and move focus to the
+  # replacement field, which is where the user is heading.
+  def handle_input({:key, {:key_h, @key_pressed, [:ctrl]}}, _context, scene) do
+    cast_parent(scene, {:replace_mode_requested, scene.assigns.state.id})
+    # Focus first, mode second: the parent's :enable_replace_mode keeps the
+    # focused field, so the replace row appears already focused.
+    {:noreply, focus_field(scene, :replace)}
+  end
+
+  # Ctrl+F while already open: back to the search field.
+  def handle_input({:key, {:key_f, @key_pressed, [:ctrl]}}, _context, scene) do
+    {:noreply, focus_field(scene, :search)}
+  end
+
   # Handle Escape - close
   def handle_input({:key, {:key_esc, @key_pressed, _}}, _context, scene) do
     cast_parent(scene, {:search_close, scene.assigns.state.id})
@@ -362,7 +379,21 @@ defmodule ScenicWidgets.SearchBar do
     {:noreply, scene}
   end
 
-  # Handle clicks on different areas
+  defp focus_field(scene, field) do
+    state = %{scene.assigns.state | focused_field: field}
+    graph = Renderer.render(state)
+
+    scene
+    |> assign(state: state)
+    |> assign(graph: graph)
+    |> push_graph(graph)
+  end
+
+  # Handle clicks on different areas. Requested cursor_button input arrives
+  # for EVERY click, in this component's local space; anything outside the
+  # bar is somebody else's click (the parent decides whether it closes us),
+  # not a press on whichever of our buttons the coordinates happen to fall
+  # near — a click far to the left used to read as the close button.
   defp handle_click(scene, {click_x, click_y}) do
     state = scene.assigns.state
     %{frame: frame} = state
@@ -374,18 +405,24 @@ defmodule ScenicWidgets.SearchBar do
       end
 
     bar_height = 36
+    height = if state.replace_mode, do: bar_height * 2, else: bar_height
 
-    # Check if click is in the replace row (y >= bar_height) when in replace mode
-    if state.replace_mode and click_y >= bar_height do
-      handle_replace_row_click(scene, click_x, width)
-    else
-      handle_search_row_click(scene, click_x, width)
+    cond do
+      click_x < 0 or click_x > width or click_y < 0 or click_y > height ->
+        {:noreply, scene}
+
+      # Click is in the replace row (y >= bar_height) when in replace mode
+      state.replace_mode and click_y >= bar_height ->
+        handle_replace_row_click(scene, click_x, width)
+
+      true ->
+        handle_search_row_click(scene, click_x, width)
     end
   end
 
   defp handle_search_row_click(scene, click_x, width) do
-    button_width = 32
-    match_count_width = 60
+    button_width = Renderer.button_width()
+    match_count_width = Renderer.match_count_width()
     nav_start_x = width - button_width * 2 - match_count_width
 
     cond do

@@ -99,6 +99,9 @@ defmodule ScenicWidgets.TextField.State do
     :display_cache_key,
     :display_lines,
     :display_line_mapping,
+    # {layout_key, %{line_text => wrapped_segments}} from the last projection,
+    # so an edit re-wraps the lines it touched and looks the rest up.
+    :wrap_memo,
     # MapSet of folded source-line headers (view state)
     :folds,
     # Fold header currently under the pointer in the line-number gutter.
@@ -274,6 +277,7 @@ defmodule ScenicWidgets.TextField.State do
       display_cache_key: nil,
       display_lines: nil,
       display_line_mapping: nil,
+      wrap_memo: nil,
       folds: Map.get(data, :folds, MapSet.new()) |> normalize_folds(),
       fold_hover_line: nil,
 
@@ -1034,10 +1038,17 @@ defmodule ScenicWidgets.TextField.State do
     # Calculate cursor pixel position
     cursor_y = (display_line - 1) * line_height
 
-    # Get text before cursor for horizontal position
-    current_line = get_line(state, line)
-    text_before_cursor = String.slice(current_line, 0, col - 1)
-    cursor_x = string_width(state, text_before_cursor)
+    # Horizontal position. With wrapping on, every row fits the viewport and
+    # the view never scrolls sideways — measuring the SOURCE column here used
+    # to shove a wrapped document off-screen to the right whenever the cursor
+    # landed on a continuation row (find-next made the text vanish).
+    cursor_x =
+      if state.wrap_mode == :none do
+        current_line = get_line(state, line)
+        string_width(state, String.slice(current_line, 0, col - 1))
+      else
+        0
+      end
 
     # Use the scroll struct's offsets (these are positive values representing content offset)
     scroll_y = scroll.offset_y
@@ -1087,6 +1098,39 @@ defmodule ScenicWidgets.TextField.State do
         vertical_scroll_offset: -new_scroll_y,
         horizontal_scroll_offset: -new_scroll_x
     }
+  end
+
+  @doc """
+  Like `ensure_cursor_visible/1`, but a cursor that is OFF-screen is brought
+  to the vertical middle of the viewport rather than to its nearest edge.
+  Used for jumps the user did not steer by hand — landing on a search match —
+  where the surrounding lines are the point and an edge-clipped row is not.
+  A cursor already on screen leaves the view where it is.
+  """
+  def reveal_cursor_centered(
+        %__MODULE__{cursor: {line, col}, frame: frame, scroll: scroll} = state
+      ) do
+    line_height = line_height(state)
+    viewport_height = frame.size.height
+
+    {display_line, _display_col} =
+      ScenicWidgets.TextField.Renderer.source_to_display_cursor(state, {line, col})
+
+    cursor_y = (display_line - 1) * line_height
+
+    on_screen? =
+      cursor_y >= scroll.offset_y and cursor_y + line_height <= scroll.offset_y + viewport_height
+
+    if on_screen? do
+      ensure_cursor_visible(state)
+    else
+      max_offset = max(scroll.content_height - viewport_height, 0)
+      centered = cursor_y - viewport_height / 2 + line_height / 2
+      offset_y = centered |> max(0) |> min(max_offset)
+
+      # Horizontal follow is unchanged: run the normal pass on top.
+      ensure_cursor_visible(%{state | scroll: %{scroll | offset_y: offset_y}})
+    end
   end
 
   @doc """

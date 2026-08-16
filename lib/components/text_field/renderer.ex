@@ -56,22 +56,41 @@ defmodule ScenicWidgets.TextField.Renderer do
   cached rows are visible.
   """
   def prepare_display_cache(%State{} = state) do
-    key =
-      {state.lines, state.folds, state.wrap_mode, content_area_width(state), state.font,
-       state.tab_width}
-
-    if state.display_cache_key == key and is_list(state.display_lines) do
+    if display_cache_valid?(state) do
       state
     else
-      {display_lines, mapping} = build_display_projection(state)
+      {display_lines, mapping, memo} = build_display_projection_with_memo(state)
 
       %{
         state
-        | display_cache_key: key,
+        | display_cache_key: display_cache_key(state),
           display_lines: display_lines,
-          display_line_mapping: mapping
+          display_line_mapping: mapping,
+          wrap_memo: memo
       }
     end
+  end
+
+  defp display_cache_key(%State{} = state) do
+    {state.lines, state.folds, state.wrap_mode, content_area_width(state), state.font,
+     state.tab_width}
+  end
+
+  defp display_cache_valid?(%State{} = state) do
+    is_list(state.display_lines) and is_list(state.display_line_mapping) and
+      state.display_cache_key == display_cache_key(state)
+  end
+
+  # The folded+wrapped projection — `{display_lines, mapping}` — for this
+  # state: the cached one when its inputs are unchanged, otherwise built (and
+  # NOT stored: the caller may hold a state it cannot write back). Every
+  # source→display question should go through here rather than re-wrapping
+  # the document; on a large wrapped file that walk is the whole cost of a
+  # cursor move.
+  defp projection(%State{} = state) do
+    if display_cache_valid?(state),
+      do: {state.display_lines, state.display_line_mapping},
+      else: build_display_projection(state)
   end
 
   @doc """
@@ -182,7 +201,7 @@ defmodule ScenicWidgets.TextField.Renderer do
 
     # Build line number to source line mapping for wrapped lines
     # This returns one entry per DISPLAY line
-    line_mapping = build_line_number_mapping(state.lines, state)
+    {_display_lines, line_mapping} = projection(state)
     foldable_lines = ScenicWidgets.TextField.Folding.foldable_lines(state.lines)
 
     Primitives.group(
@@ -661,6 +680,11 @@ defmodule ScenicWidgets.TextField.Renderer do
     render_selection(graph, %{state | selection: {start_pos, end_pos}})
   end
 
+  # Selection rectangles, one per visible DISPLAY row the selection touches.
+  # Rows come from the projection (folds, wrapping) and columns are clipped
+  # to each wrapped segment, so a selection across a wrapped paragraph paints
+  # exactly the glyphs it covers. Only rows in the render window get
+  # primitives; the rest are drawn when the window advances.
   defp render_selection_rectangles(
          graph,
          state,
@@ -669,183 +693,179 @@ defmodule ScenicWidgets.TextField.Renderer do
        ) do
     x_offset = 10
     line_height = State.line_height(state)
-    display_lines = wrap_lines(state)
     # Selection highlight - steel blue with good visibility on dark backgrounds
     selection_color = {:color_rgba, {70, 130, 180, 180}}
 
-    Enum.reduce(sel_start_line..sel_end_line, graph, fn line_num, acc_graph ->
-      # Keep the selection rectangle on exactly the same row origin as the
-      # multiline cursor.  These used to differ by four pixels, making a
-      # selection look as though it floated above the insertion point.
-      y_position = (line_num - 1) * line_height + @multiline_row_y_offset
-      line_text = Enum.at(display_lines, line_num - 1, "")
+    {display_lines, mapping} = projection(state)
+    {first, last} = State.visible_display_range(state, length(display_lines))
 
-      {start_col_on_line, end_col_on_line} =
-        cond do
-          line_num == sel_start_line and line_num == sel_end_line ->
-            {sel_start_col, sel_end_col}
+    windowed_source_runs(display_lines, mapping, first, last)
+    |> Enum.filter(fn {source, _run} -> source >= sel_start_line and source <= sel_end_line end)
+    |> Enum.reduce(graph, fn {source, {first_row, segments}}, acc_graph ->
+      source_text = Enum.at(state.lines, source - 1, "")
 
-          line_num == sel_start_line ->
-            {sel_start_col, String.length(line_text) + 1}
+      # Selected character range on this source line, 0-based, end-exclusive.
+      from = if source == sel_start_line, do: sel_start_col - 1, else: 0
 
-          line_num == sel_end_line ->
-            {1, sel_end_col}
+      to =
+        if source == sel_end_line,
+          do: sel_end_col - 1,
+          else: String.length(source_text)
 
-          true ->
-            {1, String.length(line_text) + 1}
+      segments
+      |> segment_source_starts(source_text)
+      |> Enum.with_index(first_row)
+      |> Enum.reduce(acc_graph, fn {{segment, seg_start}, row}, g ->
+        seg_len = String.length(segment)
+        a = max(seg_start, from)
+        b = min(seg_start + seg_len, to)
+        # A blank line inside the selection still shows a sliver.
+        covered? = b > a or (seg_len == 0 and to > from)
+
+        if covered? and row >= first and row <= last do
+          lead = State.string_width(state, String.slice(segment, 0, a - seg_start))
+          width = max(1, State.string_width(state, String.slice(segment, a - seg_start, b - a)))
+
+          Primitives.rect(
+            g,
+            {width, line_height},
+            fill: selection_color,
+            translate: {x_offset + lead, (row - 1) * line_height + @multiline_row_y_offset},
+            id: {:selection_highlight, row}
+          )
+        else
+          g
         end
-
-      text_before_selection = String.slice(line_text, 0, start_col_on_line - 1)
-
-      selected_text =
-        String.slice(
-          line_text,
-          start_col_on_line - 1,
-          max(0, end_col_on_line - start_col_on_line)
-        )
-
-      start_x_offset = State.string_width(state, text_before_selection)
-      selection_width = max(1, State.string_width(state, selected_text))
-
-      acc_graph
-      |> Primitives.rect(
-        {selection_width, line_height},
-        fill: selection_color,
-        translate: {x_offset + start_x_offset, y_position},
-        id: {:selection_highlight, line_num}
-      )
+      end)
     end)
   end
 
-  # Render search match highlighting
+  # ===== SEARCH MATCH HIGHLIGHTING =====
+  #
+  # Only the matches on rows inside the render window become primitives. A
+  # common word in a long document has thousands of matches; drawing every
+  # one (and re-wrapping its line to place it) froze the editor for seconds
+  # on each keystroke in the search box. Rows outside the window get their
+  # highlights when the window next advances, exactly like the text itself.
+  #
+  # Positions come from the cached display projection, so folds and wrapping
+  # are honoured for free, and columns are mapped through the same
+  # source→display rule the cursor uses (spaces consumed at a wrap boundary),
+  # so a highlight on a wrapped continuation row sits under its text instead
+  # of drifting one character right per boundary.
   defp render_search_matches(graph, %State{search_matches: nil}), do: graph
   defp render_search_matches(graph, %State{search_matches: []}), do: graph
 
   defp render_search_matches(
          graph,
-         %State{search_matches: matches, search_current_index: current_idx, lines: state_lines} =
-           state
+         %State{search_matches: matches, search_current_index: current_idx} = state
        ) do
     x_offset = 10
     line_height = State.line_height(state)
-    # Yellow highlight for search matches, orange for current match
     match_color = {:color_rgba, {255, 255, 0, 120}}
     current_match_color = {:color_rgba, {255, 165, 0, 180}}
 
-    # Small vertical adjustment to center highlight behind text
-    # Text baseline is at (line_num * line_height), text appears above baseline
-    # Highlight should cover the visual text area
-    # pixels to shift down for better centering
-    y_adjust = 4
-
-    # Build mapping from source line number to first display line index
-    # This accounts for word wrap where one source line becomes multiple display lines
-    source_to_display = build_source_to_display_map(state_lines, state)
+    {display_lines, mapping} = projection(state)
+    {first, last} = State.visible_display_range(state, length(display_lines))
+    runs = windowed_source_runs(display_lines, mapping, first, last)
 
     matches
     |> Enum.with_index()
-    |> Enum.reduce(graph, fn {{line_num, col_num, match_text}, idx}, acc_graph ->
-      # Get the display line index for this source line (accounting for word wrap)
-      display_line_idx = Map.get(source_to_display, line_num, line_num)
+    |> Enum.filter(fn {{line, _col, _text}, _idx} -> Map.has_key?(runs, line) end)
+    |> Enum.group_by(fn {{line, _col, _text}, _idx} -> line end)
+    |> Enum.reduce(graph, fn {line, line_matches}, acc_graph ->
+      {first_row, segments} = Map.fetch!(runs, line)
+      starts = segment_source_starts(segments, Enum.at(state.lines, line - 1, ""))
 
-      # Position highlight at correct display line position
-      y_position = (display_line_idx - 1) * line_height + y_adjust
+      Enum.reduce(line_matches, acc_graph, fn {{_line, col, match_text}, idx}, g ->
+        {row_offset, x} = locate_in_segments(starts, col, state)
+        row = first_row + row_offset
 
-      # Get line text for x positioning
-      # Use state_lines (actual lines) for consistency with search
-      line_text = Enum.at(state_lines, line_num - 1, "")
+        if row < first or row > last do
+          g
+        else
+          color = if idx == current_idx, do: current_match_color, else: match_color
 
-      # For wrapped lines, we need to handle x position differently
-      # The match might be on a wrapped portion of the line
-      # Calculate which wrapped segment the match is in and its x offset within that segment
-      {wrapped_y_offset, wrapped_x_offset} =
-        calculate_wrapped_position(state, line_text, col_num - 1)
-
-      # Adjust y for wrapped segments
-      final_y = y_position + wrapped_y_offset * line_height
-      final_x = x_offset + wrapped_x_offset
-
-      match_width = max(1, State.string_width(state, match_text))
-
-      # Use different color for current match
-      color = if idx == current_idx, do: current_match_color, else: match_color
-
-      acc_graph
-      |> Primitives.rect(
-        {match_width, line_height},
-        fill: color,
-        translate: {final_x, final_y},
-        id: {:search_match, idx}
-      )
+          Primitives.rect(
+            g,
+            {max(1, State.string_width(state, match_text)), line_height},
+            fill: color,
+            translate: {x_offset + x, (row - 1) * line_height + @multiline_row_y_offset},
+            id: {:search_match, idx}
+          )
+        end
+      end)
     end)
   end
 
-  # Build a map from source line number (1-indexed) to first display line index (1-indexed)
-  # This accounts for word wrap where one source line might span multiple display lines
-  defp build_source_to_display_map(source_lines, %State{} = state) do
-    max_width = content_area_width(state)
+  # Source lines with at least one display row inside first..last, as
+  # %{source_line => {first_display_row, [segment_text]}}. Walks the projection
+  # once, in step with its mapping, and stops after the run that covers `last`.
+  defp windowed_source_runs(display_lines, mapping, first, last) do
+    collect_runs(display_lines, mapping, 1, first, last, nil, %{})
+  end
 
-    {map, _display_idx} =
-      Enum.with_index(source_lines, 1)
-      |> Enum.reduce({%{}, 1}, fn {source_line, source_num}, {acc_map, current_display_idx} ->
-        # Record that this source line starts at this display line
-        new_map = Map.put(acc_map, source_num, current_display_idx)
+  defp collect_runs([text | texts], [{source, _} | rest], row, first, last, run, acc) do
+    case run do
+      {^source, start, segments} ->
+        collect_runs(texts, rest, row + 1, first, last, {source, start, [text | segments]}, acc)
 
-        # Count how many display lines this source line produces
-        display_line_count =
-          case state.wrap_mode do
-            :word -> length(wrap_line(source_line, max_width, state))
-            :char -> length(wrap_line_by_chars(source_line, max_width, state))
-            :none -> 1
+      _ ->
+        acc = flush_run(run, first, acc)
+
+        if row > last,
+          do: acc,
+          else: collect_runs(texts, rest, row + 1, first, last, {source, row, [text]}, acc)
+    end
+  end
+
+  defp collect_runs(_texts, _mapping, _row, first, _last, run, acc),
+    do: flush_run(run, first, acc)
+
+  defp flush_run(nil, _first, acc), do: acc
+
+  defp flush_run({source, start, segments}, first, acc) do
+    if start + length(segments) - 1 >= first,
+      do: Map.put(acc, source, {start, Enum.reverse(segments)}),
+      else: acc
+  end
+
+  # [{segment_text, source_start_index}] — where in the SOURCE line (0-based
+  # grapheme index) each display segment begins. Word wrap consumes the spaces
+  # at a boundary, so consecutive segments are not simply adjacent.
+  defp segment_source_starts(segments, source_text) do
+    graphemes = String.graphemes(source_text)
+
+    {starts, _consumed, _had_previous} =
+      Enum.reduce(segments, {[], 0, false}, fn segment, {acc, consumed, had_previous?} ->
+        skipped =
+          if had_previous? do
+            graphemes |> Enum.drop(consumed) |> Enum.take_while(&(&1 == " ")) |> length()
+          else
+            0
           end
 
-        {new_map, current_display_idx + display_line_count}
+        start = consumed + skipped
+        {[{segment, start} | acc], start + String.length(segment), true}
       end)
 
-    map
+    Enum.reverse(starts)
   end
 
-  # Calculate the y-offset (in line counts) and x-offset (in pixels) for a character position
-  # within a potentially wrapped line
-  defp calculate_wrapped_position(%State{wrap_mode: :none} = state, line_text, char_idx) do
-    # No wrapping - simple x offset calculation
-    text_before = String.slice(line_text, 0, char_idx)
-    {0, State.string_width(state, text_before)}
-  end
+  # {segment_index, x_pixels} for a 1-based source column: the last segment
+  # starting at or before it (the first segment always starts at 0).
+  defp locate_in_segments(starts, col, state) do
+    char_idx = col - 1
 
-  defp calculate_wrapped_position(%State{} = state, line_text, char_idx) do
-    max_width = content_area_width(state)
+    {segment, start, index} =
+      starts
+      |> Enum.with_index()
+      |> Enum.reduce({"", 0, 0}, fn {{segment, seg_start}, i}, chosen ->
+        if seg_start <= char_idx, do: {segment, seg_start, i}, else: chosen
+      end)
 
-    # Wrap the line to see how it breaks
-    wrapped =
-      case state.wrap_mode do
-        :word -> wrap_line(line_text, max_width, state)
-        :char -> wrap_line_by_chars(line_text, max_width, state)
-        :none -> [line_text]
-      end
-
-    # Find which wrapped segment contains char_idx
-    find_char_in_wrapped_segments(wrapped, char_idx, 0, state)
-  end
-
-  defp find_char_in_wrapped_segments([], _char_idx, segment_num, _state) do
-    # Character beyond end of line - use last segment
-    {segment_num, 0}
-  end
-
-  defp find_char_in_wrapped_segments([segment | rest], char_idx, segment_num, state) do
-    segment_len = String.length(segment)
-
-    if char_idx < segment_len do
-      # Found it in this segment - calculate x offset within this segment
-      text_before = String.slice(segment, 0, char_idx)
-      {segment_num, State.string_width(state, text_before)}
-    else
-      # Not in this segment - check next one
-      # Note: subtract segment length, but wrapped segments might not have clean character boundaries
-      # For word wrap, there may be a space that's elided
-      find_char_in_wrapped_segments(rest, char_idx - segment_len, segment_num + 1, state)
-    end
+    within = min(max(char_idx - start, 0), String.length(segment))
+    {index, State.string_width(state, String.slice(segment, 0, within))}
   end
 
   # Render scrollbars inside the main group (for z-order)
@@ -1553,18 +1573,7 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   # ===== LINE WRAPPING HELPERS =====
 
-  defp wrap_lines(%State{display_lines: lines}) when is_list(lines), do: lines
-
-  defp wrap_lines(%State{wrap_mode: wrap_mode} = state) do
-    max_width = content_area_width(state)
-    lines = visible_source_lines(state) |> Enum.map(fn {_source, text} -> text end)
-
-    case wrap_mode do
-      :word -> Enum.flat_map(lines, &wrap_line(&1, max_width, state))
-      :char -> Enum.flat_map(lines, &wrap_line_by_chars(&1, max_width, state))
-      :none -> lines
-    end
-  end
+  defp wrap_lines(%State{} = state), do: state |> projection() |> elem(0)
 
   # Calculate the available width for text content
   # Note: scroll.viewport_width already excludes gutter (set from content_frame in State.new)
@@ -1574,55 +1583,36 @@ defmodule ScenicWidgets.TextField.Renderer do
     scroll.viewport_width - 40
   end
 
-  # Build mapping from display line number to {source_line_number, is_first_of_source}
-  # Returns one entry per DISPLAY line, tracking which source line it came from
-  # and whether it's the first display line for that source (to show the line number)
-  defp build_line_number_mapping(source_lines, %State{} = state) do
-    if is_list(state.display_line_mapping) and source_lines == state.lines do
-      state.display_line_mapping
-    else
-      build_line_number_mapping_uncached(source_lines, state)
-    end
-  end
-
-  defp build_line_number_mapping_uncached(source_lines, %State{} = state) do
-    # We need to wrap each source line individually to track display line counts
-    max_width = content_area_width(state)
-
-    visible = visible_source_lines(%{state | lines: source_lines})
-
-    {mapping, _seen_sources} =
-      Enum.reduce(visible, {[], MapSet.new()}, fn {source_num, source_line}, {acc, seen} ->
-        # Wrap this source line to see how many display lines it produces
-        wrapped =
-          case state.wrap_mode do
-            :word -> wrap_line(source_line, max_width, state)
-            :char -> wrap_line_by_chars(source_line, max_width, state)
-            :none -> [source_line]
-          end
-
-        # Create mapping entries: first one shows source line number, rest are blank
-        first_source_row? = not MapSet.member?(seen, source_num)
-
-        entries =
-          Enum.with_index(wrapped, 0)
-          |> Enum.map(fn {_text, idx} ->
-            {source_num, first_source_row? and idx == 0}
-          end)
-
-        {acc ++ entries, MapSet.put(seen, source_num)}
-      end)
-
-    mapping
-  end
-
   defp build_display_projection(%State{} = state) do
-    max_width = content_area_width(state)
+    {lines, mapping, _memo} = build_display_projection_with_memo(state)
+    {lines, mapping}
+  end
 
-    {lines, mapping, _seen} =
-      Enum.reduce(visible_source_lines(state), {[], [], MapSet.new()}, fn
-        {source_num, source_line}, {line_acc, mapping_acc, seen} ->
-          wrapped = wrap_for_mode(source_line, max_width, state)
+  # Wrapping is memoised per line TEXT under the current layout (mode, width,
+  # font, tabs). An edit changes one line, but the projection is rebuilt whole;
+  # without the memo every keystroke in a large wrapped document re-measured
+  # every paragraph — twice, once for content size and once for the render.
+  # The memo is rebuilt from what was just projected, so it never outgrows
+  # the document.
+  defp build_display_projection_with_memo(%State{} = state) do
+    max_width = content_area_width(state)
+    layout_key = {state.wrap_mode, max_width, state.font, state.tab_width}
+
+    previous =
+      case state.wrap_memo do
+        {^layout_key, memo} -> memo
+        _ -> %{}
+      end
+
+    {lines, mapping, memo, _seen} =
+      Enum.reduce(visible_source_lines(state), {[], [], %{}, MapSet.new()}, fn
+        {source_num, source_line}, {line_acc, mapping_acc, memo_acc, seen} ->
+          wrapped =
+            case previous do
+              %{^source_line => wrapped} -> wrapped
+              _ -> wrap_for_mode(source_line, max_width, state)
+            end
+
           first_source_row? = not MapSet.member?(seen, source_num)
 
           entries =
@@ -1633,10 +1623,10 @@ defmodule ScenicWidgets.TextField.Renderer do
             end)
 
           {Enum.reverse(wrapped, line_acc), Enum.reverse(entries, mapping_acc),
-           MapSet.put(seen, source_num)}
+           Map.put(memo_acc, source_line, wrapped), MapSet.put(seen, source_num)}
       end)
 
-    {Enum.reverse(lines), Enum.reverse(mapping)}
+    {Enum.reverse(lines), Enum.reverse(mapping), {layout_key, memo}}
   end
 
   # Convert source cursor position to display cursor position
@@ -1650,74 +1640,44 @@ defmodule ScenicWidgets.TextField.Renderer do
   a scroll target from the source line scrolls too little (the end of a
   wrapped document becomes unreachable).
   """
-  def source_to_display_cursor(%State{wrap_mode: :none} = state, {source_line, source_col}) do
-    display_line =
-      state
-      |> visible_source_lines()
-      |> Enum.find_index(fn {line, _text} -> line == source_line end)
+  def source_to_display_cursor(%State{} = state, {source_line, source_col}) do
+    {display_lines, mapping} = projection(state)
 
-    {if(display_line, do: display_line + 1, else: 1), source_col}
+    case first_display_row(mapping, source_line) do
+      nil ->
+        {1, source_col}
+
+      first_row ->
+        segments =
+          display_lines
+          |> Enum.drop(first_row - 1)
+          |> Enum.zip(Enum.drop(mapping, first_row - 1))
+          |> Enum.take_while(fn {_text, {source, _}} -> source == source_line end)
+          |> Enum.map(&elem(&1, 0))
+
+        source_text = Enum.at(state.lines, source_line - 1, "")
+        {offset, display_col} = find_cursor_in_wrapped_lines(segments, source_col, source_text)
+        {first_row + offset - 1, display_col}
+    end
   end
 
-  def source_to_display_cursor(%State{lines: lines} = state, {source_line, source_col}) do
-    max_width = content_area_width(state)
-
-    # Count how many display lines exist before the source line containing the cursor
-    visible = visible_source_lines(state)
-
-    display_lines_before =
-      visible
-      |> Enum.take_while(fn {line, _text} -> line < source_line end)
-      |> Enum.map(fn {_line, text} -> wrap_for_mode(text, max_width, state) end)
-      |> Enum.map(&length/1)
-      |> Enum.sum()
-
-    # Get the source line containing the cursor and wrap it
-    source_line_text = Enum.at(lines, source_line - 1, "")
-    wrapped_lines = wrap_for_mode(source_line_text, max_width, state)
-
-    # Find which wrapped segment contains the cursor
-    {display_line_offset, display_col} =
-      find_cursor_in_wrapped_lines(wrapped_lines, source_col, source_line_text)
-
-    display_line = display_lines_before + display_line_offset
-    {display_line, display_col}
+  # 1-based display row of the first row projected from `source_line`, or nil
+  # when the line is hidden inside a fold.
+  defp first_display_row(mapping, source_line) do
+    case Enum.find_index(mapping, fn {source, _} -> source == source_line end) do
+      nil -> nil
+      index -> index + 1
+    end
   end
 
   @doc "Map a display row to its source line, accounting for folds and wrapping."
-  def display_to_source_line(
-        %State{display_line_mapping: mapping} = state,
-        display_line
-      )
-      when is_list(mapping) do
-    mapping
-    |> Enum.at(
-      display_line - 1,
-      List.last(mapping) ||
-        {List.last(Enum.map(visible_source_lines(state), &elem(&1, 0))) || 1, true}
-    )
-    |> elem(0)
-  end
-
   def display_to_source_line(%State{} = state, display_line) do
-    max_width = content_area_width(state)
+    {_display_lines, mapping} = projection(state)
 
-    state
-    |> visible_source_lines()
-    |> Enum.flat_map(fn {source, text} ->
-      wrapped =
-        case state.wrap_mode do
-          :word -> wrap_line(text, max_width, state)
-          :char -> wrap_line_by_chars(text, max_width, state)
-          :none -> [text]
-        end
-
-      List.duplicate(source, max(length(wrapped), 1))
-    end)
-    |> Enum.at(
-      display_line - 1,
-      List.last(Enum.map(visible_source_lines(state), &elem(&1, 0))) || 1
-    )
+    case Enum.at(mapping, display_line - 1) || List.last(mapping) do
+      {source, _first?} -> source
+      nil -> 1
+    end
   end
 
   defp visible_source_lines(%State{lines: lines, folds: folds} = state) do

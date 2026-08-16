@@ -21,7 +21,14 @@ defmodule ScenicWidgets.SearchBar.Renderer do
   @bar_height 36
   @button_width 32
   @input_padding 8
-  @match_count_width 60
+  # Text inset inside both input fields
+  @text_inset 8
+  # Wide enough for "1238/1238" in 14px mono; the count is centred in it.
+  @match_count_width 84
+
+  @doc "Layout constants shared with the component's hit-testing."
+  def button_width, do: @button_width
+  def match_count_width, do: @match_count_width
 
   @doc """
   Renders the complete search bar (optionally with replace row).
@@ -101,10 +108,10 @@ defmodule ScenicWidgets.SearchBar.Renderer do
         font: font.name,
         font_size: font.size,
         fill: query_color,
-        translate: {input_x + 28, @bar_height / 2 + 5}
+        translate: {input_x + @text_inset, @bar_height / 2 + 5}
       )
       # Cursor line (if focused on search)
-      |> maybe_add_cursor(focused and search_focused, input_x + 28 + cursor_x, 0, theme)
+      |> maybe_add_cursor(focused and search_focused, input_x + @text_inset + cursor_x, 0, theme)
       # Prev button
       |> Primitives.rect({@button_width, @bar_height},
         fill: theme.button_bg,
@@ -122,8 +129,8 @@ defmodule ScenicWidgets.SearchBar.Renderer do
         font: :roboto_mono,
         font_size: 14,
         fill: match_color,
-        translate:
-          {nav_start_x + @button_width + @match_count_width / 2 - 10, @bar_height / 2 + 5}
+        text_align: :center,
+        translate: {nav_start_x + @button_width + @match_count_width / 2, @bar_height / 2 + 5}
       )
       # Next button
       |> Primitives.rect({@button_width, @bar_height},
@@ -188,10 +195,15 @@ defmodule ScenicWidgets.SearchBar.Renderer do
       font: font.name,
       font_size: font.size,
       fill: replace_color,
-      translate: {input_x + 8, row_y + @bar_height / 2 + 5}
+      translate: {input_x + @text_inset, row_y + @bar_height / 2 + 5}
     )
     # Cursor in replace field
-    |> maybe_add_replace_cursor(replace_focused, input_x + 8 + replace_cursor_x, row_y, theme)
+    |> maybe_add_replace_cursor(
+      replace_focused,
+      input_x + @text_inset + replace_cursor_x,
+      row_y,
+      theme
+    )
     # "Replace" button
     |> Primitives.rect({replace_btn_width, @bar_height - 4},
       id: :replace_btn_bg,
@@ -238,46 +250,6 @@ defmodule ScenicWidgets.SearchBar.Renderer do
       stroke: {2, theme.text}
     )
   end
-
-  # Calculate cursor x position based on text width
-  defp calculate_cursor_x(query, cursor_pos, font) do
-    if cursor_pos == 0 do
-      0
-    else
-      text_before_cursor = String.slice(query, 0, cursor_pos)
-      # Approximate width calculation (monospace font)
-      char_width = font.size * 0.6
-      String.length(text_before_cursor) * char_width
-    end
-  end
-
-  @doc """
-  Updates the graph with new query text.
-  """
-  def update_query(graph, %State{} = state) do
-    %{query: query, cursor_pos: cursor_pos, focused: focused, theme: theme, font: font} = state
-    cursor_x = calculate_cursor_x(query, cursor_pos, font)
-
-    graph
-    |> Graph.modify(:query_text, fn primitive ->
-      if query == "" do
-        Primitives.text(primitive, "Search...", fill: theme.placeholder)
-      else
-        Primitives.text(primitive, query, fill: theme.text)
-      end
-    end)
-    |> update_cursor(cursor_x, focused, theme)
-  end
-
-  defp update_cursor(graph, cursor_x, true, theme) do
-    Graph.modify(graph, :cursor, fn primitive ->
-      Primitives.line(primitive, {{cursor_x + 28, 8}, {cursor_x + 28, @bar_height - 8}},
-        stroke: {2, theme.text}
-      )
-    end)
-  end
-
-  defp update_cursor(graph, _cursor_x, false, _theme), do: graph
 
   @doc """
   Updates the match count display.
