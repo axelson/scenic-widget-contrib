@@ -21,6 +21,12 @@ defmodule ScenicWidgets.Menu.Model do
     defstruct [:id, :label, :value, :min, :max, :tooltip, step: 1, enabled?: true]
   end
 
+  defmodule Divider do
+    @moduledoc "A non-interactive horizontal separator between groups of menu rows."
+    @enforce_keys [:id]
+    defstruct [:id, enabled?: false]
+  end
+
   defmodule Submenu do
     @enforce_keys [:id, :label, :rows]
     defstruct [:id, :label, :rows, :tooltip, enabled?: true]
@@ -60,7 +66,7 @@ defmodule ScenicWidgets.Menu.Model do
   defp valid_row?(%Slider{min: min, max: max, value: value, step: step}),
     do: is_number(value) and is_number(step) and step > 0 and value >= min and value <= max
 
-  defp valid_row?(%module{}) when module in [Item, Toggle, Radio, Section], do: true
+  defp valid_row?(%module{}) when module in [Item, Toggle, Radio, Section, Divider], do: true
   defp valid_row?(row) when row in [:divider, :space], do: true
   defp valid_row?(_), do: false
 end

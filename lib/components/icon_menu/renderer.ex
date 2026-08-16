@@ -398,95 +398,108 @@ defmodule ScenicWidgets.IconMenu.Renderer do
           true -> theme.item_text_color
         end
 
-      acc
-      |> Primitives.group(
-        fn g ->
-          g =
-            g
-            # Item background (for hover)
-            |> Primitives.rrect(
-              {dropdown.width - 2 * padding, row_height, 3},
-              id: {:item_bg, item_id},
-              fill: bg_color
-            )
+      if match?(%ScenicWidgets.Menu.Model.Divider{}, item) do
+        divider_y = row_height / 2
 
-          # Checkmark for toggle items (only if checked)
-          g =
-            if is_toggle and is_checked do
+        acc
+        |> Primitives.line(
+          {{8, divider_y}, {dropdown.width - 2 * padding - 8, divider_y}},
+          id: {:menu_divider, item_id},
+          stroke: {1, Map.get(theme, :dropdown_border, {70, 70, 70})},
+          translate: {item_x, item_y}
+        )
+      else
+        acc
+        |> Primitives.group(
+          fn g ->
+            g =
               g
-              |> Primitives.text(
-                "✓",
-                id: {:item_check, item_id},
-                fill: text_color,
-                font: theme.font,
-                font_size: theme.dropdown_font_size,
-                translate: {6, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
+              # Item background (for hover)
+              |> Primitives.rrect(
+                {dropdown.width - 2 * padding, row_height, 3},
+                id: {:item_bg, item_id},
+                fill: bg_color
               )
-            else
-              g
-            end
 
-          if match?(%ScenicWidgets.Menu.Model.Slider{}, item) do
-            render_slider(
-              g,
-              item,
-              dropdown.width - 2 * padding,
-              text_color,
-              is_hovered,
-              theme
-            )
-          else
-            text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
-            shortcut_right = dropdown.width - 2 * padding - 8
-            column_gap = Map.get(theme, :dropdown_column_gap, 24)
-            available_width = shortcut_right - text_x
-            measured_shortcut_width = measure_width(shortcut || "", theme)
-
-            shortcut_width =
-              if shortcut do
-                min(measured_shortcut_width, max(40, available_width * 0.55))
+            # Checkmark for toggle items (only if checked)
+            g =
+              if is_toggle and is_checked do
+                g
+                |> Primitives.text(
+                  "✓",
+                  id: {:item_check, item_id},
+                  fill: text_color,
+                  font: theme.font,
+                  font_size: theme.dropdown_font_size,
+                  translate: {6, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
+                )
               else
-                0
+                g
               end
 
-            label_max_width =
-              max(
-                0,
-                shortcut_right - text_x - if(shortcut, do: shortcut_width + column_gap, else: 0)
-              )
-
-            display_label = truncate(label, label_max_width, theme)
-            display_shortcut = shortcut && truncate(shortcut, shortcut_width, theme)
-
-            g =
-              Primitives.text(g, display_label,
-                id: {:item_text, item_id},
-                fill: text_color,
-                font: theme.font,
-                font_size: theme.dropdown_font_size,
-                translate: {text_x, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
-              )
-
-            if display_shortcut do
-              Primitives.text(g, display_shortcut,
-                id: {:item_shortcut, item_id},
-                fill: text_color,
-                font: theme.font,
-                font_size: theme.dropdown_font_size,
-                text_align: :right,
-                translate: {
-                  shortcut_right,
-                  theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3
-                }
+            if match?(%ScenicWidgets.Menu.Model.Slider{}, item) do
+              render_slider(
+                g,
+                item,
+                dropdown.width - 2 * padding,
+                text_color,
+                is_hovered,
+                theme
               )
             else
-              g
+              text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
+              shortcut_right = dropdown.width - 2 * padding - 8
+              column_gap = Map.get(theme, :dropdown_column_gap, 24)
+              available_width = shortcut_right - text_x
+              measured_shortcut_width = measure_width(shortcut || "", theme)
+
+              shortcut_width =
+                if shortcut do
+                  min(measured_shortcut_width, max(40, available_width * 0.55))
+                else
+                  0
+                end
+
+              label_max_width =
+                max(
+                  0,
+                  shortcut_right - text_x - if(shortcut, do: shortcut_width + column_gap, else: 0)
+                )
+
+              display_label = truncate(label, label_max_width, theme)
+              display_shortcut = shortcut && truncate(shortcut, shortcut_width, theme)
+
+              g =
+                Primitives.text(g, display_label,
+                  id: {:item_text, item_id},
+                  fill: text_color,
+                  font: theme.font,
+                  font_size: theme.dropdown_font_size,
+                  translate:
+                    {text_x, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
+                )
+
+              if display_shortcut do
+                Primitives.text(g, display_shortcut,
+                  id: {:item_shortcut, item_id},
+                  fill: text_color,
+                  font: theme.font,
+                  font_size: theme.dropdown_font_size,
+                  text_align: :right,
+                  translate: {
+                    shortcut_right,
+                    theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3
+                  }
+                )
+              else
+                g
+              end
             end
-          end
-        end,
-        id: {:dropdown_item, item_id},
-        translate: {item_x, item_y}
-      )
+          end,
+          id: {:dropdown_item, item_id},
+          translate: {item_x, item_y}
+        )
+      end
     end)
   end
 

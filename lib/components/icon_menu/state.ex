@@ -389,6 +389,8 @@ defmodule ScenicWidgets.IconMenu.State do
   def get_item_label({_id, label, _opts_or_action}), do: label
   def get_item_label(%{label: label}), do: label
 
+  def display_label(%ScenicWidgets.Menu.Model.Divider{}), do: ""
+
   def display_label(%ScenicWidgets.Menu.Model.Slider{label: label, value: value}),
     do: "#{label}: #{value}"
 
@@ -404,6 +406,9 @@ defmodule ScenicWidgets.IconMenu.State do
   @doc "Returns the row height for an item; interactive sliders receive extra vertical space."
   def item_height(%ScenicWidgets.Menu.Model.Slider{}, theme),
     do: Map.get(theme, :dropdown_slider_height, 52)
+
+  def item_height(%ScenicWidgets.Menu.Model.Divider{}, theme),
+    do: Map.get(theme, :dropdown_divider_height, 13)
 
   def item_height(_item, theme), do: theme.dropdown_item_height
 

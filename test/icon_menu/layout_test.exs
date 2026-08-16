@@ -3,7 +3,7 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
 
   alias ScenicWidgets.IconMenu.State
   alias ScenicWidgets.IconMenu.Renderer
-  alias ScenicWidgets.Menu.Model.{Item, Slider}
+  alias ScenicWidgets.Menu.Model.{Divider, Item, Slider}
   alias Scenic.{Graph, Primitive}
   alias Widgex.Frame
 
@@ -103,6 +103,23 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
     assert Graph.get!(graph, {:slider_value, :tab_width}).data == "4"
     assert Graph.get!(graph, {:slider_track, :tab_width})
     assert Graph.get!(graph, {:slider_thumb, :tab_width})
+  end
+
+  test "divider rows are compact, non-interactive separators" do
+    divider = %Divider{id: :display_divider}
+
+    state =
+      state([%Item{id: :before, label: "Before"}, divider, %Item{id: :after, label: "After"}])
+
+    bounds = state.dropdown_bounds.file.items
+
+    assert bounds.display_divider.height == 13
+    assert bounds.after.y == bounds.display_divider.y + bounds.display_divider.height
+    refute State.item_enabled?(divider)
+
+    graph = Renderer.initial_render(Graph.build(), %{state | active_menu: :file})
+    assert Graph.get!(graph, {:menu_divider, :display_divider})
+    assert Graph.get(graph, {:item_text, :display_divider}) == []
   end
 
   test "hovered sliders invert their controls against the blue row highlight" do
