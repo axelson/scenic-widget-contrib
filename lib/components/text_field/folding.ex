@@ -39,7 +39,12 @@ defmodule ScenicWidgets.TextField.Folding do
 
   @doc "Return `{source_line, text, folded_child_count}` visible rows."
   def projection(lines, folds) do
-    do_projection(lines, folds, 1, []) |> Enum.reverse()
+    foldable = foldable_lines(lines)
+
+    lines
+    |> Enum.with_index(1)
+    |> do_projection(folds, foldable, [])
+    |> Enum.reverse()
   end
 
   def expand_to_line(lines, folds, target) do
@@ -52,19 +57,24 @@ defmodule ScenicWidgets.TextField.Folding do
     if length(old_lines) == length(new_lines), do: folds, else: MapSet.new()
   end
 
-  defp do_projection(lines, _folds, line, acc) when line > length(lines), do: acc
+  defp do_projection([], _folds, _foldable, acc), do: acc
 
-  defp do_projection(lines, folds, line, acc) do
-    text = Enum.at(lines, line - 1)
-
-    if MapSet.member?(folds, line) and foldable?(lines, line) do
-      range = hidden_range(lines, line)
-
-      do_projection(lines, folds, Enum.max(range, fn -> line end) + 1, [
-        {line, text, Enum.count(range)} | acc
-      ])
+  defp do_projection([{text, line} | rest], folds, foldable, acc) do
+    if MapSet.member?(folds, line) and MapSet.member?(foldable, line) do
+      {remaining, hidden_count} = skip_folded_children(rest, indent(text), 0)
+      do_projection(remaining, folds, foldable, [{line, text, hidden_count} | acc])
     else
-      do_projection(lines, folds, line + 1, [{line, text, 0} | acc])
+      do_projection(rest, folds, foldable, [{line, text, 0} | acc])
+    end
+  end
+
+  defp skip_folded_children([], _base_indent, count), do: {[], count}
+
+  defp skip_folded_children([{text, _line} | rest] = remaining, base_indent, count) do
+    if String.trim(text) == "" or indent(text) > base_indent do
+      skip_folded_children(rest, base_indent, count + 1)
+    else
+      {remaining, count}
     end
   end
 

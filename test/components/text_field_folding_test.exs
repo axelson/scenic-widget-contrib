@@ -40,6 +40,18 @@ defmodule ScenicWidgets.TextField.FoldingTest do
     assert microseconds < 1_000_000
   end
 
+  test "fold projection stays linear across a large document" do
+    lines =
+      1..10_000
+      |> Enum.flat_map(fn n -> ["def item_#{n} do", "  :ok", "end"] end)
+
+    folds = Folding.fold_to_level(lines, 1)
+    {microseconds, projection} = :timer.tc(fn -> Folding.projection(lines, folds) end)
+
+    assert length(projection) == 20_000
+    assert microseconds < 250_000
+  end
+
   test "navigation expands containing folds and line-count edits clear them" do
     assert Folding.expand_to_line(@lines, MapSet.new([1]), 3) == MapSet.new()
     assert Folding.reconcile_after_edit(MapSet.new([1]), @lines, @lines) == MapSet.new([1])
