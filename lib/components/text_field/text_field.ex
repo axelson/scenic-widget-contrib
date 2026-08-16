@@ -325,6 +325,7 @@ defmodule ScenicWidgets.TextField do
       # beside a sidebar) would BOTH scroll on a single wheel event.
       {:cursor_scroll, {{_dx, _dy}, {x, y}}} ->
         if point_in_frame?(state.frame, x, y) do
+          input = coalesce_scroll_input(input, state.frame)
           do_handle_input(input, scene)
         else
           {:noreply, scene}
@@ -349,6 +350,38 @@ defmodule ScenicWidgets.TextField do
   # be subtracted or included here.
   defp point_in_frame?(%{size: %{width: w, height: h}}, x, y) do
     x >= 0 and x <= w and y >= 0 and y <= h
+  end
+
+  # Scenic delivers requested input as ordinary process messages. A high-rate
+  # wheel can therefore enqueue hundreds of frames while this component is
+  # rendering the first few. Collapse a bounded burst into one accumulated
+  # movement. Selective receive intentionally leaves non-scroll messages (for
+  # example a buffer-store snapshot) at the front of the queue, giving control
+  # changes a chance to pre-empt the remaining wheel backlog.
+  defp coalesce_scroll_input({:cursor_scroll, {{dx, dy}, position}}, frame) do
+    {dx, dy, position} = drain_scroll_inputs(dx, dy, position, frame, 128)
+    {:cursor_scroll, {{dx, dy}, position}}
+  end
+
+  defp drain_scroll_inputs(dx, dy, position, _frame, 0), do: {dx, dy, position}
+
+  defp drain_scroll_inputs(dx, dy, position, frame, remaining) do
+    receive do
+      {:_input, {:cursor_scroll, {{next_dx, next_dy}, {x, y} = next_position}}, _raw, _id} ->
+        if point_in_frame?(frame, x, y) do
+          drain_scroll_inputs(
+            dx + next_dx,
+            dy + next_dy,
+            next_position,
+            frame,
+            remaining - 1
+          )
+        else
+          drain_scroll_inputs(dx, dy, position, frame, remaining - 1)
+        end
+    after
+      0 -> {dx, dy, position}
+    end
   end
 
   defp do_handle_input(input, scene) do
