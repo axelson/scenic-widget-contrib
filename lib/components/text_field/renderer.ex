@@ -61,6 +61,7 @@ defmodule ScenicWidgets.TextField.Renderer do
       |> update_lines_if_changed(old_state, new_state)
       |> update_semantic_if_changed(old_state, new_state)
       |> update_line_numbers_if_changed(old_state, new_state)
+      |> update_fold_gutter_if_changed(old_state, new_state)
       |> update_selection_if_changed(old_state, new_state)
       |> update_search_matches_if_changed(old_state, new_state)
       |> update_cursor_if_changed(old_state, new_state)
@@ -152,6 +153,7 @@ defmodule ScenicWidgets.TextField.Renderer do
     # Build line number to source line mapping for wrapped lines
     # This returns one entry per DISPLAY line
     line_mapping = build_line_number_mapping(state.lines, state)
+    foldable_lines = ScenicWidgets.TextField.Folding.foldable_lines(state.lines)
 
     Primitives.group(
       graph,
@@ -176,6 +178,14 @@ defmodule ScenicWidgets.TextField.Renderer do
               line_text = if is_first_of_source, do: "#{source_line_num}", else: ""
 
               g
+              |> maybe_render_fold_triangle(
+                state,
+                source_line_num,
+                display_line_num,
+                is_first_of_source,
+                foldable_lines,
+                line_height
+              )
               |> Primitives.text(
                 line_text,
                 translate: {x_pos, y_pos},
@@ -194,6 +204,57 @@ defmodule ScenicWidgets.TextField.Renderer do
       id: :gutter_group,
       scissor: {gutter_width, frame_height}
     )
+  end
+
+  defp maybe_render_fold_triangle(
+         graph,
+         state,
+         source_line,
+         display_line,
+         true,
+         foldable_lines,
+         line_height
+       ) do
+    folded? = MapSet.member?(state.folds || MapSet.new(), source_line)
+    hovered? = state.fold_hover_line == source_line
+
+    if MapSet.member?(foldable_lines, source_line) and (folded? or hovered?) do
+      cx = 7
+      cy = (display_line - 1) * line_height + line_height / 2
+      size = 4
+
+      points =
+        if folded? do
+          {{cx - 2, cy - size}, {cx - 2, cy + size}, {cx + size, cy}}
+        else
+          {{cx - size, cy - 2}, {cx + size, cy - 2}, {cx, cy + size}}
+        end
+
+      Primitives.triangle(graph, points,
+        fill: state.colors.line_numbers,
+        id: {:fold_toggle, source_line}
+      )
+    else
+      graph
+    end
+  end
+
+  defp maybe_render_fold_triangle(graph, _state, _source, _display, _first, _foldable, _height),
+    do: graph
+
+  defp update_fold_gutter_if_changed(graph, old_state, new_state) do
+    cond do
+      old_state.folds != new_state.folds ->
+        graph
+        |> rebuild_content_area(new_state)
+        |> rebuild_gutter_if_shown(new_state)
+
+      old_state.fold_hover_line != new_state.fold_hover_line ->
+        rebuild_gutter_if_shown(graph, new_state)
+
+      true ->
+        graph
+    end
   end
 
   # Render the main text content area with full scrolling

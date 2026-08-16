@@ -88,6 +88,8 @@ defmodule ScenicWidgets.TextField.State do
     :viewport_buffer_lines,
     # MapSet of folded source-line headers (view state)
     :folds,
+    # Fold header currently under the pointer in the line-number gutter.
+    :fold_hover_line,
 
     # Legacy scroll fields (deprecated - use :scroll instead)
     # :none | :vertical | :horizontal | :both (for backwards compat)
@@ -250,6 +252,7 @@ defmodule ScenicWidgets.TextField.State do
       max_visible_lines: calculate_max_lines(frame, font),
       viewport_buffer_lines: Map.get(data, :viewport_buffer_lines, 5),
       folds: Map.get(data, :folds, MapSet.new()) |> normalize_folds(),
+      fold_hover_line: nil,
 
       # Legacy fields (for backwards compatibility during transition)
       scroll_mode: Map.get(data, :scroll_mode, :both),

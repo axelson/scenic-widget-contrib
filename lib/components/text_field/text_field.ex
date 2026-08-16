@@ -269,6 +269,9 @@ defmodule ScenicWidgets.TextField do
     # (e.g., buffer pane shouldn't receive input when search bar is open,
     #  read-only HyperCards shouldn't capture keyboard input)
     case input do
+      {:cursor_pos, {x, y}} when state.show_line_numbers == true ->
+        handle_fold_hover(input, scene, state, x, y)
+
       {:cursor_button, {:btn_left, 1, _mods, {x, y}}}
       when state.show_line_numbers == true ->
         local_x = x - state.frame.pin.x
@@ -281,7 +284,9 @@ defmodule ScenicWidgets.TextField do
           case Reducer.process_action(state, {:toggle_fold, source_line}) do
             {:event, event, new_state} ->
               send_parent_event(scene, event)
-              update_scene(scene, state, Reducer.update_scroll_content_size(new_state))
+              new_state = Reducer.update_scroll_content_size(new_state)
+              maybe_persist_view(state, new_state)
+              update_scene(scene, state, new_state)
 
             {:noop, _} ->
               {:noreply, scene}
@@ -490,20 +495,58 @@ defmodule ScenicWidgets.TextField do
   def handle_put({:action, action}, scene) do
     state = scene.assigns.state
 
-    if state.input_mode == :store_backed and state.dispatch do
-      # Forward action to the store - the published snapshot updates us
-      GenServer.cast(state.dispatch, {:action, [action]})
-      {:noreply, scene}
-    else
-      # Direct mode - process locally
+    if fold_action?(action) do
       case Reducer.process_action(state, action) do
         {:noop, new_state} ->
           update_scene(scene, state, new_state)
 
         {:event, event_data, new_state} ->
           send_parent_event(scene, event_data)
-          update_scene(scene, state, new_state)
+          maybe_persist_view(state, new_state)
+          update_scene(scene, state, Reducer.update_scroll_content_size(new_state))
       end
+    else
+      if state.input_mode == :store_backed and state.dispatch do
+        # Forward action to the store - the published snapshot updates us
+        GenServer.cast(state.dispatch, {:action, [action]})
+        {:noreply, scene}
+      else
+        # Direct mode - process locally
+        case Reducer.process_action(state, action) do
+          {:noop, new_state} ->
+            update_scene(scene, state, new_state)
+
+          {:event, event_data, new_state} ->
+            send_parent_event(scene, event_data)
+            update_scene(scene, state, new_state)
+        end
+      end
+    end
+  end
+
+  defp fold_action?({:toggle_fold, line}) when is_integer(line), do: true
+  defp fold_action?({:fold_to_level, level}) when level in 1..4, do: true
+  defp fold_action?(:unfold_all), do: true
+  defp fold_action?(_), do: false
+
+  defp handle_fold_hover(input, scene, state, x, y) do
+    local_x = x - state.frame.pin.x
+
+    hover_line =
+      if local_x >= 0 and local_x <= state.line_number_width do
+        local_y = y - state.frame.pin.y + state.scroll.offset_y
+        display_line = max(1, div(max(trunc(local_y), 0), State.line_height(state)) + 1)
+        source_line = Renderer.display_to_source_line(state, display_line)
+        if ScenicWidgets.TextField.Folding.foldable?(state.lines, source_line), do: source_line
+      end
+
+    if hover_line == state.fold_hover_line do
+      if is_nil(hover_line), do: do_handle_input(input, scene), else: {:noreply, scene}
+    else
+      new_state = %{state | fold_hover_line: hover_line}
+      graph = Renderer.update_render(scene.assigns.graph, state, new_state)
+      new_scene = scene |> assign(state: new_state, graph: graph) |> push_graph(graph)
+      if is_nil(hover_line), do: do_handle_input(input, new_scene), else: {:noreply, new_scene}
     end
   end
 

@@ -24,12 +24,17 @@ defmodule ScenicWidgets.TextField.Folding do
 
   def fold_to_level(lines, level) when level in 1..4 do
     lines
-    |> Enum.with_index(1)
-    |> Enum.reduce(MapSet.new(), fn {_text, line}, acc ->
-      if foldable?(lines, line) and indentation_level(lines, line) < level,
-        do: MapSet.put(acc, line),
-        else: acc
+    |> foldable_lines_with_levels()
+    |> Enum.reduce(MapSet.new(), fn {line, fold_level}, acc ->
+      if fold_level == level, do: MapSet.put(acc, line), else: acc
     end)
+  end
+
+  @doc "Return all indentation-fold headers in one linear pass."
+  def foldable_lines(lines) do
+    lines
+    |> foldable_lines_with_levels()
+    |> MapSet.new(&elem(&1, 0))
   end
 
   @doc "Return `{source_line, text, folded_child_count}` visible rows."
@@ -91,9 +96,28 @@ defmodule ScenicWidgets.TextField.Folding do
     end
   end
 
-  defp indentation_level(lines, line) do
-    width = lines |> Enum.at(line - 1, "") |> indent()
-    div(width, 2)
+  # Scan upward so each nonblank line already knows the indentation of the
+  # next nonblank line. This replaces the old remaining-document scan for
+  # every source line (quadratic on large buffers).
+  defp foldable_lines_with_levels(lines) do
+    lines
+    |> Enum.with_index(1)
+    |> Enum.reverse()
+    |> Enum.reduce({[], nil}, fn {text, line}, {headers, next_indent} ->
+      if String.trim(text) == "" do
+        {headers, next_indent}
+      else
+        current_indent = indent(text)
+
+        headers =
+          if is_integer(next_indent) and next_indent > current_indent,
+            do: [{line, div(current_indent, 2) + 1} | headers],
+            else: headers
+
+        {headers, current_indent}
+      end
+    end)
+    |> elem(0)
   end
 
   defp indent(text) do

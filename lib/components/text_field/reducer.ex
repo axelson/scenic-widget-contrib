@@ -510,7 +510,10 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   def process_action(%State{} = state, {:toggle_fold, line}) when is_integer(line) do
     folds = ScenicWidgets.TextField.Folding.toggle(state.lines, state.folds, line)
-    {:event, {:folds_changed, state.id, MapSet.to_list(folds)}, %{state | folds: folds}}
+
+    if folds == state.folds,
+      do: {:noop, state},
+      else: {:event, {:folds_changed, state.id, MapSet.to_list(folds)}, %{state | folds: folds}}
   end
 
   def process_action(%State{} = state, :unfold_all) do

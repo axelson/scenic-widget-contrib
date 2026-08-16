@@ -20,7 +20,24 @@ defmodule ScenicWidgets.TextField.FoldingTest do
   test "toggle, unfold-all, and fold-to-level are deterministic" do
     assert Folding.toggle(@lines, MapSet.new(), 1) == MapSet.new([1])
     assert Folding.unfold_all() == MapSet.new()
-    assert MapSet.member?(Folding.fold_to_level(@lines, 2), 1)
+    assert MapSet.member?(Folding.fold_to_level(@lines, 2), 2)
+  end
+
+  test "fold levels are exact and one-based so parent headers remain visible" do
+    assert Folding.fold_to_level(@lines, 1) == MapSet.new([1])
+    assert Folding.fold_to_level(@lines, 2) == MapSet.new([2])
+    assert Folding.fold_to_level(@lines, 3) == MapSet.new()
+    assert Folding.foldable_lines(@lines) == MapSet.new([1, 2])
+  end
+
+  test "fold header discovery scales linearly across a large document" do
+    lines =
+      1..10_000
+      |> Enum.flat_map(fn n -> ["def item_#{n} do", "  :ok", "end"] end)
+
+    {microseconds, folds} = :timer.tc(fn -> Folding.fold_to_level(lines, 1) end)
+    assert MapSet.size(folds) == 10_000
+    assert microseconds < 1_000_000
   end
 
   test "navigation expands containing folds and line-count edits clear them" do
@@ -54,5 +71,7 @@ defmodule ScenicWidgets.TextField.FoldingTest do
              Reducer.process_action(folded, :unfold_all)
 
     assert unfolded.folds == MapSet.new()
+
+    assert {:noop, ^unfolded} = Reducer.process_action(unfolded, {:toggle_fold, 6})
   end
 end
