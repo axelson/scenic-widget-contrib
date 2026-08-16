@@ -64,8 +64,9 @@ defmodule ScenicWidgets.TextField.FoldingTest do
     assert {:event, {:folds_changed, :editor, [1]}, folded} =
              Reducer.process_action(state, {:toggle_fold, 1})
 
-    assert Renderer.source_to_display_cursor(folded, {5, 1}) == {2, 1}
-    assert Renderer.display_to_source_line(folded, 2) == 5
+    assert Renderer.source_to_display_cursor(folded, {5, 1}) == {3, 1}
+    assert Renderer.display_to_source_line(folded, 2) == 1
+    assert Renderer.display_to_source_line(folded, 3) == 5
 
     assert {:event, {:folds_changed, :editor, []}, unfolded} =
              Reducer.process_action(folded, :unfold_all)

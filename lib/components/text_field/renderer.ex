@@ -220,8 +220,10 @@ defmodule ScenicWidgets.TextField.Renderer do
 
     if MapSet.member?(foldable_lines, source_line) and (folded? or hovered?) do
       cx = 7
-      cy = (display_line - 1) * line_height + line_height / 2
-      size = 4
+      # Line numbers are baseline-positioned at the bottom of the row. Their
+      # optical centre is therefore below the geometric half-height.
+      cy = display_line * line_height - state.font.size * 0.35
+      size = 5
 
       points =
         if folded? do
@@ -1455,8 +1457,8 @@ defmodule ScenicWidgets.TextField.Renderer do
 
     visible = visible_source_lines(%{state | lines: source_lines})
 
-    {mapping, _display_idx} =
-      Enum.reduce(visible, {[], 1}, fn {source_num, source_line}, {acc, _display_idx} ->
+    {mapping, _seen_sources} =
+      Enum.reduce(visible, {[], MapSet.new()}, fn {source_num, source_line}, {acc, seen} ->
         # Wrap this source line to see how many display lines it produces
         wrapped =
           case state.wrap_mode do
@@ -1466,15 +1468,15 @@ defmodule ScenicWidgets.TextField.Renderer do
           end
 
         # Create mapping entries: first one shows source line number, rest are blank
+        first_source_row? = not MapSet.member?(seen, source_num)
+
         entries =
           Enum.with_index(wrapped, 0)
           |> Enum.map(fn {_text, idx} ->
-            # is_first_of_source is true only for idx 0
-            {source_num, idx == 0}
+            {source_num, first_source_row? and idx == 0}
           end)
 
-        # display_idx not used
-        {acc ++ entries, 0}
+        {acc ++ entries, MapSet.put(seen, source_num)}
       end)
 
     mapping
@@ -1571,14 +1573,28 @@ defmodule ScenicWidgets.TextField.Renderer do
     )
   end
 
-  defp visible_source_lines(%State{lines: lines, folds: folds}) do
+  defp visible_source_lines(%State{lines: lines, folds: folds} = state) do
     folds = folds || MapSet.new()
 
     ScenicWidgets.TextField.Folding.projection(lines, folds)
-    |> Enum.map(fn
-      {line, text, 0} -> {line, text}
-      {line, text, count} -> {line, text <> "  … #{count} lines"}
+    |> Enum.flat_map(fn
+      {line, text, 0} ->
+        [{line, text}]
+
+      {line, text, count} ->
+        indent = fold_summary_indent(text, state.tab_width || 2)
+        [{line, text}, {line, indent <> "… #{count} lines"}]
     end)
+  end
+
+  defp fold_summary_indent(text, tab_width) do
+    leading =
+      case Regex.run(~r/^[\t ]*/, text) do
+        [indent] -> indent
+        _ -> ""
+      end
+
+    leading <> String.duplicate(" ", tab_width)
   end
 
   # Find which wrapped line segment contains the cursor and what column within it
