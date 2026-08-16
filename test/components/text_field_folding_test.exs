@@ -2,6 +2,7 @@ defmodule ScenicWidgets.TextField.FoldingTest do
   use ExUnit.Case, async: true
   alias ScenicWidgets.TextField.Folding
   alias ScenicWidgets.TextField.{Reducer, Renderer, State}
+  alias Scenic.Graph
   alias Widgex.{Frame}
   alias Widgex.Scroll.ScrollState
 
@@ -115,5 +116,49 @@ defmodule ScenicWidgets.TextField.FoldingTest do
     unfolded = Reducer.update_scroll_content_size(unfolded)
 
     assert unfolded.scroll.content_height == length(@lines) * State.line_height(unfolded) + 8
+  end
+
+  test "fold marker and hit row follow wrapped display rows" do
+    lines = [
+      String.duplicate("a long wrapped prefix ", 10),
+      "def nested do",
+      "  :ok",
+      "end"
+    ]
+
+    state =
+      State.new(%{
+        id: :editor,
+        frame: Frame.new(%{pin: {0, 0}, size: {260, 180}}),
+        initial_text: Enum.join(lines, "\n"),
+        wrap_mode: :word,
+        show_line_numbers: true,
+        font: %{
+          name: :ibm_plex_mono,
+          size: 16,
+          path: Path.expand("../../assets/fonts/IBMPlexMono-Regular.ttf", __DIR__)
+        }
+      })
+      |> Map.put(:fold_hover_line, 2)
+      |> Renderer.prepare_display_cache()
+
+    display_row =
+      Enum.find(1..length(state.display_lines), fn row ->
+        Renderer.display_to_source_line(state, row) == 2
+      end)
+
+    assert display_row > 2
+    assert Renderer.display_to_source_line(state, display_row) == 2
+
+    graph = Renderer.initial_render(Graph.build(), state)
+    [triangle] = Graph.get(graph, {:fold_toggle, 2})
+    {{_x1, y1}, {_x2, y2}, {_x3, y3}} = Scenic.Primitive.get(triangle)
+    # The open (downward) triangle's first two points sit two pixels above its
+    # anchor. Recover that anchor and prove it uses the wrapped display row.
+    triangle_anchor_y = (y1 + y2) / 2 + 2
+    expected_anchor_y = display_row * State.line_height(state) - state.font.size * 0.35
+
+    assert y3 > triangle_anchor_y
+    assert_in_delta triangle_anchor_y, expected_anchor_y, 0.01
   end
 end

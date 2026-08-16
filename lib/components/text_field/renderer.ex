@@ -1685,6 +1685,20 @@ defmodule ScenicWidgets.TextField.Renderer do
   end
 
   @doc "Map a display row to its source line, accounting for folds and wrapping."
+  def display_to_source_line(
+        %State{display_line_mapping: mapping} = state,
+        display_line
+      )
+      when is_list(mapping) do
+    mapping
+    |> Enum.at(
+      display_line - 1,
+      List.last(mapping) ||
+        {List.last(Enum.map(visible_source_lines(state), &elem(&1, 0))) || 1, true}
+    )
+    |> elem(0)
+  end
+
   def display_to_source_line(%State{} = state, display_line) do
     max_width = content_area_width(state)
 
@@ -1813,6 +1827,8 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   defp wrap_for_mode(line, max_width, %State{wrap_mode: :char} = state),
     do: wrap_line_by_chars(line, max_width, state)
+
+  defp wrap_for_mode(line, _max_width, %State{wrap_mode: :none}), do: [line]
 
   defp wrap_for_mode(line, max_width, state), do: wrap_line(line, max_width, state)
 end
