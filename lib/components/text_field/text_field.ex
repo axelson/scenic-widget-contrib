@@ -646,6 +646,8 @@ defmodule ScenicWidgets.TextField do
       |> State.recalculate_line_number_width()
       |> State.recalculate_scroll_viewport()
       |> Reducer.update_scroll_content_size()
+      |> Map.put(:render_window, nil)
+      |> State.advance_render_window()
 
     graph = Renderer.initial_render(Scenic.Graph.build(), new_state)
 

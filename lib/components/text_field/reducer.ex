@@ -1556,7 +1556,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     new_scroll = handle_scroll_smart(scroll, -delta_x, -delta_y)
 
     if scroll_changed?(scroll, new_scroll) do
-      {:noop, %{state | scroll: new_scroll}}
+      {:noop, State.advance_render_window(%{state | scroll: new_scroll})}
     else
       {:noop, state}
     end
@@ -1571,7 +1571,7 @@ defmodule ScenicWidgets.TextField.Reducer do
     new_scroll = handle_scroll_2d(scroll, -delta_x, -delta_y)
 
     if scroll_changed?(scroll, new_scroll) do
-      {:noop, %{state | scroll: new_scroll}}
+      {:noop, State.advance_render_window(%{state | scroll: new_scroll})}
     else
       {:noop, state}
     end

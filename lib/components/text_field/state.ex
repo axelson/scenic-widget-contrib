@@ -88,8 +88,12 @@ defmodule ScenicWidgets.TextField.State do
     :height_mode,
     # Calculated from frame height and height_mode
     :max_visible_lines,
-    # Number of lines to render outside viewport (default 5)
+    # Number of lines to render outside viewport (default 96). A generous
+    # retained window keeps wheel events on the translate-only fast path.
     :viewport_buffer_lines,
+    # Buffered display-row window currently materialized in the graph.
+    # It advances only when the viewport leaves it, not on every wheel tick.
+    :render_window,
     # MapSet of folded source-line headers (view state)
     :folds,
     # Fold header currently under the pointer in the line-number gutter.
@@ -209,6 +213,9 @@ defmodule ScenicWidgets.TextField.State do
     content_width = calculate_content_width(lines, font, content_frame, wrap_mode)
     content_height = calculate_content_height(lines, font, content_frame, wrap_mode)
 
+    viewport_buffer_lines = Map.get(data, :viewport_buffer_lines, 96)
+    max_visible_lines = calculate_max_lines(frame, font)
+
     %__MODULE__{
       frame: frame,
       lines: lines,
@@ -256,8 +263,9 @@ defmodule ScenicWidgets.TextField.State do
           initially_visible: Map.get(data, :show_scrollbars, true)
         ),
       height_mode: Map.get(data, :height_mode, :auto),
-      max_visible_lines: calculate_max_lines(frame, font),
-      viewport_buffer_lines: Map.get(data, :viewport_buffer_lines, 5),
+      max_visible_lines: max_visible_lines,
+      viewport_buffer_lines: viewport_buffer_lines,
+      render_window: {1, max_visible_lines + viewport_buffer_lines},
       folds: Map.get(data, :folds, MapSet.new()) |> normalize_folds(),
       fold_hover_line: nil,
 
@@ -907,6 +915,11 @@ defmodule ScenicWidgets.TextField.State do
   def visible_display_range(%__MODULE__{mode: :single_line}, display_count),
     do: {1, display_count}
 
+  def visible_display_range(%__MODULE__{render_window: {first, last}}, display_count) do
+    first = min(max(first, 1), max(display_count, 1))
+    {first, max(first, min(last, max(display_count, 1)))}
+  end
+
   def visible_display_range(%__MODULE__{} = state, display_count) do
     line_height = line_height(state)
     offset_y = (state.scroll && state.scroll.offset_y) || 0
@@ -925,6 +938,25 @@ defmodule ScenicWidgets.TextField.State do
       |> min(max(display_count, 1))
 
     {first, max(last, first)}
+  end
+
+  @doc false
+  def advance_render_window(%__MODULE__{mode: :single_line} = state), do: state
+
+  def advance_render_window(%__MODULE__{} = state) do
+    line_height = line_height(state)
+    offset_y = (state.scroll && state.scroll.offset_y) || 0
+    buffer = state.viewport_buffer_lines || 96
+    viewport_first = max(1, trunc(offset_y / line_height) + 1)
+    viewport_last = trunc((offset_y + state.frame.size.height) / line_height) + 1
+
+    case state.render_window do
+      {first, last} when viewport_first >= first and viewport_last <= last ->
+        state
+
+      _ ->
+        %{state | render_window: {max(1, viewport_first - buffer), viewport_last + buffer}}
+    end
   end
 
   @doc """

@@ -1035,18 +1035,7 @@ defmodule ScenicWidgets.TextField.Renderer do
   # input stops being serviced. The line count only clamps the window's end,
   # which is not needed to detect that the window moved.
   defp visible_window_changed?(old_state, new_state) do
-    unclamped_window(old_state) != unclamped_window(new_state)
-  end
-
-  defp unclamped_window(%State{} = state) do
-    line_height = State.line_height(state)
-    offset_y = (state.scroll && state.scroll.offset_y) || 0
-    buffer = state.viewport_buffer_lines || 5
-
-    {
-      max(1, trunc(offset_y / line_height) + 1 - buffer),
-      trunc((offset_y + state.frame.size.height) / line_height) + 1 + buffer
-    }
+    old_state.render_window != new_state.render_window
   end
 
   defp translate_content_scroll(graph, %State{scroll: old_scroll}, %State{scroll: new_scroll})
@@ -1175,15 +1164,17 @@ defmodule ScenicWidgets.TextField.Renderer do
   defp update_semantic_if_changed(graph, old_state, new_state) do
     if semantic_changed?(old_state, new_state) do
       semantic = semantic_metadata(new_state)
-      text = State.get_text(new_state)
 
       # No rescue: a swallowed modify failure here leaves the semantic table
       # frozen at stale values while the visible state moves on — the
       # "cursor moved on screen but tests read the old position" bug class.
       Graph.modify(graph, :semantic_content, fn primitive ->
-        primitive
-        |> Scenic.Primitive.put(text)
-        |> Scenic.Primitive.put_style(:semantic, semantic)
+        primitive =
+          if old_state.lines != new_state.lines,
+            do: Scenic.Primitive.put(primitive, State.get_text(new_state)),
+            else: primitive
+
+        Scenic.Primitive.put_style(primitive, :semantic, semantic)
       end)
     else
       graph
@@ -1274,7 +1265,10 @@ defmodule ScenicWidgets.TextField.Renderer do
   end
 
   defp update_cursor_guides_if_changed(graph, old_state, new_state) do
-    if old_state.cursor != new_state.cursor or scroll_changed?(old_state.scroll, new_state.scroll) do
+    # Guides live in the translated content group, so scrolling moves them
+    # automatically. Recomputing their source-to-display position here made a
+    # wrapped wheel event walk the document before the cursor on every tick.
+    if old_state.cursor != new_state.cursor do
       {x, y} = cursor_guide_position(new_state, 10, State.line_height(new_state))
 
       graph
