@@ -11,6 +11,7 @@ defmodule ScenicWidgets.IconMenu.Renderer do
   alias Scenic.Graph
   alias Scenic.Primitives
   alias ScenicWidgets.IconMenu.State
+  alias ScenicWidgets.MenuBar.TextHelper
 
   @doc """
   Initial render - create all UI elements.
@@ -318,10 +319,10 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     |> Enum.reduce(graph, fn {item, index}, acc ->
       item_id = State.get_item_id(item)
       label = State.display_label(item)
+      shortcut = State.item_shortcut(item)
       is_toggle = State.is_toggle_item?(item)
       is_checked = State.is_item_checked?(item)
 
-      item_bounds = Map.get(dropdown.items, item_id)
       is_hovered = hovered_item == item_id
 
       # Position relative to dropdown origin
@@ -366,18 +367,44 @@ defmodule ScenicWidgets.IconMenu.Renderer do
               g
             end
 
-          # Item text (offset if toggle items exist to align all labels)
           text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
+          shortcut_right = dropdown.width - 2 * padding - 8
+          column_gap = Map.get(theme, :dropdown_column_gap, 24)
+          shortcut_width = measure_width(shortcut || "", theme)
 
-          g
-          |> Primitives.text(
-            label,
-            id: {:item_text, item_id},
-            fill: text_color,
-            font: theme.font,
-            font_size: theme.dropdown_font_size,
-            translate: {text_x, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
-          )
+          label_max_width =
+            max(
+              0,
+              shortcut_right - text_x - if(shortcut, do: shortcut_width + column_gap, else: 0)
+            )
+
+          display_label = truncate(label, label_max_width, theme)
+          display_shortcut = shortcut && truncate(shortcut, shortcut_width, theme)
+
+          g =
+            Primitives.text(g, display_label,
+              id: {:item_text, item_id},
+              fill: text_color,
+              font: theme.font,
+              font_size: theme.dropdown_font_size,
+              translate: {text_x, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
+            )
+
+          if display_shortcut do
+            Primitives.text(g, display_shortcut,
+              id: {:item_shortcut, item_id},
+              fill: text_color,
+              font: theme.font,
+              font_size: theme.dropdown_font_size,
+              text_align: :right,
+              translate: {
+                shortcut_right,
+                theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3
+              }
+            )
+          else
+            g
+          end
         end,
         id: {:dropdown_item, item_id},
         translate: {item_x, item_y}
@@ -388,6 +415,27 @@ defmodule ScenicWidgets.IconMenu.Renderer do
   # Check if any item in the list is a toggle type (to align text consistently)
   defp has_any_toggle_items?(items) do
     Enum.any?(items, &State.is_toggle_item?/1)
+  end
+
+  defp measure_width("", _theme), do: 0
+
+  defp measure_width(text, theme) do
+    case TextHelper.measure_text(text, font: theme.font, font_size: theme.dropdown_font_size) do
+      {:ok, width} -> width
+      {:error, _} -> String.length(text) * theme.dropdown_font_size * 0.6
+    end
+  end
+
+  defp truncate(text, width, theme) do
+    case TextHelper.truncate_text(text, width,
+           font: theme.font,
+           font_size: theme.dropdown_font_size,
+           ellipsis: "…"
+         ) do
+      {:ok, value} -> value
+      {:truncated, value} -> value
+      {:error, _} -> text
+    end
   end
 
   # ===========================================================================

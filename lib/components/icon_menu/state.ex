@@ -91,6 +91,8 @@ defmodule ScenicWidgets.IconMenu.State do
     icon_button_size: 35,
     icon_font_size: 16,
     dropdown_width: 180,
+    dropdown_max_width: 420,
+    dropdown_column_gap: 24,
     dropdown_item_height: 28,
     dropdown_padding: 4,
 
@@ -178,7 +180,6 @@ defmodule ScenicWidgets.IconMenu.State do
   """
   def calculate_dropdown_bounds(%__MODULE__{menus: menus, theme: theme, align: align} = state) do
     button_size = theme.icon_button_size
-    dropdown_width = theme.dropdown_width
     item_height = theme.dropdown_item_height
     padding = theme.dropdown_padding
     x_offset = alignment_offset(state)
@@ -186,6 +187,7 @@ defmodule ScenicWidgets.IconMenu.State do
     menus
     |> Enum.with_index()
     |> Enum.map(fn {menu, index} ->
+      dropdown_width = dropdown_width(menu.items, theme, state)
       # Button x position
       button_x = x_offset + index * button_size
       y = theme.height
@@ -375,10 +377,41 @@ defmodule ScenicWidgets.IconMenu.State do
 
   def display_label(%ScenicWidgets.Menu.Model.Submenu{label: label}), do: label <> "  ›"
 
-  def display_label(%{label: label, shortcut: shortcut}) when is_binary(shortcut),
-    do: label <> "    " <> shortcut
-
   def display_label(item), do: get_item_label(item)
+
+  @doc "Returns a menu item's shortcut as a separate, right-aligned column."
+  def item_shortcut(%{shortcut: shortcut}) when is_binary(shortcut), do: shortcut
+  def item_shortcut(_item), do: nil
+
+  @doc "Calculates a content-aware dropdown width, bounded by the component theme and frame."
+  def dropdown_width(items, theme, state) do
+    minimum = theme.dropdown_width
+    maximum = min(Map.get(theme, :dropdown_max_width, 420), get_frame_width(state.frame))
+    gap = Map.get(theme, :dropdown_column_gap, 24)
+    font_opts = [font: theme.font, font_size: theme.dropdown_font_size]
+
+    label_width =
+      items |> Enum.map(&text_width(display_label(&1), font_opts)) |> Enum.max(fn -> 0 end)
+
+    shortcut_width =
+      items
+      |> Enum.map(&(item_shortcut(&1) || ""))
+      |> Enum.map(&text_width(&1, font_opts))
+      |> Enum.max(fn -> 0 end)
+
+    leading_space = if Enum.any?(items, &is_toggle_item?/1), do: 20, else: 8
+    shortcut_space = if shortcut_width > 0, do: gap + shortcut_width, else: 0
+    chrome = 2 * theme.dropdown_padding + leading_space + 8
+
+    min(max(minimum, ceil(label_width + shortcut_space + chrome)), max(minimum, maximum))
+  end
+
+  defp text_width(text, opts) do
+    case ScenicWidgets.MenuBar.TextHelper.measure_text(text, opts) do
+      {:ok, width} -> width
+      {:error, _} -> String.length(text) * Keyword.fetch!(opts, :font_size) * 0.6
+    end
+  end
 
   @doc """
   Extract options from a menu item. Returns empty map for simple items.
