@@ -33,6 +33,7 @@ defmodule ScenicWidgets.TextField.Renderer do
   alias Scenic.Graph
   alias Scenic.Primitives
   alias ScenicWidgets.TextField.State
+  alias ScenicWidgets.TextField.Wrapping
   require Logger
 
   @doc """
@@ -1536,16 +1537,17 @@ defmodule ScenicWidgets.TextField.Renderer do
     display_lines_before =
       visible
       |> Enum.take_while(fn {line, _text} -> line < source_line end)
-      |> Enum.map(fn {_line, text} -> wrap_line(text, max_width, state) end)
+      |> Enum.map(fn {_line, text} -> wrap_for_mode(text, max_width, state) end)
       |> Enum.map(&length/1)
       |> Enum.sum()
 
     # Get the source line containing the cursor and wrap it
     source_line_text = Enum.at(lines, source_line - 1, "")
-    wrapped_lines = wrap_line(source_line_text, max_width, state)
+    wrapped_lines = wrap_for_mode(source_line_text, max_width, state)
 
     # Find which wrapped segment contains the cursor
-    {display_line_offset, display_col} = find_cursor_in_wrapped_lines(wrapped_lines, source_col)
+    {display_line_offset, display_col} =
+      find_cursor_in_wrapped_lines(wrapped_lines, source_col, source_line_text)
 
     display_line = display_lines_before + display_line_offset
     {display_line, display_col}
@@ -1599,13 +1601,20 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   # Find which wrapped line segment contains the cursor and what column within it
   # Note: Word wrap consumes spaces at wrap boundaries, so we need to track that
-  defp find_cursor_in_wrapped_lines(wrapped_lines, source_col) do
+  defp find_cursor_in_wrapped_lines(wrapped_lines, source_col, source_text) do
     # Walk through wrapped lines, tracking cumulative SOURCE character position
     # When word wrapping, a space is consumed between wrapped lines
-    find_cursor_in_wrapped_lines(wrapped_lines, source_col, 1, 0, false)
+    find_cursor_in_wrapped_lines(
+      wrapped_lines,
+      source_col,
+      String.graphemes(source_text),
+      1,
+      0,
+      false
+    )
   end
 
-  defp find_cursor_in_wrapped_lines([], source_col, line_num, chars_consumed, _) do
+  defp find_cursor_in_wrapped_lines([], source_col, _source, line_num, chars_consumed, _) do
     # Cursor is past all content - place at end of last line
     {max(1, line_num - 1), max(1, source_col - chars_consumed)}
   end
@@ -1613,6 +1622,7 @@ defmodule ScenicWidgets.TextField.Renderer do
   defp find_cursor_in_wrapped_lines(
          [line | rest],
          source_col,
+         source,
          line_num,
          chars_consumed,
          had_previous_line
@@ -1621,7 +1631,15 @@ defmodule ScenicWidgets.TextField.Renderer do
 
     # Account for the space that was consumed at wrap boundary
     # (when transitioning from a previous line to this one via word wrap)
-    space_adjustment = if had_previous_line, do: 1, else: 0
+    space_adjustment =
+      if had_previous_line do
+        source
+        |> Enum.drop(chars_consumed)
+        |> Enum.take_while(&(&1 == " "))
+        |> length()
+      else
+        0
+      end
 
     # Total source characters consumed after this wrapped line
     source_chars_after = chars_consumed + space_adjustment + line_length
@@ -1637,7 +1655,14 @@ defmodule ScenicWidgets.TextField.Renderer do
 
       # Cursor is after this line - continue to next
       source_col > source_chars_after ->
-        find_cursor_in_wrapped_lines(rest, source_col, line_num + 1, source_chars_after, true)
+        find_cursor_in_wrapped_lines(
+          rest,
+          source_col,
+          source,
+          line_num + 1,
+          source_chars_after,
+          true
+        )
 
       # Cursor is before this line (shouldn't happen normally)
       true ->
@@ -1647,83 +1672,16 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   # Word-based line wrapping using FontMetrics when available
   defp wrap_line(line, max_width, %State{} = state) do
-    line_width = State.string_width(state, line)
-
-    if line_width <= max_width do
-      [line]
-    else
-      wrap_line_by_words(line, max_width, state)
-    end
-  end
-
-  defp wrap_line_by_words(line, max_width, %State{} = state) do
-    words = String.split(line, " ")
-
-    words
-    |> Enum.reduce({[], ""}, fn word, {wrapped_lines, current_line} ->
-      test_line = if current_line == "", do: word, else: current_line <> " " <> word
-      test_width = State.string_width(state, test_line)
-
-      if test_width <= max_width do
-        {wrapped_lines, test_line}
-      else
-        if current_line == "" do
-          # Word is too long, must include it anyway (could split further if needed)
-          {wrapped_lines ++ [word], ""}
-        else
-          {wrapped_lines ++ [current_line], word}
-        end
-      end
-    end)
-    |> then(fn {wrapped_lines, current_line} ->
-      if current_line == "", do: wrapped_lines, else: wrapped_lines ++ [current_line]
-    end)
+    Wrapping.word(line, max_width, &State.string_width(state, &1))
   end
 
   # Character-based line wrapping using FontMetrics when available
   defp wrap_line_by_chars(line, max_width, %State{} = state) do
-    line_width = State.string_width(state, line)
-
-    if line_width <= max_width do
-      [line]
-    else
-      # Use character width to estimate chunk size, then verify with actual measurement
-      char_width = State.char_width(state)
-      estimated_chars = max(1, trunc(max_width / char_width))
-
-      wrap_line_by_chars_measured(line, max_width, estimated_chars, state)
-    end
+    Wrapping.character(line, max_width, &State.string_width(state, &1))
   end
 
-  # Wrap line by characters, using actual string width measurement
-  defp wrap_line_by_chars_measured(line, max_width, estimated_chars, state) do
-    graphemes = String.graphemes(line)
+  defp wrap_for_mode(line, max_width, %State{wrap_mode: :char} = state),
+    do: wrap_line_by_chars(line, max_width, state)
 
-    if length(graphemes) <= estimated_chars do
-      [line]
-    else
-      # Build chunks that actually fit within max_width
-      {chunks, current_chunk} =
-        Enum.reduce(graphemes, {[], ""}, fn char, {chunks, current} ->
-          test = current <> char
-
-          if State.string_width(state, test) <= max_width do
-            {chunks, test}
-          else
-            if current == "" do
-              # Single char exceeds width, include it anyway
-              {chunks ++ [char], ""}
-            else
-              {chunks ++ [current], char}
-            end
-          end
-        end)
-
-      if current_chunk == "" do
-        chunks
-      else
-        chunks ++ [current_chunk]
-      end
-    end
-  end
+  defp wrap_for_mode(line, max_width, state), do: wrap_line(line, max_width, state)
 end

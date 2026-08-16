@@ -8,6 +8,7 @@ defmodule ScenicWidgets.TextField.State do
 
   use Widgex.Scrollable
   require Logger
+  alias ScenicWidgets.TextField.Wrapping
 
   defstruct [
     # Core
@@ -330,7 +331,9 @@ defmodule ScenicWidgets.TextField.State do
         display_lines_before =
           state.lines
           |> Enum.take(target_line - 1)
-          |> Enum.map(fn line -> count_wrapped_lines_init(line, state.font, max_width) end)
+          |> Enum.map(fn line ->
+            count_wrapped_lines_init(line, state.font, max_width, state.wrap_mode)
+          end)
           |> Enum.sum()
 
         display_lines_before * line_height
@@ -354,7 +357,7 @@ defmodule ScenicWidgets.TextField.State do
           max_width = frame.size.width - 40
 
           lines
-          |> Enum.map(fn line -> count_wrapped_lines_init(line, font, max_width) end)
+          |> Enum.map(fn line -> count_wrapped_lines_init(line, font, max_width, wrap_mode) end)
           |> Enum.sum()
       end
 
@@ -363,33 +366,14 @@ defmodule ScenicWidgets.TextField.State do
 
   # Count how many display lines a single source line will wrap into (used during init)
   # This is a simplified version that doesn't require the full State struct
-  defp count_wrapped_lines_init(line, font, max_width) do
-    line_width = measure_string_width(line, font)
+  defp count_wrapped_lines_init(line, font, max_width, wrap_mode) do
+    measure = &measure_string_width(&1, font)
 
-    if line_width <= max_width do
-      1
-    else
-      # Word wrap: split by words and count lines
-      words = String.split(line, " ")
-      space_width = measure_string_width(" ", font)
-
-      {line_count, _current_width} =
-        Enum.reduce(words, {1, 0}, fn word, {lines, current_w} ->
-          word_width = measure_string_width(word, font)
-
-          test_width =
-            if current_w == 0, do: word_width, else: current_w + space_width + word_width
-
-          if test_width <= max_width do
-            {lines, test_width}
-          else
-            # Word doesn't fit, start new line
-            {lines + 1, word_width}
-          end
-        end)
-
-      line_count
+    case wrap_mode do
+      :char -> Wrapping.character(line, max_width, measure)
+      :word -> Wrapping.word(line, max_width, measure)
     end
+    |> length()
   end
 
   # Measure string width using FontMetrics if available, fallback to approximation

@@ -13,6 +13,7 @@ defmodule ScenicWidgets.TextField.Reducer do
   """
 
   alias ScenicWidgets.TextField.State
+  alias ScenicWidgets.TextField.Wrapping
   alias Widgex.Scroll.ScrollController
   use ScenicWidgets.ScenicEventsDefinitions
   use Widgex.Scrollable
@@ -1646,32 +1647,13 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # Count how many display lines a single source line will wrap into
   defp count_wrapped_lines(state, line, max_width) do
-    line_width = State.string_width(state, line)
+    measure = &State.string_width(state, &1)
 
-    if line_width <= max_width do
-      1
-    else
-      # Word wrap: split by words and count lines
-      words = String.split(line, " ")
-
-      {line_count, _current_width} =
-        Enum.reduce(words, {1, 0}, fn word, {lines, current_w} ->
-          word_width = State.string_width(state, word)
-          space_width = State.string_width(state, " ")
-
-          test_width =
-            if current_w == 0, do: word_width, else: current_w + space_width + word_width
-
-          if test_width <= max_width do
-            {lines, test_width}
-          else
-            # Word doesn't fit, start new line
-            {lines + 1, word_width}
-          end
-        end)
-
-      line_count
+    case state.wrap_mode do
+      :char -> Wrapping.character(line, max_width, measure)
+      :word -> Wrapping.word(line, max_width, measure)
     end
+    |> length()
   end
 
   defp drag_offset(start_offset, pointer_delta, track_length, content_size, viewport_size) do
