@@ -34,6 +34,11 @@ defmodule ScenicWidgets.SideNav.State do
     :drag_start,
     :drag_mods,
     :dragging,
+    :drag_target,
+    :drop_valid,
+    :pending_path_moves,
+    :renaming_id,
+    :rename_value,
     # Currently focused item (for keyboard nav)
     :focused_id,
     # Currently hovered item (for hover effects)
@@ -133,6 +138,11 @@ defmodule ScenicWidgets.SideNav.State do
       drag_start: nil,
       drag_mods: [],
       dragging: false,
+      drag_target: nil,
+      drop_valid: false,
+      pending_path_moves: [],
+      renaming_id: nil,
+      rename_value: "",
       focused_id: Map.get(data, :focused_id),
       expanded: initial_expanded,
       scroll:
@@ -436,6 +446,7 @@ defmodule ScenicWidgets.SideNav.State do
 
   @doc "Apply conventional plain, Ctrl-toggle, or Shift-range selection."
   def select(%__MODULE__{} = state, item_id, mods \\ []) do
+    mods = normalize_mods(mods)
     visible_ids = visible_items(state)
 
     cond do
@@ -459,6 +470,14 @@ defmodule ScenicWidgets.SideNav.State do
             focused_id: item_id
         }
     end
+  end
+
+  defp normalize_mods(mods) do
+    Enum.map(mods, fn
+      mod when mod in [:key_left_control, :key_right_control, :control] -> :ctrl
+      mod when mod in [:key_left_shift, :key_right_shift] -> :shift
+      mod -> mod
+    end)
   end
 
   defp selection_range(ids, from, to) do

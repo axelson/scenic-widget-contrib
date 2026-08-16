@@ -48,6 +48,7 @@ defmodule ScenicWidgets.SideNav do
   - `{:sidebar, :expand, item_id}` - When a node is expanded
   - `{:sidebar, :collapse, item_id}` - When a node is collapsed
   - `{:sidebar, :hover, item_id}` - When mouse hovers over an item
+  - `{:sidebar, :rename_requested, item_id, new_name}` - Inline rename committed
   """
 
   use Scenic.Component, has_children: false
@@ -111,7 +112,7 @@ defmodule ScenicWidgets.SideNav do
     # bounds-checks against our frame before acting (the same shape TextField
     # uses; without the check an editor beside a sidebar would both scroll on
     # one wheel event).
-    request_input(scene, [:key, :cursor_scroll])
+    request_input(scene, [:key, :codepoint, :cursor_scroll])
 
     Logger.debug("   Graph pushed, now calling register_semantic_elements...")
     # Register semantic elements for MCP interaction
@@ -290,8 +291,34 @@ defmodule ScenicWidgets.SideNav do
       )
       when not is_nil(source) do
     {start_x, start_y} = scene.assigns.state.drag_start
-    dragging = scene.assigns.state.dragging or abs(x - start_x) + abs(y - start_y) >= 6
-    {:noreply, assign(scene, state: %{scene.assigns.state | dragging: dragging})}
+    state = scene.assigns.state
+    dragging = state.dragging or abs(x - start_x) + abs(y - start_y) >= 6
+
+    {drag_target, drop_valid} =
+      if dragging do
+        case State.hit_test(state, {x, y}) do
+          {target_id, _} ->
+            target = Item.find_by_id(state.tree, target_id)
+
+            valid =
+              target && Item.get_type(target) == :group &&
+                Enum.all?(state.selected_ids, fn source ->
+                  source != target_id and
+                    not descendant_path?(target_id, source)
+                end)
+
+            {target_id, valid}
+
+          nil ->
+            {nil, false}
+        end
+      else
+        {nil, false}
+      end
+
+    new_state = %{state | dragging: dragging, drag_target: drag_target, drop_valid: drop_valid}
+    graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+    {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
   end
 
   def handle_input(
@@ -313,9 +340,11 @@ defmodule ScenicWidgets.SideNav do
 
           if target && Item.get_type(target) == :group &&
                not MapSet.member?(state.selected_ids, target_id) do
+            paths = MapSet.to_list(state.selected_ids)
+
             send_parent_event(
               scene,
-              {:sidebar, :move_requested, MapSet.to_list(state.selected_ids), target_id}
+              {:sidebar, :move_requested, paths, target_id}
             )
           end
 
@@ -338,12 +367,22 @@ defmodule ScenicWidgets.SideNav do
         state
       end
 
+    pending_path_moves =
+      if state.dragging and state.drop_valid do
+        Enum.map(state.selected_ids, &{&1, Path.join(state.drag_target, Path.basename(&1))})
+      else
+        state.pending_path_moves
+      end
+
     new_state = %{
       selected_state
       | drag_source: nil,
         drag_start: nil,
         drag_mods: [],
-        dragging: false
+        dragging: false,
+        drag_target: nil,
+        drop_valid: false,
+        pending_path_moves: pending_path_moves
     }
 
     graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
@@ -359,9 +398,9 @@ defmodule ScenicWidgets.SideNav do
       ) do
     %{frame: frame} = scene.assigns.state
     left = min(menu_x, max(frame.size.width - 150 - 4, 4))
-    top = min(menu_y, max(frame.size.height - 30 - 4, 4))
+    top = min(menu_y, max(frame.size.height - 60 - 4, 4))
 
-    if x >= left and x <= left + 150 and y >= top and y <= top + 30 do
+    if x >= left and x <= left + 150 and y >= top and y <= top + 60 do
       {:noreply, scene}
     else
       close_context_menu(scene)
@@ -474,7 +513,27 @@ defmodule ScenicWidgets.SideNav do
 
     new_state = %{
       selected_state
-      | context_menu: %{x: x, y: y},
+      | context_menu: %{x: x, y: y, item_id: item_id},
+        focused: true
+    }
+
+    graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+    {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
+  end
+
+  def handle_input(
+        {:cursor_button, {:btn_left, 1, _mods, _coords}},
+        {:context_action, :rename},
+        scene
+      ) do
+    state = scene.assigns.state
+    item_id = state.context_menu.item_id
+
+    new_state = %{
+      state
+      | context_menu: nil,
+        renaming_id: item_id,
+        rename_value: Path.basename(item_id),
         focused: true
     }
 
@@ -793,6 +852,51 @@ defmodule ScenicWidgets.SideNav do
     close_context_menu(scene)
   end
 
+  def handle_input(
+        {:key, {:key_enter, 1, _}},
+        _context,
+        %{assigns: %{state: %State{renaming_id: id}}} = scene
+      )
+      when not is_nil(id) do
+    state = scene.assigns.state
+    value = String.trim(state.rename_value)
+
+    if value != "" and value != Path.basename(id) do
+      send_parent_event(scene, {:sidebar, :rename_requested, id, value})
+    end
+
+    finish_rename(scene)
+  end
+
+  def handle_input(
+        {:key, {:key_esc, 1, _}},
+        _context,
+        %{assigns: %{state: %State{renaming_id: id}}} = scene
+      )
+      when not is_nil(id) do
+    finish_rename(scene)
+  end
+
+  def handle_input(
+        {:key, {:key_backspace, 1, _}},
+        _context,
+        %{assigns: %{state: %State{renaming_id: id}}} = scene
+      )
+      when not is_nil(id) do
+    state = scene.assigns.state
+    value = String.slice(state.rename_value, 0, max(String.length(state.rename_value) - 1, 0))
+    update_rename(scene, value)
+  end
+
+  def handle_input(
+        {:codepoint, {codepoint, _mods}},
+        _context,
+        %{assigns: %{state: %State{renaming_id: id}}} = scene
+      )
+      when not is_nil(id) and is_binary(codepoint) do
+    update_rename(scene, scene.assigns.state.rename_value <> codepoint)
+  end
+
   def handle_input({:key, _}, _context, %{assigns: %{state: %State{focused: false}}} = scene) do
     {:noreply, scene}
   end
@@ -881,6 +985,25 @@ defmodule ScenicWidgets.SideNav do
     new_state = %{state | context_menu: nil}
     graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
     {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
+  end
+
+  defp update_rename(scene, value) do
+    state = scene.assigns.state
+    new_state = %{state | rename_value: value}
+    graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+    {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
+  end
+
+  defp finish_rename(scene) do
+    state = scene.assigns.state
+    new_state = %{state | renaming_id: nil, rename_value: ""}
+    graph = Renderizer.update_render(scene.assigns.graph, state, new_state)
+    {:noreply, scene |> assign(state: new_state, graph: graph) |> push_graph(graph)}
+  end
+
+  defp descendant_path?(candidate, directory) do
+    relative = Path.relative_to(candidate, directory)
+    relative != candidate and relative != "." and not String.starts_with?(relative, "..")
   end
 
   # Register semantic elements for MCP interaction

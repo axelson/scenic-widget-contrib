@@ -86,7 +86,9 @@ defmodule ScenicWidgets.SideNav.Api do
       |> MapSet.new()
 
     # Keep only expanded IDs that still exist
-    new_expanded = MapSet.intersection(state.expanded, new_ids)
+    remap = fn id -> remap_path(id, state.pending_path_moves) end
+    remapped_expanded = MapSet.new(state.expanded, remap)
+    new_expanded = MapSet.intersection(remapped_expanded, new_ids)
 
     # Recalculate bounds
     new_bounds = State.calculate_item_bounds(new_tree, state.theme, new_expanded)
@@ -103,12 +105,16 @@ defmodule ScenicWidgets.SideNav.Api do
       |> update_content_size(content_width, content_height)
       |> State.sync_scrollbar_visibility()
 
-    active_id = if MapSet.member?(new_ids, state.active_id), do: state.active_id
-    focused_id = if MapSet.member?(new_ids, state.focused_id), do: state.focused_id
-    selected_ids = MapSet.intersection(state.selected_ids, new_ids)
+    active_id = remap.(state.active_id)
+    active_id = if MapSet.member?(new_ids, active_id), do: active_id
+    focused_id = remap.(state.focused_id)
+    focused_id = if MapSet.member?(new_ids, focused_id), do: focused_id
+    selected_ids = state.selected_ids |> MapSet.new(remap) |> MapSet.intersection(new_ids)
 
     selection_anchor =
-      if MapSet.member?(new_ids, state.selection_anchor), do: state.selection_anchor
+      anchor = remap.(state.selection_anchor)
+
+    if MapSet.member?(new_ids, anchor), do: anchor
 
     %{
       state
@@ -119,8 +125,31 @@ defmodule ScenicWidgets.SideNav.Api do
         active_id: active_id,
         focused_id: focused_id,
         selected_ids: selected_ids,
-        selection_anchor: selection_anchor
+        selection_anchor: selection_anchor,
+        pending_path_moves: []
     }
+  end
+
+  defp remap_path(nil, _moves), do: nil
+
+  defp remap_path(path, moves) when is_binary(path) do
+    Enum.find_value(moves, path, fn {source, destination} ->
+      cond do
+        path == source ->
+          destination
+
+        descendant_path?(path, source) ->
+          Path.join(destination, Path.relative_to(path, source))
+
+        true ->
+          nil
+      end
+    end)
+  end
+
+  defp descendant_path?(candidate, directory) do
+    relative = Path.relative_to(candidate, directory)
+    relative != candidate and relative != "." and not String.starts_with?(relative, "..")
   end
 
   @doc """

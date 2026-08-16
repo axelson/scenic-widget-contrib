@@ -74,6 +74,12 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       old_state.context_menu != new_state.context_menu ->
         initial_render(Graph.build(), new_state)
 
+      old_state.drag_target != new_state.drag_target ||
+        old_state.drop_valid != new_state.drop_valid ||
+        old_state.renaming_id != new_state.renaming_id ||
+          old_state.rename_value != new_state.rename_value ->
+        initial_render(Graph.build(), new_state)
+
       # Scroll changed - use efficient transform update from Widgex.Scrollable
       scroll_changed?(old_state.scroll, new_state.scroll) ->
         graph
@@ -100,8 +106,9 @@ defmodule ScenicWidgets.SideNav.Renderizer do
   defp render_context_menu(graph, %{context_menu: %{x: x, y: y}, frame: frame}) do
     width = 150
     row_height = 30
+    menu_height = row_height * 2
     left = min(x, max(frame.size.width - width - 4, 4))
-    top = min(y, max(frame.size.height - row_height - 4, 4))
+    top = min(y, max(frame.size.height - menu_height - 4, 4))
 
     Primitives.group(
       graph,
@@ -113,19 +120,30 @@ defmodule ScenicWidgets.SideNav.Renderizer do
           input: [:cursor_button],
           translate: {-left, -top}
         )
-        |> Primitives.rrect({width, row_height, 4},
+        |> Primitives.rrect({width, menu_height, 4},
           fill: {45, 49, 58},
           stroke: {1, {105, 112, 126}}
         )
         |> Primitives.rect({width, row_height},
-          id: {:context_action, :delete},
+          id: {:context_action, :rename},
           fill: :clear,
           input: [:cursor_button, :cursor_pos]
+        )
+        |> Primitives.text("Rename",
+          fill: :white,
+          font_size: 14,
+          translate: {12, 20}
+        )
+        |> Primitives.rect({width, row_height},
+          id: {:context_action, :delete},
+          fill: :clear,
+          input: [:cursor_button, :cursor_pos],
+          translate: {0, row_height}
         )
         |> Primitives.text("Delete…",
           fill: :white,
           font_size: 14,
-          translate: {12, 20}
+          translate: {12, row_height + 20}
         )
       end,
       id: :side_nav_context_menu,
@@ -173,6 +191,7 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       is_selected = MapSet.member?(state.selected_ids, item_id)
       is_focused = state.focused_id == item_id
       is_hovered = Map.get(state, :hovered_id) == item_id
+      is_drop_target = state.drag_target == item_id
       has_children = Item.has_children?(item)
 
       # Row positioning
@@ -191,6 +210,8 @@ defmodule ScenicWidgets.SideNav.Renderizer do
       # Determine colors based on state
       {bg_fill, text_fill} =
         cond do
+          is_drop_target and state.drop_valid -> {{54, 92, 67}, :white}
+          is_drop_target -> {{105, 48, 52}, :white}
           is_active -> {theme.active_bg, theme.text}
           is_selected -> {theme.selection_bg, theme.text}
           is_hovered -> {theme.hover_bg, theme.text}
@@ -257,13 +278,30 @@ defmodule ScenicWidgets.SideNav.Renderizer do
             end
           end)
           # 6. Text label - visual only
-          |> Primitives.text(
-            Item.get_title(item),
-            fill: text_fill,
-            font: theme.font,
-            font_size: theme.font_size,
-            translate: {text_x, v_center + theme.font_size / 3}
-          )
+          |> then(fn g2 ->
+            if state.renaming_id == item_id do
+              g2
+              |> Primitives.rrect({max(row_width - text_x - 6, 20), row_height - 6, 3},
+                fill: {35, 39, 47},
+                stroke: {1, theme.focus_ring},
+                translate: {text_x, 3}
+              )
+              |> Primitives.text(state.rename_value <> "|",
+                fill: :white,
+                font: theme.font,
+                font_size: theme.font_size,
+                translate: {text_x + 5, v_center + theme.font_size / 3}
+              )
+            else
+              Primitives.text(g2, Item.get_title(item),
+                id: String.to_atom("item_text_#{item_id}"),
+                fill: text_fill,
+                font: theme.font,
+                font_size: theme.font_size,
+                translate: {text_x, v_center + theme.font_size / 3}
+              )
+            end
+          end)
           # 7. Focus ring
           |> then(fn g2 ->
             if is_focused do

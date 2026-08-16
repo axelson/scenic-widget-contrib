@@ -103,6 +103,59 @@ defmodule ScenicWidgets.SideNav.StateTest do
     assert ranged.active_id == "file-5"
   end
 
+  test "driver-specific control and shift modifier names build visible selection" do
+    tree =
+      for index <- 1..4 do
+        %Item{id: "file-#{index}", title: "file-#{index}", type: :page}
+      end
+
+    state = State.new(%{frame: Frame.new(pin: {0, 0}, size: {200, 200}), tree: tree})
+    state = State.select(state, "file-1")
+    state = State.select(state, "file-3", [:key_left_control])
+    assert state.selected_ids == MapSet.new(["file-1", "file-3"])
+
+    state = State.select(state, "file-4", [:key_left_shift])
+    assert state.selected_ids == MapSet.new(["file-3", "file-4"])
+  end
+
+  test "tree refresh remaps expanded and selected paths after a directory move" do
+    old_root = "/project/source"
+    destination = "/project/target/source"
+    old_child = Path.join(old_root, "child.txt")
+    new_child = Path.join(destination, "child.txt")
+
+    old_tree = [
+      %Item{
+        id: old_root,
+        title: "source",
+        type: :group,
+        children: [%Item{id: old_child, title: "child.txt", type: :page}]
+      }
+    ]
+
+    state =
+      State.new(%{frame: Frame.new(pin: {0, 0}, size: {250, 200}), tree: old_tree})
+      |> State.toggle_expanded(old_root)
+      |> State.select(old_child)
+
+    state = %{state | pending_path_moves: [{old_root, destination}]}
+
+    new_tree = [
+      %Item{
+        id: destination,
+        title: "source",
+        type: :group,
+        children: [%Item{id: new_child, title: "child.txt", type: :page}]
+      }
+    ]
+
+    refreshed = ScenicWidgets.SideNav.Api.update_tree(state, new_tree)
+    assert MapSet.member?(refreshed.expanded, destination)
+    assert refreshed.selected_ids == MapSet.new([new_child])
+    assert refreshed.selection_anchor == new_child
+    assert refreshed.pending_path_moves == []
+  end
+
   test "active id may arrive before a refreshed tree contains it" do
     state =
       State.new(%{
