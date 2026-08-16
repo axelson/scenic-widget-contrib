@@ -593,8 +593,8 @@ defmodule ScenicWidgets.TextField do
   requested input, and any keystroke or click arriving in that window is
   lost. (Symptom: a character vanishes if you type while toggling a setting.)
 
-  Recognised keys: `:show_line_numbers`, `:show_matching_brace`, `:wrap_mode`, `:tab_width`,
-  `:frame`, `:colors`, `:font`. Unknown keys are ignored.
+  Recognised keys include line numbers, matching braces, current-line/current-column
+  highlights, wrapping, tab width, frame, colors, and font. Unknown keys are ignored.
   """
   @doc """
   Set the "an overlay owns the pointer" flag.
@@ -618,6 +618,8 @@ defmodule ScenicWidgets.TextField do
         [
           :show_line_numbers,
           :show_matching_brace,
+          :highlight_current_line,
+          :highlight_current_column,
           :wrap_mode,
           :tab_width,
           :frame,

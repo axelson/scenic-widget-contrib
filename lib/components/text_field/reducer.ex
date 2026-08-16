@@ -666,6 +666,15 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:newline, :at_cursor}
   end
 
+  # Shift+Tab - remove one indentation unit from the current line.
+  def input_to_buffer_action(
+        %State{focused: true, tab_width: tab_width},
+        {:key, {:key_tab, key_state, mods}}
+      )
+      when key_state > 0 and mods == [:shift] do
+    {:unindent, tab_width}
+  end
+
   # Tab key - insert tab character
   def input_to_buffer_action(%State{focused: true}, {:key, {:key_tab, key_state, _mods}})
       when key_state > 0 do

@@ -27,6 +27,18 @@ defmodule ScenicWidgets.Menu.Model do
     defstruct [:id, enabled?: false]
   end
 
+  defmodule Select do
+    @moduledoc "An inline dropdown selector with a finite set of choices."
+    @enforce_keys [:id, :label, :value, :options]
+    defstruct [:id, :label, :value, :options, :tooltip, expanded?: false, enabled?: true]
+  end
+
+  defmodule Stepper do
+    @moduledoc "A numeric menu control with reusable decrement and increment buttons."
+    @enforce_keys [:id, :label, :value, :min, :max]
+    defstruct [:id, :label, :value, :min, :max, :tooltip, step: 1, enabled?: true]
+  end
+
   defmodule Submenu do
     @enforce_keys [:id, :label, :rows]
     defstruct [:id, :label, :rows, :tooltip, enabled?: true]
@@ -66,7 +78,10 @@ defmodule ScenicWidgets.Menu.Model do
   defp valid_row?(%Slider{min: min, max: max, value: value, step: step}),
     do: is_number(value) and is_number(step) and step > 0 and value >= min and value <= max
 
-  defp valid_row?(%module{}) when module in [Item, Toggle, Radio, Section, Divider], do: true
+  defp valid_row?(%module{})
+       when module in [Item, Toggle, Radio, Section, Divider, Select, Stepper],
+       do: true
+
   defp valid_row?(row) when row in [:divider, :space], do: true
   defp valid_row?(_), do: false
 end

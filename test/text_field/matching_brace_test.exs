@@ -44,4 +44,24 @@ defmodule ScenicWidgets.TextField.MatchingBraceTest do
     assert Primitive.get_style(Graph.get!(hidden, :matching_brace_current), :hidden)
     assert Primitive.get_style(Graph.get!(hidden, :matching_brace_partner), :hidden)
   end
+
+  test "current-line and current-column guides are independently configurable" do
+    state =
+      State.new(%{
+        frame: Frame.new(pin: {0, 0}, size: {400, 200}),
+        initial_text: "alpha\nbeta",
+        initial_cursor: {2, 3},
+        highlight_current_line: true,
+        highlight_current_column: false,
+        font: %{
+          name: :ibm_plex_mono,
+          size: 16,
+          path: Path.expand("../../assets/fonts/IBMPlexMono-Regular.ttf", __DIR__)
+        }
+      })
+
+    graph = Renderer.initial_render(Graph.build(), state)
+    refute Primitive.get_style(Graph.get!(graph, :current_line_highlight), :hidden)
+    assert Primitive.get_style(Graph.get!(graph, :current_column_highlight), :hidden)
+  end
 end

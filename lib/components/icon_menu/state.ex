@@ -390,6 +390,7 @@ defmodule ScenicWidgets.IconMenu.State do
   def get_item_label(%{label: label}), do: label
 
   def display_label(%ScenicWidgets.Menu.Model.Divider{}), do: ""
+  def display_label(%ScenicWidgets.Menu.Model.Select{label: label}), do: label
 
   def display_label(%ScenicWidgets.Menu.Model.Slider{label: label, value: value}),
     do: "#{label}: #{value}"
@@ -409,6 +410,9 @@ defmodule ScenicWidgets.IconMenu.State do
 
   def item_height(%ScenicWidgets.Menu.Model.Divider{}, theme),
     do: Map.get(theme, :dropdown_divider_height, 13)
+
+  def item_height(%ScenicWidgets.Menu.Model.Select{expanded?: true, options: options}, theme),
+    do: theme.dropdown_item_height * (length(options) + 1)
 
   def item_height(_item, theme), do: theme.dropdown_item_height
 

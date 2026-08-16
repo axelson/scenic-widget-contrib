@@ -67,6 +67,7 @@ defmodule ScenicWidgets.TextField.Renderer do
       |> update_selection_if_changed(old_state, new_state)
       |> update_search_matches_if_changed(old_state, new_state)
       |> update_matching_braces_if_changed(old_state, new_state)
+      |> update_cursor_guides_if_changed(old_state, new_state)
       |> update_cursor_if_changed(old_state, new_state)
       |> update_scrollbars_if_changed(old_state, new_state)
     end
@@ -279,6 +280,7 @@ defmodule ScenicWidgets.TextField.Renderer do
       graph,
       fn outer_g ->
         outer_g
+        |> render_cursor_guides(state, content_width, frame_height, text_padding, line_height)
         # Inner group that scrolls both directions
         |> Primitives.group(
           fn inner_g ->
@@ -317,6 +319,36 @@ defmodule ScenicWidgets.TextField.Renderer do
         hidden: hidden?
       )
     end)
+  end
+
+  defp render_cursor_guides(graph, state, width, height, padding, line_height) do
+    {x, y} = cursor_guide_position(state, padding, line_height)
+    color = {255, 215, 0, 30}
+
+    graph
+    |> Primitives.rect({width, line_height},
+      id: :current_line_highlight,
+      translate: {0, y},
+      fill: color,
+      hidden: not state.highlight_current_line
+    )
+    |> Primitives.rect({max(1, State.char_width(state)), height},
+      id: :current_column_highlight,
+      translate: {x, 0},
+      fill: color,
+      hidden: not state.highlight_current_column
+    )
+  end
+
+  defp cursor_guide_position(state, padding, line_height) do
+    {display_line, display_col} = source_to_display_cursor(state, state.cursor)
+    display_text = Enum.at(wrap_lines(state), display_line - 1, "")
+    before = String.slice(display_text, 0, max(0, display_col - 1))
+
+    {
+      padding + State.string_width(state, before) - state.scroll.offset_x,
+      (display_line - 1) * line_height + @multiline_row_y_offset - state.scroll.offset_y
+    }
   end
 
   defp matching_brace_geometries(%State{show_matching_brace: false}, _padding, _height),
@@ -1235,6 +1267,22 @@ defmodule ScenicWidgets.TextField.Renderer do
           |> Scenic.Primitive.put(size)
           |> Primitives.update_opts(translate: translate, hidden: hidden?)
         end)
+      end)
+    else
+      graph
+    end
+  end
+
+  defp update_cursor_guides_if_changed(graph, old_state, new_state) do
+    if old_state.cursor != new_state.cursor or scroll_changed?(old_state.scroll, new_state.scroll) do
+      {x, y} = cursor_guide_position(new_state, 10, State.line_height(new_state))
+
+      graph
+      |> Graph.modify(:current_line_highlight, fn primitive ->
+        Primitives.update_opts(primitive, translate: {0, y})
+      end)
+      |> Graph.modify(:current_column_highlight, fn primitive ->
+        Primitives.update_opts(primitive, translate: {x, 0})
       end)
     else
       graph

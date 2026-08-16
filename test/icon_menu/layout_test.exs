@@ -3,7 +3,8 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
 
   alias ScenicWidgets.IconMenu.State
   alias ScenicWidgets.IconMenu.Renderer
-  alias ScenicWidgets.Menu.Model.{Divider, Item, Slider}
+  alias ScenicWidgets.Menu.Model.{Divider, Item, Select, Slider, Stepper}
+  alias ScenicWidgets.IconMenu.Reducer
   alias Scenic.{Graph, Primitive}
   alias Widgex.Frame
 
@@ -120,6 +121,36 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
     graph = Renderer.initial_render(Graph.build(), %{state | active_menu: :file})
     assert Graph.get!(graph, {:menu_divider, :display_divider})
     assert Graph.get(graph, {:item_text, :display_divider}) == []
+  end
+
+  test "select rows expand and emit the chosen value" do
+    select = %Select{id: :fold_level, label: "Set Fold Level", value: 1, options: [1, 2, 3, 4]}
+    state = %{state([select]) | active_menu: :file}
+    bounds = state.dropdown_bounds.file.items.fold_level
+
+    assert {:noop, expanded} = Reducer.handle_click(state, {bounds.x + 20, bounds.y + 10})
+    assert State.find_item(expanded, :fold_level).expanded?
+    expanded_bounds = expanded.dropdown_bounds.file.items.fold_level
+
+    assert {:menu_value_changed, :fold_level, 3, collapsed} =
+             Reducer.handle_click(expanded, {
+               expanded_bounds.x + 20,
+               expanded_bounds.y + expanded.theme.dropdown_item_height * 3 + 1
+             })
+
+    assert State.find_item(collapsed, :fold_level).value == 3
+    refute State.find_item(collapsed, :fold_level).expanded?
+  end
+
+  test "stepper buttons clamp and emit numeric changes" do
+    stepper = %Stepper{id: :zoom, label: "Zoom", value: 100, min: 50, max: 200, step: 10}
+    state = %{state([stepper]) | active_menu: :file}
+    bounds = state.dropdown_bounds.file.items.zoom
+
+    assert {:menu_value_changed, :zoom, 110, updated} =
+             Reducer.handle_click(state, {bounds.x + bounds.width - 5, bounds.y + 10})
+
+    assert State.find_item(updated, :zoom).value == 110
   end
 
   test "hovered sliders invert their controls against the blue row highlight" do

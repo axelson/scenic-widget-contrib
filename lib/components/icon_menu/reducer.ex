@@ -146,6 +146,34 @@ defmodule ScenicWidgets.IconMenu.Reducer do
     update_slider(state, item_id, {x, 0}, true)
   end
 
+  defp activate_item(state, %ScenicWidgets.Menu.Model.Select{} = select, item_id, {_x, y}) do
+    bounds = state.dropdown_bounds[state.active_menu].items[item_id]
+    row_height = state.theme.dropdown_item_height
+
+    if select.expanded? and y >= bounds.y + row_height do
+      option = Enum.at(select.options, floor((y - bounds.y - row_height) / row_height))
+
+      if is_nil(option) do
+        {:noop, state}
+      else
+        updated = %{select | value: option, expanded?: false}
+        {:menu_value_changed, item_id, option, replace_and_recalculate(state, item_id, updated)}
+      end
+    else
+      updated = %{select | expanded?: not select.expanded?}
+      {:noop, replace_and_recalculate(state, item_id, updated)}
+    end
+  end
+
+  defp activate_item(state, %ScenicWidgets.Menu.Model.Stepper{} = stepper, item_id, {x, _y}) do
+    bounds = state.dropdown_bounds[state.active_menu].items[item_id]
+    local_x = x - bounds.x
+    delta = if local_x >= bounds.width - 38, do: stepper.step, else: -stepper.step
+    value = min(stepper.max, max(stepper.min, stepper.value + delta))
+    updated = %{stepper | value: value}
+    {:menu_value_changed, item_id, value, replace_and_recalculate(state, item_id, updated)}
+  end
+
   defp activate_item(
          state,
          %ScenicWidgets.Menu.Model.Toggle{checked?: checked} = toggle,
@@ -209,6 +237,11 @@ defmodule ScenicWidgets.IconMenu.Reducer do
       menu ->
         menu
     end)
+  end
+
+  defp replace_and_recalculate(state, item_id, updated) do
+    state = %{state | menus: replace_active_item(state, item_id, updated), hovered_item: item_id}
+    %{state | dropdown_bounds: State.calculate_dropdown_bounds(state)}
   end
 
   @doc """

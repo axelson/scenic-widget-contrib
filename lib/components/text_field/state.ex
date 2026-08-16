@@ -50,6 +50,8 @@ defmodule ScenicWidgets.TextField.State do
     # Boolean
     :show_line_numbers,
     :show_matching_brace,
+    :highlight_current_line,
+    :highlight_current_column,
     # Pixels (default 40)
     :line_number_width,
     # Number of spaces per tab (default 4)
@@ -226,6 +228,8 @@ defmodule ScenicWidgets.TextField.State do
       input_mode: Map.get(data, :input_mode, :direct),
       show_line_numbers: show_line_numbers,
       show_matching_brace: Map.get(data, :show_matching_brace, true),
+      highlight_current_line: Map.get(data, :highlight_current_line, false),
+      highlight_current_column: Map.get(data, :highlight_current_column, false),
       line_number_width: line_number_width,
       tab_width: Map.get(data, :tab_width, 4),
       font: font,

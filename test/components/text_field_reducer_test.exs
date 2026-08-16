@@ -26,4 +26,12 @@ defmodule ScenicWidgets.TextField.ReducerTest do
     assert nil == Reducer.input_to_buffer_action(state, {:key, {:key_u, 1, [:ctrl]}})
     assert nil == Reducer.input_to_buffer_action(state, {:key, {:key_r, 1, [:ctrl]}})
   end
+
+  test "Shift+Tab emits unindent using the configured tab stop" do
+    state = %State{focused: true, tab_width: 6}
+    assert {:unindent, 6} = Reducer.input_to_buffer_action(state, {:key, {:key_tab, 1, [:shift]}})
+
+    assert {:insert, "\t", :at_cursor} =
+             Reducer.input_to_buffer_action(state, {:key, {:key_tab, 1, []}})
+  end
 end

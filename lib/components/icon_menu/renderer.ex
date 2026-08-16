@@ -437,69 +437,183 @@ defmodule ScenicWidgets.IconMenu.Renderer do
                 g
               end
 
-            if match?(%ScenicWidgets.Menu.Model.Slider{}, item) do
-              render_slider(
-                g,
-                item,
-                dropdown.width - 2 * padding,
-                text_color,
-                is_hovered,
-                theme
-              )
-            else
-              text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
-              shortcut_right = dropdown.width - 2 * padding - 8
-              column_gap = Map.get(theme, :dropdown_column_gap, 24)
-              available_width = shortcut_right - text_x
-              measured_shortcut_width = measure_width(shortcut || "", theme)
+            cond do
+              match?(%ScenicWidgets.Menu.Model.Select{}, item) ->
+                render_select(g, item, dropdown.width - 2 * padding, text_color, theme)
 
-              shortcut_width =
-                if shortcut do
-                  min(measured_shortcut_width, max(40, available_width * 0.55))
+              match?(%ScenicWidgets.Menu.Model.Stepper{}, item) ->
+                render_stepper(g, item, dropdown.width - 2 * padding, text_color, theme)
+
+              match?(%ScenicWidgets.Menu.Model.Slider{}, item) ->
+                render_slider(
+                  g,
+                  item,
+                  dropdown.width - 2 * padding,
+                  text_color,
+                  is_hovered,
+                  theme
+                )
+
+              true ->
+                text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
+                shortcut_right = dropdown.width - 2 * padding - 8
+                column_gap = Map.get(theme, :dropdown_column_gap, 24)
+                available_width = shortcut_right - text_x
+                measured_shortcut_width = measure_width(shortcut || "", theme)
+
+                shortcut_width =
+                  if shortcut do
+                    min(measured_shortcut_width, max(40, available_width * 0.55))
+                  else
+                    0
+                  end
+
+                label_max_width =
+                  max(
+                    0,
+                    shortcut_right - text_x -
+                      if(shortcut, do: shortcut_width + column_gap, else: 0)
+                  )
+
+                display_label = truncate(label, label_max_width, theme)
+                display_shortcut = shortcut && truncate(shortcut, shortcut_width, theme)
+
+                g =
+                  Primitives.text(g, display_label,
+                    id: {:item_text, item_id},
+                    fill: text_color,
+                    font: theme.font,
+                    font_size: theme.dropdown_font_size,
+                    translate:
+                      {text_x, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
+                  )
+
+                if display_shortcut do
+                  Primitives.text(g, display_shortcut,
+                    id: {:item_shortcut, item_id},
+                    fill: text_color,
+                    font: theme.font,
+                    font_size: theme.dropdown_font_size,
+                    text_align: :right,
+                    translate: {
+                      shortcut_right,
+                      theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3
+                    }
+                  )
                 else
-                  0
+                  g
                 end
-
-              label_max_width =
-                max(
-                  0,
-                  shortcut_right - text_x - if(shortcut, do: shortcut_width + column_gap, else: 0)
-                )
-
-              display_label = truncate(label, label_max_width, theme)
-              display_shortcut = shortcut && truncate(shortcut, shortcut_width, theme)
-
-              g =
-                Primitives.text(g, display_label,
-                  id: {:item_text, item_id},
-                  fill: text_color,
-                  font: theme.font,
-                  font_size: theme.dropdown_font_size,
-                  translate:
-                    {text_x, theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3}
-                )
-
-              if display_shortcut do
-                Primitives.text(g, display_shortcut,
-                  id: {:item_shortcut, item_id},
-                  fill: text_color,
-                  font: theme.font,
-                  font_size: theme.dropdown_font_size,
-                  text_align: :right,
-                  translate: {
-                    shortcut_right,
-                    theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3
-                  }
-                )
-              else
-                g
-              end
             end
           end,
           id: {:dropdown_item, item_id},
           translate: {item_x, item_y}
         )
       end
+    end)
+  end
+
+  defp render_stepper(graph, stepper, row_width, text_color, theme) do
+    baseline = theme.dropdown_item_height / 2 + theme.dropdown_font_size / 3
+    controls_x = row_width - 82
+
+    graph
+    |> Primitives.text(stepper.label,
+      id: {:stepper_label, stepper.id},
+      fill: text_color,
+      font: theme.font,
+      font_size: theme.dropdown_font_size,
+      translate: {8, baseline}
+    )
+    |> Primitives.rrect({22, 20, 3},
+      id: {:stepper_minus_bg, stepper.id},
+      fill: :clear,
+      stroke: {1, theme.dropdown_border},
+      translate: {controls_x, 4}
+    )
+    |> Primitives.text("−",
+      id: {:stepper_minus, stepper.id},
+      fill: text_color,
+      font: theme.font,
+      font_size: theme.dropdown_font_size,
+      text_align: :center,
+      translate: {controls_x + 11, baseline}
+    )
+    |> Primitives.text("#{stepper.value}%",
+      id: {:stepper_value, stepper.id},
+      fill: text_color,
+      font: theme.font,
+      font_size: theme.dropdown_font_size,
+      text_align: :center,
+      translate: {controls_x + 41, baseline}
+    )
+    |> Primitives.rrect({22, 20, 3},
+      id: {:stepper_plus_bg, stepper.id},
+      fill: :clear,
+      stroke: {1, theme.dropdown_border},
+      translate: {controls_x + 60, 4}
+    )
+    |> Primitives.text("+",
+      id: {:stepper_plus, stepper.id},
+      fill: text_color,
+      font: theme.font,
+      font_size: theme.dropdown_font_size,
+      text_align: :center,
+      translate: {controls_x + 71, baseline}
+    )
+  end
+
+  defp render_select(graph, select, row_width, text_color, theme) do
+    row_height = theme.dropdown_item_height
+    box_width = 52
+    box_x = row_width - box_width - 8
+    baseline = row_height / 2 + theme.dropdown_font_size / 3
+
+    graph
+    |> Primitives.text(select.label,
+      id: {:select_label, select.id},
+      fill: text_color,
+      font: theme.font,
+      font_size: theme.dropdown_font_size,
+      translate: {8, baseline}
+    )
+    |> Primitives.rrect({box_width, row_height - 8, 3},
+      id: {:select_box, select.id},
+      fill: :clear,
+      stroke: {1, theme.dropdown_border},
+      translate: {box_x, 4}
+    )
+    |> Primitives.text("#{select.value} ▾",
+      id: {:select_value, select.id},
+      fill: text_color,
+      font: theme.font,
+      font_size: theme.dropdown_font_size,
+      text_align: :center,
+      translate: {box_x + box_width / 2, baseline}
+    )
+    |> render_select_options(select, row_width, row_height, text_color, theme)
+  end
+
+  defp render_select_options(graph, %{expanded?: false}, _width, _height, _color, _theme),
+    do: graph
+
+  defp render_select_options(graph, select, row_width, row_height, text_color, theme) do
+    Enum.with_index(select.options)
+    |> Enum.reduce(graph, fn {value, index}, acc ->
+      y = row_height * (index + 1)
+
+      acc
+      |> Primitives.rect({row_width - 16, row_height},
+        id: {:select_option_bg, select.id, value},
+        fill: if(value == select.value, do: theme.item_hover_bg, else: theme.dropdown_bg),
+        translate: {8, y}
+      )
+      |> Primitives.text(to_string(value),
+        id: {:select_option, select.id, value},
+        fill: text_color,
+        font: theme.font,
+        font_size: theme.dropdown_font_size,
+        translate: {16, y + row_height / 2 + theme.dropdown_font_size / 3}
+      )
     end)
   end
 
