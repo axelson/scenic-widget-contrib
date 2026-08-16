@@ -368,7 +368,14 @@ defmodule ScenicWidgets.IconMenu.Renderer do
             end
 
           if match?(%ScenicWidgets.Menu.Model.Slider{}, item) do
-            render_slider(g, item, dropdown.width - 2 * padding, text_color, theme)
+            render_slider(
+              g,
+              item,
+              dropdown.width - 2 * padding,
+              text_color,
+              is_hovered,
+              theme
+            )
           else
             text_x = if has_any_toggle_items?(items), do: checkmark_width, else: 8
             shortcut_right = dropdown.width - 2 * padding - 8
@@ -424,13 +431,28 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     end)
   end
 
-  defp render_slider(graph, slider, row_width, text_color, theme) do
+  defp render_slider(graph, slider, row_width, text_color, hovered?, theme) do
     track_x = 10
     track_width = max(1, row_width - 20)
     track_y = Map.get(theme, :dropdown_slider_height, 52) - 13
     ratio = (slider.value - slider.min) / max(slider.max - slider.min, 1)
     thumb_x = track_x + ratio * track_width
     font_y = theme.dropdown_font_size + 5
+
+    {track_color, fill_color, thumb_color} =
+      if hovered? do
+        {
+          Map.get(theme, :item_hover_text_color, {255, 255, 255}),
+          Map.get(theme, :dropdown_bg, {50, 50, 50}),
+          Map.get(theme, :dropdown_bg, {50, 50, 50})
+        }
+      else
+        {
+          Map.get(theme, :dropdown_border, {70, 70, 70}),
+          Map.get(theme, :item_hover_bg, {0, 122, 204}),
+          text_color
+        }
+      end
 
     graph
     |> Primitives.text(slider.label,
@@ -450,17 +472,17 @@ defmodule ScenicWidgets.IconMenu.Renderer do
     )
     |> Primitives.rrect({track_width, 4, 2},
       id: {:slider_track, slider.id},
-      fill: Map.get(theme, :dropdown_border, {70, 70, 70}),
+      fill: track_color,
       translate: {track_x, track_y}
     )
     |> Primitives.rrect({max(0, thumb_x - track_x), 4, 2},
       id: {:slider_fill, slider.id},
-      fill: Map.get(theme, :item_hover_bg, {0, 122, 204}),
+      fill: fill_color,
       translate: {track_x, track_y}
     )
     |> Primitives.circle(6,
       id: {:slider_thumb, slider.id},
-      fill: text_color,
+      fill: thumb_color,
       translate: {thumb_x, track_y + 2}
     )
   end

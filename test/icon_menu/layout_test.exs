@@ -104,4 +104,28 @@ defmodule ScenicWidgets.IconMenu.LayoutTest do
     assert Graph.get!(graph, {:slider_track, :tab_width})
     assert Graph.get!(graph, {:slider_thumb, :tab_width})
   end
+
+  test "hovered sliders invert their controls against the blue row highlight" do
+    slider = %Slider{id: :tab_width, label: "Tab Stops", value: 4, min: 2, max: 12}
+    state = state([slider])
+
+    normal = Renderer.initial_render(Graph.build(), %{state | active_menu: :file})
+
+    hovered =
+      Renderer.initial_render(Graph.build(), %{
+        state
+        | active_menu: :file,
+          hovered_item: :tab_width
+      })
+
+    normal_fill = Graph.get!(normal, {:slider_fill, :tab_width})
+    hovered_fill = Graph.get!(hovered, {:slider_fill, :tab_width})
+    hovered_track = Graph.get!(hovered, {:slider_track, :tab_width})
+
+    refute Primitive.get_style(normal_fill, :fill) == Primitive.get_style(hovered_fill, :fill)
+    assert Primitive.get_style(hovered_fill, :fill) == {:color, {:color_rgba, {50, 50, 50, 255}}}
+
+    assert Primitive.get_style(hovered_track, :fill) ==
+             {:color, {:color_rgba, {255, 255, 255, 255}}}
+  end
 end
