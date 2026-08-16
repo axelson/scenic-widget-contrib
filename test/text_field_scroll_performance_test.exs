@@ -5,14 +5,14 @@ defmodule ScenicWidgets.TextFieldScrollPerformanceTest do
   alias ScenicWidgets.TextField.{Reducer, Renderer, State}
   alias Widgex.Frame
 
-  @scroll_events 120
+  @scroll_events 1_000
 
   defp ethics_sized_text do
     paragraph =
       "However, whatsoever perfection is possessed by substance is due to no external cause; " <>
         "wherefore existence must arise solely from its own nature and necessity."
 
-    1..340
+    1..1_200
     |> Enum.map_join("\n", fn line -> "#{line}. #{paragraph}" end)
   end
 
@@ -31,6 +31,7 @@ defmodule ScenicWidgets.TextFieldScrollPerformanceTest do
         path: Path.expand("../assets/fonts/IBMPlexMono-Regular.ttf", __DIR__)
       }
     })
+    |> Renderer.prepare_display_cache()
   end
 
   defp scroll_workload(wrap_mode) do
@@ -55,14 +56,30 @@ defmodule ScenicWidgets.TextFieldScrollPerformanceTest do
   test "large unwrapped documents retain their render window across wheel events" do
     {micros, rebuilds} = scroll_workload(:none)
 
-    assert rebuilds <= 6
-    assert micros < 750_000
+    assert rebuilds <= 12
+    assert micros < 1_500_000
   end
 
   test "large word-wrapped documents do not rewrap on every wheel event" do
     {micros, rebuilds} = scroll_workload(:word)
 
-    assert rebuilds <= 6
-    assert micros < 1_500_000
+    assert rebuilds <= 24
+    assert micros < 3_000_000
+  end
+
+  test "wheel scrolling reuses the exact wrapped projection" do
+    initial = state(:word)
+
+    final =
+      Enum.reduce(1..@scroll_events, initial, fn _, current ->
+        {:noop, next} =
+          Reducer.process_input(current, {:cursor_scroll, {{0, -12}, {500, 300}}})
+
+        Renderer.prepare_display_cache(next)
+      end)
+
+    assert final.display_lines === initial.display_lines
+    assert final.display_line_mapping === initial.display_line_mapping
+    assert final.display_cache_key === initial.display_cache_key
   end
 end

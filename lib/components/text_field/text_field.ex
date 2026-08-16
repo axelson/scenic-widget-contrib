@@ -220,6 +220,10 @@ defmodule ScenicWidgets.TextField do
         state
       end
 
+    # Build the expensive folded/wrapped projection once. Wheel events reuse
+    # it; document or layout changes invalidate it through its cache key.
+    state = Renderer.prepare_display_cache(state)
+
     # Render initial graph
     graph = Renderer.initial_render(Graph.build(), state)
 
@@ -649,6 +653,8 @@ defmodule ScenicWidgets.TextField do
       |> Map.put(:render_window, nil)
       |> State.advance_render_window()
 
+    new_state = Renderer.prepare_display_cache(new_state)
+
     graph = Renderer.initial_render(Scenic.Graph.build(), new_state)
 
     scene =
@@ -935,6 +941,8 @@ defmodule ScenicWidgets.TextField do
   # ===== HELPER FUNCTIONS =====
 
   defp update_scene(scene, old_state, new_state) do
+    old_state = Renderer.prepare_display_cache(old_state)
+    new_state = Renderer.prepare_display_cache(new_state)
     graph = Renderer.update_render(scene.assigns.graph, old_state, new_state)
 
     scene =

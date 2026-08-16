@@ -94,6 +94,11 @@ defmodule ScenicWidgets.TextField.State do
     # Buffered display-row window currently materialized in the graph.
     # It advances only when the viewport leaves it, not on every wheel tick.
     :render_window,
+    # Derived folded/wrapped rows. Recomputed only when document/layout inputs
+    # change; scrolling must never project the whole document again.
+    :display_cache_key,
+    :display_lines,
+    :display_line_mapping,
     # MapSet of folded source-line headers (view state)
     :folds,
     # Fold header currently under the pointer in the line-number gutter.
@@ -266,6 +271,9 @@ defmodule ScenicWidgets.TextField.State do
       max_visible_lines: max_visible_lines,
       viewport_buffer_lines: viewport_buffer_lines,
       render_window: {1, max_visible_lines + viewport_buffer_lines},
+      display_cache_key: nil,
+      display_lines: nil,
+      display_line_mapping: nil,
       folds: Map.get(data, :folds, MapSet.new()) |> normalize_folds(),
       fold_hover_line: nil,
 

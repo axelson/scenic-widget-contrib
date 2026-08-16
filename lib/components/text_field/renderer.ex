@@ -49,6 +49,32 @@ defmodule ScenicWidgets.TextField.Renderer do
   end
 
   @doc """
+  Materializes the folded and wrapped display projection when its inputs change.
+
+  This belongs outside the wheel-event hot path: a display projection can be
+  expensive for a large wrapped document, while scrolling changes only which
+  cached rows are visible.
+  """
+  def prepare_display_cache(%State{} = state) do
+    key =
+      {state.lines, state.folds, state.wrap_mode, content_area_width(state), state.font,
+       state.tab_width}
+
+    if state.display_cache_key == key and is_list(state.display_lines) do
+      state
+    else
+      {display_lines, mapping} = build_display_projection(state)
+
+      %{
+        state
+        | display_cache_key: key,
+          display_lines: display_lines,
+          display_line_mapping: mapping
+      }
+    end
+  end
+
+  @doc """
   Update render - intelligently updates only what changed.
   """
   def update_render(graph, old_state, new_state) do
@@ -502,8 +528,8 @@ defmodule ScenicWidgets.TextField.Renderer do
     {first, last} = State.visible_display_range(state, length(display_lines))
 
     display_lines
-    |> Enum.with_index(1)
-    |> Enum.filter(fn {_line, n} -> n >= first and n <= last end)
+    |> Enum.slice(first - 1, max(last - first + 1, 0))
+    |> Enum.with_index(first)
     |> Enum.reduce(graph, fn {line_text, line_num}, g ->
       # Expand tabs and get indent width + trimmed content
       # Scenic renders leading spaces as zero-width, so we position explicitly
@@ -1103,7 +1129,7 @@ defmodule ScenicWidgets.TextField.Renderer do
          %State{lines: new_lines} = new_state
        )
        when old_lines != new_lines do
-    old_display = wrap_lines_from(old_lines, new_state)
+    old_display = wrap_lines(old_state)
     new_display = wrap_lines(new_state)
 
     if length(old_display) != length(new_display) do
@@ -1137,8 +1163,8 @@ defmodule ScenicWidgets.TextField.Renderer do
     frame_height = state.frame.size.height
 
     display_lines
-    |> Enum.with_index(1)
-    |> Enum.filter(fn {_line, n} -> n >= first and n <= last end)
+    |> Enum.slice(first - 1, max(last - first + 1, 0))
+    |> Enum.with_index(first)
     |> Enum.reduce(graph, fn {line_text, line_num}, g ->
       {indent_width, content} = State.expand_tabs_with_indent(state, line_text)
       line_x = x_offset + indent_width
@@ -1527,19 +1553,11 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   # ===== LINE WRAPPING HELPERS =====
 
+  defp wrap_lines(%State{display_lines: lines}) when is_list(lines), do: lines
+
   defp wrap_lines(%State{wrap_mode: wrap_mode} = state) do
     max_width = content_area_width(state)
     lines = visible_source_lines(state) |> Enum.map(fn {_source, text} -> text end)
-
-    case wrap_mode do
-      :word -> Enum.flat_map(lines, &wrap_line(&1, max_width, state))
-      :char -> Enum.flat_map(lines, &wrap_line_by_chars(&1, max_width, state))
-      :none -> lines
-    end
-  end
-
-  defp wrap_lines_from(lines, %State{wrap_mode: wrap_mode} = state) do
-    max_width = content_area_width(state)
 
     case wrap_mode do
       :word -> Enum.flat_map(lines, &wrap_line(&1, max_width, state))
@@ -1560,6 +1578,14 @@ defmodule ScenicWidgets.TextField.Renderer do
   # Returns one entry per DISPLAY line, tracking which source line it came from
   # and whether it's the first display line for that source (to show the line number)
   defp build_line_number_mapping(source_lines, %State{} = state) do
+    if is_list(state.display_line_mapping) and source_lines == state.lines do
+      state.display_line_mapping
+    else
+      build_line_number_mapping_uncached(source_lines, state)
+    end
+  end
+
+  defp build_line_number_mapping_uncached(source_lines, %State{} = state) do
     # We need to wrap each source line individually to track display line counts
     max_width = content_area_width(state)
 
@@ -1590,29 +1616,27 @@ defmodule ScenicWidgets.TextField.Renderer do
     mapping
   end
 
-  # Overload for when called with just display_lines list (from update functions)
-  defp build_line_number_mapping(source_lines, display_lines) when is_list(display_lines) do
-    # Fallback: simple 1:1 mapping when we don't have full state
-    # This is used during updates where we don't have the full state context
-    total_display = length(display_lines)
-    total_source = length(source_lines)
+  defp build_display_projection(%State{} = state) do
+    max_width = content_area_width(state)
 
-    if total_display == total_source do
-      # No wrapping - simple 1:1 mapping
-      Enum.map(1..max(1, total_source), fn n -> {n, true} end)
-    else
-      # Wrapping occurred - create entries for each display line
-      # First N entries (where N = source count) show line numbers
-      # Remaining entries are blank (wrapped continuations)
-      Enum.with_index(1..total_display, 1)
-      |> Enum.map(fn {_display_num, idx} ->
-        if idx <= total_source do
-          {idx, true}
-        else
-          {0, false}
-        end
+    {lines, mapping, _seen} =
+      Enum.reduce(visible_source_lines(state), {[], [], MapSet.new()}, fn
+        {source_num, source_line}, {line_acc, mapping_acc, seen} ->
+          wrapped = wrap_for_mode(source_line, max_width, state)
+          first_source_row? = not MapSet.member?(seen, source_num)
+
+          entries =
+            wrapped
+            |> Enum.with_index()
+            |> Enum.map(fn {_text, index} ->
+              {source_num, first_source_row? and index == 0}
+            end)
+
+          {Enum.reverse(wrapped, line_acc), Enum.reverse(entries, mapping_acc),
+           MapSet.put(seen, source_num)}
       end)
-    end
+
+    {Enum.reverse(lines), Enum.reverse(mapping)}
   end
 
   # Convert source cursor position to display cursor position
