@@ -707,8 +707,10 @@ defmodule ScenicWidgets.SideNav do
 
   # Input coords arrive in the parent's coordinate space — the same space as
   # state.frame's pin for a component placed by a root scene.
-  defp point_in_frame?(%{pin: %{x: px, y: py}, size: %{width: w, height: h}}, x, y) do
-    x >= px and x <= px + w and y >= py and y <= py + h
+  # Requested positional input arrives already transformed into this component's
+  # local coordinates; frame.pin is expressed in the parent scene.
+  defp point_in_frame?(%{size: %{width: w, height: h}}, x, y) do
+    x >= 0 and x <= w and y >= 0 and y <= h
   end
 
   defp start_scrollbar_drag(scene, axis, coords) do

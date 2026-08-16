@@ -340,10 +340,11 @@ defmodule ScenicWidgets.TextField do
     end
   end
 
-  # Input coords from request_input arrive in the parent's coordinate space —
-  # the same space as state.frame's pin for a component placed by a root scene.
-  defp point_in_frame?(%{pin: %{x: px, y: py}, size: %{width: w, height: h}}, x, y) do
-    x >= px and x <= px + w and y >= py and y <= py + h
+  # Scenic's requested positional input is transformed into this child scene's
+  # local coordinate space. frame.pin belongs to the parent layout and must not
+  # be subtracted or included here.
+  defp point_in_frame?(%{size: %{width: w, height: h}}, x, y) do
+    x >= 0 and x <= w and y >= 0 and y <= h
   end
 
   defp do_handle_input(input, scene) do
