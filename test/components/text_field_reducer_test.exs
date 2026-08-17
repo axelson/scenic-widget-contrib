@@ -7,7 +7,7 @@ defmodule ScenicWidgets.TextField.ReducerTest do
     state = %State{focused: true}
 
     for modifier <- [[:ctrl], [:meta], [:super], [:ctrl, :shift]] do
-      assert :ignore = Reducer.input_to_buffer_action(state, {:codepoint, {"s", modifier}})
+      assert nil == Reducer.input_to_buffer_action(state, {:codepoint, {"s", modifier}})
     end
 
     assert {:insert, "é", :at_cursor} =
