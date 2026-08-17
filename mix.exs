@@ -9,10 +9,12 @@ defmodule ScenicWidgets.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
-      preferred_cli_env: [
-        spex: :test
-      ]
+      test_ignore_filters: [~r/_spex\.exs$/]
     ]
+  end
+
+  def cli do
+    [preferred_envs: [spex: :test]]
   end
 
   # Run "mix help compile.app" to learn about applications.
