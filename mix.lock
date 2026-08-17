@@ -25,7 +25,7 @@
   "plug_crypto": {:hex, :plug_crypto, "2.1.1", "19bda8184399cb24afa10be734f84a16ea0a2bc65054e23a62bb10f06bc89491", [:mix], [], "hexpm", "6470bce6ffe41c8bd497612ffde1a7e4af67f36a15eea5f921af71cf3e11247c"},
   "req": {:hex, :req, "0.5.15", "662020efb6ea60b9f0e0fac9be88cd7558b53fe51155a2d9899de594f9906ba9", [:mix], [{:brotli, "~> 0.3.1", [hex: :brotli, repo: "hexpm", optional: true]}, {:ezstd, "~> 1.0", [hex: :ezstd, repo: "hexpm", optional: true]}, {:finch, "~> 0.17", [hex: :finch, repo: "hexpm", optional: false]}, {:jason, "~> 1.0", [hex: :jason, repo: "hexpm", optional: false]}, {:mime, "~> 2.0.6 or ~> 2.1", [hex: :mime, repo: "hexpm", optional: false]}, {:nimble_csv, "~> 1.0", [hex: :nimble_csv, repo: "hexpm", optional: true]}, {:plug, "~> 1.0", [hex: :plug, repo: "hexpm", optional: true]}], "hexpm", "a6513a35fad65467893ced9785457e91693352c70b58bbc045b47e5eb2ef0c53"},
   "scenic": {:git, "https://github.com/JediLuke/scenic.git", "29244592b8261b8cbbed222df804f0bf0d7e9cba", [branch: "main"]},
-  "scenic_driver_local": {:git, "https://github.com/JediLuke/scenic_driver_local.git", "825261acc3edcfc840ff511b405ca7c57a366efd", [branch: "main"]},
+  "scenic_driver_local": {:git, "https://github.com/JediLuke/scenic_driver_local.git", "97d241c464ef7aee7a749a839b3e2df63cdf6a82", [branch: "main"]},
   "scenic_live_reload": {:git, "https://github.com/axelson/scenic_live_reload.git", "404e89478d0698feb2aac22a2e2b44dd0ccd8030", [branch: "main"]},
   "scenic_mcp": {:git, "https://github.com/scenic-contrib/scenic_mcp_experimental.git", "b3e0cb9b1a17dae2b645cb67a75531c503bc960d", [branch: "main"]},
   "sexy_spex": {:git, "https://github.com/JediLuke/spex.git", "e220afce46f1c60dce5edc4a7c23e07f43f1badd", [branch: "main"]},
