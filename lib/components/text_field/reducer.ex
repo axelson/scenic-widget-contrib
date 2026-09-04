@@ -23,12 +23,47 @@ defmodule ScenicWidgets.TextField.Reducer do
   # Double-click threshold in milliseconds
   @double_click_ms 400
 
+  # Modifiers that mark a codepoint as belonging to a keyboard shortcut rather
+  # than to document text, so it must never be inserted. :meta is macOS Command,
+  # :super is the Linux/Windows key. Shift and lock keys are absent on purpose:
+  # they are text modifiers the driver has already folded into the character.
+  @command_mods [:ctrl, :meta, :super]
+
   # ===== DIRECT INPUT PROCESSING =====
 
   @doc """
   Process raw Scenic input events (for direct input mode).
   Uses ScenicEventsDefinitions for key matching and conversion.
   """
+
+  @doc """
+  Make the macOS Command key behave like Ctrl for keyboard shortcuts.
+
+  On macOS Cmd is delivered as the `:meta` modifier, but every editor shortcut
+  (Ctrl+A/C/X/V/S/F/H/G, etc.) matches `[:ctrl]`. Rewriting `:meta` -> `:ctrl` at
+  a single input boundary (the top of `handle_input/3`) makes all of them fire
+  for Cmd without touching any individual shortcut clause, and keeps working for
+  shortcuts added later.
+
+  `macos?` is passed in (the caller supplies its compile-time OS check) so this
+  stays a pure, platform-independent function. When false — Linux/Windows, where
+  `:meta` is the Super/Windows key — the input is returned unchanged so those
+  keys never trigger editor shortcuts. The rewrite is also skipped when `:ctrl`
+  is already present (a genuine Ctrl chord is never altered) and it preserves any
+  other modifiers (e.g. Cmd+Shift+Z -> `[:ctrl, :shift]`) so combined chords
+  still match. Non-key events pass through untouched.
+  """
+  def normalize_command_key(input, macos?)
+
+  def normalize_command_key({:key, {key, action, mods}} = input, true) when is_list(mods) do
+    if :meta in mods and :ctrl not in mods do
+      {:key, {key, action, [:ctrl | List.delete(mods, :meta)]}}
+    else
+      input
+    end
+  end
+
+  def normalize_command_key(input, _macos?), do: input
 
   # ===== TEXT INPUT - Codepoint events ONLY =====
 
@@ -56,13 +91,23 @@ defmodule ScenicWidgets.TextField.Reducer do
     process_input_codepoint(state, input)
   end
 
-  defp process_input_codepoint(state, {:codepoint, {char, _mods}}) when is_bitstring(char) do
-    # Push undo before making changes
-    state_with_undo = State.push_undo(state)
-    # Delete selection first if any, then insert
-    state_after_delete = delete_selection(state_with_undo)
-    new_state = insert_char(state_after_delete, char)
-    {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+  # Command-modified codepoints (e.g. Cmd+A on macOS, which GLFW also reports as
+  # a codepoint) belong to a shortcut, not to the document — drop them so the
+  # letter is never inserted alongside the shortcut's action. Guarding here, the
+  # chokepoint both codepoint clauses funnel through, also covers the debounce
+  # path above.
+  defp process_input_codepoint(state, {:codepoint, {char, mods}})
+       when is_bitstring(char) and is_list(mods) do
+    if Enum.any?(mods, &(&1 in @command_mods)) do
+      {:noop, state}
+    else
+      # Push undo before making changes
+      state_with_undo = State.push_undo(state)
+      # Delete selection first if any, then insert
+      state_after_delete = delete_selection(state_with_undo)
+      new_state = insert_char(state_after_delete, char)
+      {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+    end
   end
 
   # ===== TEXT INPUT - Using key2string conversion =====
