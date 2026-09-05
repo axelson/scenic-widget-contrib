@@ -9,8 +9,23 @@ defmodule ScenicWidgets.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
+      aliases: aliases(),
       preferred_cli_env: [
         spex: :test
+      ]
+    ]
+  end
+
+  # Fast pre-commit gate, run by .githooks/pre-commit (activate with
+  # `git config core.hooksPath .githooks`). Kept minimal on purpose: the wider suite
+  # can't gate yet — lib/ isn't fully formatted, a spex file has non-Elixir syntax, and
+  # EnhancedMenuBarTest is currently broken. Add `format --check-formatted` and a scoped
+  # `test` step once that debt is cleared.
+  defp aliases do
+    [
+      precommit: [
+        "compile",
+        "deps.unlock --check-unused"
       ]
     ]
   end
