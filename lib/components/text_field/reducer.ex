@@ -25,9 +25,13 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # Modifiers that mark a codepoint as belonging to a keyboard shortcut rather
   # than to document text, so it must never be inserted. :meta is macOS Command,
-  # :super is the Linux/Windows key. Shift and lock keys are absent on purpose:
-  # they are text modifiers the driver has already folded into the character.
-  @command_mods [:ctrl, :meta, :super]
+  # :super is the Linux/Windows key, :alt is the emacs Meta modifier (macOS Option).
+  # macOS composes Option+letter into a codepoint (Option+F -> "ƒ"), so :alt must be
+  # dropped here or the emacs word motions (Alt-F/B/D) would also type that glyph;
+  # the tradeoff is that Option-as-compose-key text entry is disabled in this field.
+  # Shift and lock keys are absent on purpose: they are text modifiers the driver has
+  # already folded into the character.
+  @command_mods [:ctrl, :meta, :super, :alt]
 
   # ===== DIRECT INPUT PROCESSING =====
 
@@ -331,6 +335,36 @@ defmodule ScenicWidgets.TextField.Reducer do
     state_with_undo = State.push_undo(state)
     new_state = kill_to_line_end(state_with_undo)
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+  end
+
+  # ===== EMACS WORD MOTIONS (Alt / Option = Meta) =====
+  # Alt is the emacs Meta modifier: Alt-F/B move by word, Alt-D kills the next word.
+  # key_state > 0 matches press + repeat so holding a key repeats. On macOS these keys
+  # also emit composed codepoints (ƒ/∫/∂); @command_mods drops those so nothing is typed.
+
+  # Alt+F - forward word
+  def process_input(%State{focused: true} = state, {:key, {:key_f, key_state, [:alt]}}) when key_state > 0 do
+    {:noop, move_cursor(state, :word_right) |> clear_selection()}
+  end
+
+  # Alt+B - backward word
+  def process_input(%State{focused: true} = state, {:key, {:key_b, key_state, [:alt]}}) when key_state > 0 do
+    {:noop, move_cursor(state, :word_left) |> clear_selection()}
+  end
+
+  # Alt+D - kill word forward (delete from cursor to the forward-word boundary; no kill-ring)
+  def process_input(%State{focused: true, cursor: cursor} = state, {:key, {:key_d, key_state, [:alt]}})
+      when key_state > 0 do
+    target = State.word_motion_target(state, :word_right)
+
+    if target == cursor do
+      # Nothing to the right (end of document) - no-op, no undo entry.
+      {:noop, state}
+    else
+      state_with_undo = State.push_undo(state)
+      new_state = kill_word_forward(state_with_undo, target)
+      {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+    end
   end
 
   # ===== SHIFT KEY TRACKING (for Shift+scroll horizontal scrolling) =====
@@ -1077,6 +1111,15 @@ defmodule ScenicWidgets.TextField.Reducer do
     end
   end
 
+  # Kill from the cursor forward to `target` (the forward-word boundary; Alt+D, emacs
+  # kill-word). Deletes exactly the span Alt+F would move over. Plain delete (no
+  # kill-ring), reusing delete_selection/1 via a transient selection; the cursor is left
+  # at its original position (delete_selection collapses to the selection start). Callers
+  # guard the end-of-document no-op, so target is always past the cursor here.
+  defp kill_word_forward(%State{cursor: cursor} = state, target) do
+    delete_selection(%{state | selection: {cursor, target}})
+  end
+
   # Turn a State.undo/1 or State.redo/1 result into a process_input return value.
   defp apply_history(state, {:ok, new_state}) do
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
@@ -1155,6 +1198,13 @@ defmodule ScenicWidgets.TextField.Reducer do
   defp move_cursor(%State{cursor: {line, _col}, lines: lines} = state, :line_end) do
     current_line = Enum.at(lines, line - 1, "")
     new_state = %{state | cursor: {line, String.length(current_line) + 1}}
+    State.ensure_cursor_visible(new_state)
+  end
+
+  # Word motions (Alt+B / Alt+F). Boundary math lives in State.word_motion_target/2;
+  # here we just move the cursor there and keep it visible, like the other motions.
+  defp move_cursor(%State{} = state, direction) when direction in [:word_left, :word_right] do
+    new_state = %{state | cursor: State.word_motion_target(state, direction)}
     State.ensure_cursor_visible(new_state)
   end
 

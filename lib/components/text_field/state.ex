@@ -40,6 +40,9 @@ defmodule ScenicWidgets.TextField.State do
     :tab_width,                # Number of spaces per tab (default 4)
     :font,                     # %{name: atom, size: int, metrics: FontMetrics | nil}
     :colors,                   # %{text:, background:, cursor:, line_numbers:, border:, focused_border:}
+    :word_char_fun,            # (grapheme -> boolean): what counts as a word char for
+                               # word motions (Alt-F/B/D) and double-click selection.
+                               # nil falls back to default_word_char?/1 (~r/[\w]/).
 
     # Buffer-backed mode (when input_mode == :buffer_backed)
     :buffer_controller,        # PID of Buffer.Process (for buffer_backed mode)
@@ -184,6 +187,7 @@ defmodule ScenicWidgets.TextField.State do
       tab_width: Map.get(data, :tab_width, 4),
       font: font,
       colors: Map.get(data, :colors) || default_colors(),
+      word_char_fun: Map.get(data, :word_char_fun, &default_word_char?/1),
 
       # Buffer-backed mode
       buffer_controller: Map.get(data, :buffer_controller),
@@ -636,9 +640,9 @@ defmodule ScenicWidgets.TextField.State do
   Get the word at or near the cursor position.
   Returns the word as a string, or nil if cursor is not on a word.
   """
-  def word_at_cursor(%__MODULE__{lines: lines, cursor: {line_num, col}}) do
+  def word_at_cursor(%__MODULE__{lines: lines, cursor: {line_num, col}} = state) do
     line = Enum.at(lines, line_num - 1, "")
-    extract_word_at(line, col - 1)  # Convert to 0-indexed
+    extract_word_at(line, col - 1, word_predicate(state))  # Convert to 0-indexed
   end
 
   @doc """
@@ -646,74 +650,177 @@ defmodule ScenicWidgets.TextField.State do
   Returns {start_col, end_col} (1-indexed, inclusive start, exclusive end for selection).
   Returns nil if position is not on a word.
   """
-  def word_boundaries_at(%__MODULE__{lines: lines}, {line_num, col}) do
+  def word_boundaries_at(%__MODULE__{lines: lines} = state, {line_num, col}) do
     line = Enum.at(lines, line_num - 1, "")
-    get_word_boundaries(line, col - 1)  # Convert to 0-indexed internally
+    get_word_boundaries(line, col - 1, word_predicate(state))  # Convert to 0-indexed internally
+  end
+
+  @doc """
+  Target cursor position for an emacs/readline word motion from the current cursor.
+
+  `:word_right` (Alt-F, forward-word) skips any separators, then the following word,
+  landing just after it. `:word_left` (Alt-B, backward-word) skips separators, then the
+  preceding word backwards, landing at its start. Motion crosses line boundaries
+  (newlines are separators) and is a no-op at the start/end of the document.
+
+  What counts as a "word character" comes from the configured `:word_char_fun`
+  (see `default_word_char?/1`); newlines are always separators regardless. Returns a
+  `{line, col}` cursor (1-indexed).
+  """
+  def word_motion_target(%__MODULE__{cursor: cursor, lines: lines} = state, direction)
+      when direction in [:word_left, :word_right] do
+    word? = word_predicate(state)
+    separator? = fn c -> not word?.(c) end
+
+    case direction do
+      :word_right ->
+        cursor
+        |> skip_forward(lines, separator?)
+        |> skip_forward(lines, word?)
+
+      :word_left ->
+        cursor
+        |> skip_backward(lines, separator?)
+        |> skip_backward(lines, word?)
+    end
+  end
+
+  # Walk the cursor forward while `pred` holds for the grapheme after it; stop at the
+  # document end. Used in two passes: skip separators, then skip word chars.
+  defp skip_forward(pos, lines, pred) do
+    case char_after(pos, lines) do
+      nil -> pos
+      c -> if pred.(c), do: skip_forward(step_right(pos, lines), lines, pred), else: pos
+    end
+  end
+
+  # Mirror of skip_forward, walking backward over the grapheme before the cursor.
+  defp skip_backward(pos, lines, pred) do
+    case char_before(pos, lines) do
+      nil -> pos
+      c -> if pred.(c), do: skip_backward(step_left(pos, lines), lines, pred), else: pos
+    end
+  end
+
+  # Grapheme immediately after the cursor, or "\n" at a line boundary, or nil at EOF.
+  defp char_after({line, col}, lines) do
+    line_text = Enum.at(lines, line - 1, "")
+
+    cond do
+      col <= String.length(line_text) -> String.at(line_text, col - 1)
+      line < length(lines) -> "\n"
+      true -> nil
+    end
+  end
+
+  # Grapheme immediately before the cursor, or "\n" at a line boundary, or nil at BOF.
+  defp char_before({line, col}, lines) do
+    cond do
+      col > 1 -> String.at(Enum.at(lines, line - 1, ""), col - 2)
+      line > 1 -> "\n"
+      true -> nil
+    end
+  end
+
+  # Step the cursor one grapheme right, crossing into the next line at end-of-line.
+  defp step_right({line, col}, lines) do
+    line_text = Enum.at(lines, line - 1, "")
+
+    cond do
+      col <= String.length(line_text) -> {line, col + 1}
+      line < length(lines) -> {line + 1, 1}
+      true -> {line, col}
+    end
+  end
+
+  # Step the cursor one grapheme left, crossing into the previous line at start-of-line.
+  defp step_left({line, col}, lines) do
+    cond do
+      col > 1 -> {line, col - 1}
+      line > 1 -> {line - 1, String.length(Enum.at(lines, line - 2, "")) + 1}
+      true -> {line, col}
+    end
   end
 
   # Get word boundaries at a given 0-indexed position in a string
   # Returns {start_col, end_col} (1-indexed) or nil
-  defp get_word_boundaries("", _pos), do: nil
-  defp get_word_boundaries(line, pos) do
+  defp get_word_boundaries("", _pos, _word?), do: nil
+  defp get_word_boundaries(line, pos, word?) do
     graphemes = String.graphemes(line)
     pos = max(0, min(pos, length(graphemes) - 1))
 
     # Check if position is on a word character
     char_at_pos = Enum.at(graphemes, pos, "")
-    unless word_char?(char_at_pos) do
+    unless word?.(char_at_pos) do
       # Try one position to the left (cursor might be after word)
       if pos > 0 do
         char_before = Enum.at(graphemes, pos - 1, "")
-        if word_char?(char_before), do: get_word_boundaries(line, pos - 1), else: nil
+        if word?.(char_before), do: get_word_boundaries(line, pos - 1, word?), else: nil
       else
         nil
       end
     else
       # Find word boundaries (0-indexed)
-      start_pos = find_word_start(graphemes, pos)
-      end_pos = find_word_end(graphemes, pos)
+      start_pos = find_word_start(graphemes, pos, word?)
+      end_pos = find_word_end(graphemes, pos, word?)
       # Convert to 1-indexed, with end_col being position AFTER the word for selection
       {start_pos + 1, end_pos + 2}
     end
   end
 
   # Extract word at a given 0-indexed position in a string
-  defp extract_word_at("", _pos), do: nil
-  defp extract_word_at(line, pos) do
+  defp extract_word_at("", _pos, _word?), do: nil
+  defp extract_word_at(line, pos, word?) do
     graphemes = String.graphemes(line)
     pos = max(0, min(pos, length(graphemes) - 1))
 
     # Check if position is on a word character
     char_at_pos = Enum.at(graphemes, pos, "")
-    unless word_char?(char_at_pos) do
+    unless word?.(char_at_pos) do
       # Try one position to the left (cursor might be after word)
       if pos > 0 do
         char_before = Enum.at(graphemes, pos - 1, "")
-        if word_char?(char_before), do: extract_word_at(line, pos - 1), else: nil
+        if word?.(char_before), do: extract_word_at(line, pos - 1, word?), else: nil
       else
         nil
       end
     else
       # Find word boundaries
-      start_pos = find_word_start(graphemes, pos)
-      end_pos = find_word_end(graphemes, pos)
+      start_pos = find_word_start(graphemes, pos, word?)
+      end_pos = find_word_end(graphemes, pos, word?)
       graphemes |> Enum.slice(start_pos..end_pos) |> Enum.join()
     end
   end
 
-  defp find_word_start(graphemes, pos) when pos <= 0, do: 0
-  defp find_word_start(graphemes, pos) do
+  defp find_word_start(_graphemes, pos, _word?) when pos <= 0, do: 0
+  defp find_word_start(graphemes, pos, word?) do
     char = Enum.at(graphemes, pos - 1, "")
-    if word_char?(char), do: find_word_start(graphemes, pos - 1), else: pos
+    if word?.(char), do: find_word_start(graphemes, pos - 1, word?), else: pos
   end
 
-  defp find_word_end(graphemes, pos) when pos >= length(graphemes) - 1, do: length(graphemes) - 1
-  defp find_word_end(graphemes, pos) do
+  defp find_word_end(graphemes, pos, _word?) when pos >= length(graphemes) - 1, do: length(graphemes) - 1
+  defp find_word_end(graphemes, pos, word?) do
     char = Enum.at(graphemes, pos + 1, "")
-    if word_char?(char), do: find_word_end(graphemes, pos + 1), else: pos
+    if word?.(char), do: find_word_end(graphemes, pos + 1, word?), else: pos
   end
 
-  defp word_char?(char), do: Regex.match?(~r/[\w]/, char)
+  @doc """
+  Default word-character predicate: matches `~r/[\\w]/` (ASCII letters, digits, and
+  underscore). Override per field with the `:word_char_fun` option to `new/1`.
+  """
+  def default_word_char?(grapheme), do: Regex.match?(~r/[\w]/, grapheme)
+
+  # The configured word predicate, guaranteeing newlines (and nil boundaries) are
+  # never treated as word characters no matter what the host passed in.
+  defp word_predicate(%__MODULE__{word_char_fun: fun}) do
+    fun = fun || (&default_word_char?/1)
+
+    fn
+      nil -> false
+      "\n" -> false
+      grapheme -> fun.(grapheme)
+    end
+  end
 
   @doc """
   Get font ascent using FontMetrics if available.

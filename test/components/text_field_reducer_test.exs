@@ -81,7 +81,9 @@ defmodule ScenicWidgets.TextField.ReducerTest do
     test "command-modified codepoints are dropped, never inserted" do
       state = %State{focused: true, lines: ["hi"], cursor: {1, 3}}
 
-      for modifier <- [[:ctrl], [:meta], [:super], [:ctrl, :shift]] do
+      # :alt is included so macOS Option-composed glyphs (Option+F -> "ƒ") are dropped
+      # rather than typed alongside the emacs word motion the Alt chord triggers.
+      for modifier <- [[:ctrl], [:meta], [:super], [:alt], [:ctrl, :shift], [:alt, :shift]] do
         assert {:noop, ^state} =
                  Reducer.process_input(state, {:codepoint, {"a", modifier}})
       end
