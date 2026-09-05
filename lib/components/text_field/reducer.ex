@@ -36,35 +36,6 @@ defmodule ScenicWidgets.TextField.Reducer do
   Uses ScenicEventsDefinitions for key matching and conversion.
   """
 
-  @doc """
-  Make the macOS Command key behave like Ctrl for keyboard shortcuts.
-
-  On macOS Cmd is delivered as the `:meta` modifier, but every editor shortcut
-  (Ctrl+A/C/X/V/S/F/H/G, etc.) matches `[:ctrl]`. Rewriting `:meta` -> `:ctrl` at
-  a single input boundary (the top of `handle_input/3`) makes all of them fire
-  for Cmd without touching any individual shortcut clause, and keeps working for
-  shortcuts added later.
-
-  `macos?` is passed in (the caller supplies its compile-time OS check) so this
-  stays a pure, platform-independent function. When false — Linux/Windows, where
-  `:meta` is the Super/Windows key — the input is returned unchanged so those
-  keys never trigger editor shortcuts. The rewrite is also skipped when `:ctrl`
-  is already present (a genuine Ctrl chord is never altered) and it preserves any
-  other modifiers (e.g. Cmd+Shift+Z -> `[:ctrl, :shift]`) so combined chords
-  still match. Non-key events pass through untouched.
-  """
-  def normalize_command_key(input, macos?)
-
-  def normalize_command_key({:key, {key, action, mods}} = input, true) when is_list(mods) do
-    if :meta in mods and :ctrl not in mods do
-      {:key, {key, action, [:ctrl | List.delete(mods, :meta)]}}
-    else
-      input
-    end
-  end
-
-  def normalize_command_key(input, _macos?), do: input
-
   # ===== TEXT INPUT - Codepoint events ONLY =====
 
   # Handle codepoint events (direct character input from driver)
@@ -239,28 +210,27 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   # ===== KEYBOARD SHORTCUTS =====
 
-  # Ctrl+A - Select all
-  def process_input(%State{focused: true} = state, @ctrl_a) do
+  # Cmd+A - Select all
+  def process_input(%State{focused: true} = state, @meta_a) do
     # IO.puts("🔍 Ctrl+A pressed! Focused: #{state.focused}")
     {:noop, select_all(state)}
   end
 
-  # Ctrl+C - Copy selection to clipboard (works even when unfocused)
-  def process_input(%State{selection: selection} = state, @ctrl_c) when selection != nil do
+  # Cmd+C - Copy selection to clipboard (works even when unfocused)
+  def process_input(%State{selection: selection} = state, @meta_c) when selection != nil do
     text = get_selected_text(state)
     # IO.puts("🔍 Ctrl+C pressed! Selection: #{inspect(selection)}, Text: #{inspect(text)}, Focused: #{state.focused}")
     # Send clipboard event to parent (Scenic doesn't have system clipboard access)
     {:event, {:clipboard_copy, state.id, text}, state}
   end
 
-  def process_input(%State{} = state, @ctrl_c) do
+  def process_input(%State{} = state, @meta_c) do
     # No selection - do nothing
-    # IO.puts("🔍 Ctrl+C pressed but no selection (focused: #{state.focused})")
     {:noop, state}
   end
 
-  # Ctrl+X - Cut selection to clipboard (works even when unfocused)
-  def process_input(%State{selection: selection} = state, @ctrl_x) when selection != nil do
+  # Cmd+X - Cut selection to clipboard (works even when unfocused)
+  def process_input(%State{selection: selection} = state, @meta_x) when selection != nil do
     text = get_selected_text(state)
     new_state = delete_selection(state)
     # IO.puts("🔍 Ctrl+X pressed! Focused: #{state.focused}")
@@ -268,32 +238,31 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:event, {:clipboard_cut, state.id, text}, new_state}
   end
 
-  def process_input(%State{} = state, @ctrl_x) do
+  def process_input(%State{} = state, @meta_x) do
     # No selection - do nothing
     {:noop, state}
   end
 
-  # Ctrl+V - Paste from clipboard (works even when unfocused for testing)
-  def process_input(%State{} = state, @ctrl_v) do
+  # Cmd+V - Paste from clipboard (works even when unfocused for testing)
+  def process_input(%State{} = state, @meta_v) do
     # IO.puts("🔍 Ctrl+V pressed! Focused: #{state.focused}")
     # Emit event to request clipboard data from parent
     # Parent will call insert_text action with the clipboard content
     {:event, {:clipboard_paste_requested, state.id}, state}
   end
 
-  # Ctrl+S - Save (emit event for parent to handle)
-  def process_input(%State{focused: true} = state, @ctrl_s) do
+  # Cmd+S - Save (emit event for parent to handle)
+  def process_input(%State{focused: true} = state, @meta_s) do
     {:event, {:save_requested, state.id, State.get_text(state)}, state}
   end
 
-  # Ctrl+F - Find (emit event to open search dialog)
-  def process_input(%State{focused: true} = state, @ctrl_f) do
-    IO.puts("🔍 Ctrl+F pressed! Emitting find_requested")
+  # Cmd+F - Find (emit event to open search dialog)
+  def process_input(%State{focused: true} = state, @meta_f) do
     {:event, {:find_requested, state.id}, state}
   end
 
-  # Ctrl+G - Go to next match (if searching)
-  def process_input(%State{focused: true, search_matches: matches, search_current_index: idx} = state, @ctrl_g)
+  # Cmd+G - Go to next match (if searching)
+  def process_input(%State{focused: true, search_matches: matches, search_current_index: idx} = state, @meta_g)
       when length(matches) > 0 do
     # Cycle to next match
     next_idx = rem(idx + 1, length(matches))
@@ -303,24 +272,65 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:event, {:search_navigated, state.id, next_idx, length(matches)}, new_state}
   end
 
-  # Ctrl+U - Undo
-  def process_input(%State{focused: true} = state, @ctrl_u) do
-    case State.undo(state) do
-      {:ok, new_state} ->
-        {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
-      {:noop, state} ->
-        {:noop, state}
-    end
+  # Cmd+Z - Undo
+  def process_input(%State{focused: true} = state, {:key, {:key_z, 1, [:meta]}}) do
+    apply_history(state, State.undo(state))
   end
 
-  # Ctrl+R - Redo
-  def process_input(%State{focused: true} = state, @ctrl_r) do
-    case State.redo(state) do
-      {:ok, new_state} ->
-        {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
-      {:noop, state} ->
-        {:noop, state}
-    end
+  # Cmd+Shift+Z - Redo. The driver does not guarantee modifier order, so accept
+  # either ordering rather than a single literal list.
+  def process_input(%State{focused: true} = state, {:key, {:key_z, 1, mods}})
+      when mods == [:meta, :shift] or mods == [:shift, :meta] do
+    apply_history(state, State.redo(state))
+  end
+
+  # ===== EMACS / READLINE MOTIONS (Ctrl, macOS) =====
+  # Ctrl is distinct from Cmd here: Cmd drives the app shortcuts above, Ctrl drives
+  # these emacs-style motions. key_state > 0 matches press + repeat so holding a key
+  # repeats, like the arrow keys. Motions clear any active selection, like the arrows.
+
+  # Ctrl+A - beginning of line
+  def process_input(%State{focused: true} = state, {:key, {:key_a, key_state, [:ctrl]}}) when key_state > 0 do
+    {:noop, move_cursor(state, :line_start) |> clear_selection()}
+  end
+
+  # Ctrl+E - end of line
+  def process_input(%State{focused: true} = state, {:key, {:key_e, key_state, [:ctrl]}}) when key_state > 0 do
+    {:noop, move_cursor(state, :line_end) |> clear_selection()}
+  end
+
+  # Ctrl+B - backward char
+  def process_input(%State{focused: true} = state, {:key, {:key_b, key_state, [:ctrl]}}) when key_state > 0 do
+    {:noop, move_cursor(state, :left) |> clear_selection()}
+  end
+
+  # Ctrl+F - forward char
+  def process_input(%State{focused: true} = state, {:key, {:key_f, key_state, [:ctrl]}}) when key_state > 0 do
+    {:noop, move_cursor(state, :right) |> clear_selection()}
+  end
+
+  # Ctrl+P - previous line
+  def process_input(%State{focused: true} = state, {:key, {:key_p, key_state, [:ctrl]}}) when key_state > 0 do
+    {:noop, move_cursor(state, :up) |> clear_selection()}
+  end
+
+  # Ctrl+N - next line
+  def process_input(%State{focused: true} = state, {:key, {:key_n, key_state, [:ctrl]}}) when key_state > 0 do
+    {:noop, move_cursor(state, :down) |> clear_selection()}
+  end
+
+  # Ctrl+D - delete char forward
+  def process_input(%State{focused: true} = state, {:key, {:key_d, key_state, [:ctrl]}}) when key_state > 0 do
+    state_with_undo = State.push_undo(state)
+    new_state = delete_at_cursor(state_with_undo)
+    {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+  end
+
+  # Ctrl+K - kill to end of line (plain delete; no kill-ring)
+  def process_input(%State{focused: true} = state, {:key, {:key_k, key_state, [:ctrl]}}) when key_state > 0 do
+    state_with_undo = State.push_undo(state)
+    new_state = kill_to_line_end(state_with_undo)
+    {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
 
   # ===== SHIFT KEY TRACKING (for Shift+scroll horizontal scrolling) =====
@@ -660,6 +670,12 @@ defmodule ScenicWidgets.TextField.Reducer do
   def input_to_buffer_action(%State{focused: true}, {:key, {:key_end, key_state, _mods}}) when key_state > 0 do
     {:move_cursor, :line_end}
   end
+
+  # NOTE: The emacs/readline motions and the Cmd-key app-shortcut remap were applied
+  # to :direct mode only (see process_input/2 above). This :buffer_backed map is
+  # unused by worktree_notes and was intentionally left on the old [:ctrl] bindings.
+  # Because normalize_command_key was removed, macOS Cmd shortcuts no longer reach
+  # these clauses in :buffer_backed mode — acceptable since nothing uses this mode.
 
   # Ctrl+A - Select all
   def input_to_buffer_action(%State{focused: true}, {:key, {:key_a, 1, [:ctrl]}}) do
@@ -1035,6 +1051,39 @@ defmodule ScenicWidgets.TextField.Reducer do
       %{state | lines: new_lines}
       |> update_scroll_content_size()
     end
+  end
+
+  @doc """
+  Kill from the cursor to the end of the current line (Ctrl+K).
+
+  Deletes the text after the cursor on the current line. This is a plain delete —
+  there is no kill-ring, so nothing is stashed for a later yank. When the cursor is
+  already at end-of-line, the line break is removed instead (joining the next line),
+  matching `delete_at_cursor/1`'s forward-delete behavior. Cursor position is
+  unchanged.
+  """
+  defp kill_to_line_end(%State{lines: lines, cursor: {line_num, col}} = state) do
+    current_line = Enum.at(lines, line_num - 1, "")
+
+    if col > String.length(current_line) do
+      # At end of line - fall through to forward-delete, which joins the next line
+      delete_at_cursor(state)
+    else
+      kept = String.slice(current_line, 0, col - 1)
+      new_lines = List.replace_at(lines, line_num - 1, kept)
+
+      %{state | lines: new_lines}
+      |> update_scroll_content_size()
+    end
+  end
+
+  # Turn a State.undo/1 or State.redo/1 result into a process_input return value.
+  defp apply_history(state, {:ok, new_state}) do
+    {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+  end
+
+  defp apply_history(state, {:noop, _state}) do
+    {:noop, state}
   end
 
   @doc """

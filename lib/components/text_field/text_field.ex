@@ -111,13 +111,6 @@ defmodule ScenicWidgets.TextField do
   alias ScenicWidgets.TextField.{State, Renderer, Reducer}
   alias Scenic.Graph
 
-  # On macOS the Command key is reported as the :meta modifier. All of the
-  # editor's shortcuts match [:ctrl], so we translate :meta -> :ctrl on Mac (via
-  # Reducer.normalize_command_key/2, applied at the top of handle_input/3) rather
-  # than duplicating every shortcut clause. Evaluated at compile time, so this is
-  # the OS the app was built on — correct for the desktop app, which is built and
-  # run on the same machine.
-  @is_macos :os.type() == {:unix, :darwin}
 
   # ===== VALIDATION =====
 
@@ -236,7 +229,6 @@ defmodule ScenicWidgets.TextField do
   # ===== INPUT HANDLING (Phase 2) =====
 
   def handle_input(input, _context, scene) do
-    input = Reducer.normalize_command_key(input, @is_macos)
     state = scene.assigns.state
 
     # CRITICAL: Only process keyboard input if focused AND editable

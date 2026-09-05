@@ -232,6 +232,16 @@ defmodule ScenicWidgets.ScenicEventsDefinitions do
       @ctrl_u {:key, {:key_u, @key_pressed, [:ctrl]}}
       @ctrl_r {:key, {:key_r, @key_pressed, [:ctrl]}}
 
+      # macOS Cmd shortcuts (Cmd is reported as the :meta modifier). App shortcuts
+      # live on :meta so that :ctrl is free for emacs-style motions in the editor.
+      @meta_a {:key, {:key_a, @key_pressed, [:meta]}}
+      @meta_c {:key, {:key_c, @key_pressed, [:meta]}}
+      @meta_v {:key, {:key_v, @key_pressed, [:meta]}}
+      @meta_x {:key, {:key_x, @key_pressed, [:meta]}}
+      @meta_s {:key, {:key_s, @key_pressed, [:meta]}}
+      @meta_f {:key, {:key_f, @key_pressed, [:meta]}}
+      @meta_g {:key, {:key_g, @key_pressed, [:meta]}}
+
       @backtick {:key, {:key_grave, @key_pressed, []}}
       @tilde {:key, {:key_grave, @key_pressed, [:shift]}}
       @bang {:key, {:key_1, @key_pressed, [:shift]}}

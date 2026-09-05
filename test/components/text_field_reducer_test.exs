@@ -3,39 +3,77 @@ defmodule ScenicWidgets.TextField.ReducerTest do
 
   alias ScenicWidgets.TextField.{Reducer, State}
 
-  describe "normalize_command_key/2 (macOS Cmd -> Ctrl)" do
-    test "on macOS, :meta is rewritten to :ctrl for key events" do
-      assert {:key, {:key_a, 1, [:ctrl]}} =
-               Reducer.normalize_command_key({:key, {:key_a, 1, [:meta]}}, true)
-    end
+  # These tests stay off the render/font stack on purpose: any clause that moves the
+  # cursor or edits text funnels through State.ensure_cursor_visible/1 and
+  # update_scroll_content_size/1, which require loaded FontMetrics and a real frame.
+  # So the emacs motions (Ctrl+A/E/B/F/P/N) and the editing kills (Ctrl+D/Ctrl+K) are
+  # exercised by hand in the running app, not here. What we CAN assert purely is the
+  # macOS modifier remap: that the app shortcuts now fire on Cmd (:meta) rather than
+  # Ctrl, since Ctrl is reserved for the emacs motions.
 
-    test "on macOS, other modifiers are preserved (Cmd+Shift+Z -> Ctrl+Shift+Z)" do
-      assert {:key, {:key_z, 1, [:ctrl, :shift]}} =
-               Reducer.normalize_command_key({:key, {:key_z, 1, [:meta, :shift]}}, true)
-    end
-
-    test "a genuine Ctrl chord is never altered" do
-      input = {:key, {:key_a, 1, [:ctrl]}}
-      assert ^input = Reducer.normalize_command_key(input, true)
-    end
-
-    test "off macOS, :meta is left alone so the Super/Windows key stays inert" do
-      input = {:key, {:key_a, 1, [:meta]}}
-      assert ^input = Reducer.normalize_command_key(input, false)
-    end
-
-    test "non-key events pass through untouched on either platform" do
-      input = {:codepoint, {"a", []}}
-      assert ^input = Reducer.normalize_command_key(input, true)
-      assert ^input = Reducer.normalize_command_key(input, false)
-    end
-
-    test "a normalized Cmd+A drives direct-mode select-all" do
+  describe "app shortcuts on Cmd (:meta)" do
+    test "Cmd+A selects all" do
       state = %State{focused: true, lines: ["hello", "world"], cursor: {1, 1}}
 
-      input = Reducer.normalize_command_key({:key, {:key_a, 1, [:meta]}}, true)
-      assert {:noop, new_state} = Reducer.process_input(state, input)
+      assert {:noop, new_state} =
+               Reducer.process_input(state, {:key, {:key_a, 1, [:meta]}})
+
       assert new_state.selection == {{1, 1}, {2, 6}}
+    end
+
+    test "Cmd+S emits a save request" do
+      state = %State{focused: true, id: :ed, lines: ["hello"], cursor: {1, 1}}
+
+      assert {:event, {:save_requested, :ed, "hello"}, ^state} =
+               Reducer.process_input(state, {:key, {:key_s, 1, [:meta]}})
+    end
+
+    test "Cmd+V requests a paste" do
+      state = %State{focused: true, id: :ed, lines: ["hello"], cursor: {1, 1}}
+
+      assert {:event, {:clipboard_paste_requested, :ed}, ^state} =
+               Reducer.process_input(state, {:key, {:key_v, 1, [:meta]}})
+    end
+
+    test "Cmd+C copies the current selection" do
+      state = %State{
+        focused: true,
+        id: :ed,
+        lines: ["hello"],
+        cursor: {1, 3},
+        selection: {{1, 1}, {1, 3}}
+      }
+
+      assert {:event, {:clipboard_copy, :ed, "he"}, ^state} =
+               Reducer.process_input(state, {:key, {:key_c, 1, [:meta]}})
+    end
+
+    test "Cmd+C with no selection is a no-op" do
+      state = %State{focused: true, id: :ed, lines: ["hello"], cursor: {1, 1}, selection: nil}
+
+      assert {:noop, ^state} =
+               Reducer.process_input(state, {:key, {:key_c, 1, [:meta]}})
+    end
+
+    test "Cmd+F emits a find request" do
+      state = %State{focused: true, id: :ed, lines: ["hello"], cursor: {1, 1}}
+
+      assert {:event, {:find_requested, :ed}, ^state} =
+               Reducer.process_input(state, {:key, {:key_f, 1, [:meta]}})
+    end
+
+    test "Cmd+Z routes to undo (no-op on an empty undo stack)" do
+      state = %State{focused: true, lines: ["hello"], cursor: {1, 1}, undo_stack: [], redo_stack: []}
+
+      assert {:noop, ^state} =
+               Reducer.process_input(state, {:key, {:key_z, 1, [:meta]}})
+    end
+
+    test "Cmd+Shift+Z routes to redo (no-op on an empty redo stack), order-independent mods" do
+      state = %State{focused: true, lines: ["hello"], cursor: {1, 1}, undo_stack: [], redo_stack: []}
+
+      assert {:noop, ^state} =
+               Reducer.process_input(state, {:key, {:key_z, 1, [:shift, :meta]}})
     end
   end
 
