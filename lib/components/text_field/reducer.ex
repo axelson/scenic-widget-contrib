@@ -124,6 +124,34 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:event, {:escape_pressed, state.id}, state}
   end
 
+  # Option+Backspace (⌥⌫) - delete word backward. Mirrors Alt+D (kill word forward):
+  # a no-op with no undo entry when already at the document start. Must precede the
+  # generic backspace clauses below, which match any modifiers.
+  def process_input(%State{focused: true, cursor: cursor} = state, {:key, {:key_backspace, key_state, [:alt]}})
+      when key_state > 0 do
+    target = State.word_motion_target(state, :word_left)
+
+    if target == cursor do
+      {:noop, state}
+    else
+      state_with_undo = State.push_undo(state)
+      new_state = kill_word_backward(state_with_undo, target)
+      {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+    end
+  end
+
+  # Cmd+Backspace (⌘⌫) - delete to line start. A no-op (no undo entry) at column 1.
+  def process_input(%State{focused: true, cursor: {_line, col} = cursor} = state, {:key, {:key_backspace, key_state, [:meta]}})
+      when key_state > 0 do
+    if col == 1 do
+      {:noop, state}
+    else
+      state_with_undo = State.push_undo(state)
+      new_state = kill_to_line_start(state_with_undo, cursor)
+      {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
+    end
+  end
+
   # Backspace - delete selection or character before cursor
   # key_state > 0 matches both press (1) and repeat (2) for key-hold functionality
   def process_input(%State{focused: true, selection: selection} = state, {:key, {:key_backspace, key_state, _mods}}) when selection != nil and key_state > 0 do
@@ -152,42 +180,27 @@ defmodule ScenicWidgets.TextField.Reducer do
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
   end
 
-  # Arrow keys with Shift - text selection
-  # key_state > 0 matches both press (1) and repeat (2) for key-hold functionality
+  # Arrow keys - motion with optional selection. key_state > 0 matches both press (1)
+  # and repeat (2) for key-hold functionality. The whole modifier set decides the
+  # action: Shift extends a selection (else the motion collapses it), Option (:alt)
+  # moves by word, Cmd (:meta) moves to the line boundary (horizontal) or document
+  # boundary (vertical). horizontal_action/2 and vertical_action/2 turn the mods into
+  # a {verb, direction}; apply_action/2 runs it. (Membership checks live in those
+  # helpers' bodies, not a guard — `x in mods` is guard-legal only for a literal list.)
   def process_input(%State{focused: true} = state, {:key, {:key_left, key_state, mods}}) when key_state > 0 do
-    if :shift in mods do
-      {:noop, move_cursor_with_selection(state, :left)}
-    else
-      {:noop, move_cursor(state, :left) |> clear_selection()}
-    end
+    {:noop, apply_action(state, horizontal_action(mods, :left))}
   end
 
   def process_input(%State{focused: true} = state, {:key, {:key_right, key_state, mods}}) when key_state > 0 do
-    if :shift in mods do
-      {:noop, move_cursor_with_selection(state, :right)}
-    else
-      {:noop, move_cursor(state, :right) |> clear_selection()}
-    end
+    {:noop, apply_action(state, horizontal_action(mods, :right))}
   end
 
   def process_input(%State{focused: true} = state, {:key, {:key_up, key_state, mods}}) when key_state > 0 do
-    if :shift in mods do
-      {:noop, move_cursor_with_selection(state, :up)}
-    else
-      {:noop, move_cursor(state, :up) |> clear_selection()}
-    end
+    {:noop, apply_action(state, vertical_action(mods, :up))}
   end
 
   def process_input(%State{focused: true} = state, {:key, {:key_down, key_state, mods}}) when key_state > 0 do
-    if :shift in mods do
-      # IO.puts("🔍 Shift+Down pressed! Current cursor: #{inspect(state.cursor)}, selection: #{inspect(state.selection)}, lines: #{length(state.lines)}")
-      # IO.puts("🔍 Lines content: #{inspect(state.lines)}")
-      new_state = move_cursor_with_selection(state, :down)
-      # IO.puts("🔍 After Shift+Down: cursor: #{inspect(new_state.cursor)}, selection: #{inspect(new_state.selection)}")
-      {:noop, new_state}
-    else
-      {:noop, move_cursor(state, :down) |> clear_selection()}
-    end
+    {:noop, apply_action(state, vertical_action(mods, :down))}
   end
 
   # Home/End keys
@@ -197,6 +210,16 @@ defmodule ScenicWidgets.TextField.Reducer do
 
   def process_input(%State{focused: true} = state, @end_key) do
     {:noop, state |> move_cursor(:line_end) |> clear_selection()}
+  end
+
+  # Shift+Home / Shift+End - select to line start / end. Plain Home/End (empty mods,
+  # above) still handle the no-modifier case; these add the selection variant.
+  def process_input(%State{focused: true} = state, {:key, {:key_home, key_state, [:shift]}}) when key_state > 0 do
+    {:noop, move_cursor_with_selection(state, :line_start)}
+  end
+
+  def process_input(%State{focused: true} = state, {:key, {:key_end, key_state, [:shift]}}) when key_state > 0 do
+    {:noop, move_cursor_with_selection(state, :line_end)}
   end
 
   # Escape - clear focus (optionally)
@@ -350,6 +373,20 @@ defmodule ScenicWidgets.TextField.Reducer do
   # Alt+B - backward word
   def process_input(%State{focused: true} = state, {:key, {:key_b, key_state, [:alt]}}) when key_state > 0 do
     {:noop, move_cursor(state, :word_left) |> clear_selection()}
+  end
+
+  # Alt+Shift+F / Alt+Shift+B - select word forward / backward (the selection variants
+  # of Alt+F/B above). Accept either modifier ordering, since the driver doesn't
+  # guarantee it. The @command_mods codepoint guard already drops the composed glyph,
+  # exactly as for Alt+F/B.
+  def process_input(%State{focused: true} = state, {:key, {:key_f, key_state, mods}})
+      when key_state > 0 and (mods == [:alt, :shift] or mods == [:shift, :alt]) do
+    {:noop, move_cursor_with_selection(state, :word_right)}
+  end
+
+  def process_input(%State{focused: true} = state, {:key, {:key_b, key_state, mods}})
+      when key_state > 0 and (mods == [:alt, :shift] or mods == [:shift, :alt]) do
+    {:noop, move_cursor_with_selection(state, :word_left)}
   end
 
   # Alt+D - kill word forward (delete from cursor to the forward-word boundary; no kill-ring)
@@ -1120,6 +1157,17 @@ defmodule ScenicWidgets.TextField.Reducer do
     delete_selection(%{state | selection: {cursor, target}})
   end
 
+  # Delete from the backward-word boundary up to the cursor (Option+Backspace). Reuses
+  # delete_selection, which normalizes order and lands the cursor at the earlier point.
+  defp kill_word_backward(%State{cursor: cursor} = state, target) do
+    delete_selection(%{state | selection: {target, cursor}})
+  end
+
+  # Delete from line start up to the cursor (Cmd+Backspace).
+  defp kill_to_line_start(%State{} = state, {line, _col} = cursor) do
+    delete_selection(%{state | selection: {{line, 1}, cursor}})
+  end
+
   # Turn a State.undo/1 or State.redo/1 result into a process_input return value.
   defp apply_history(state, {:ok, new_state}) do
     {:event, {:text_changed, state.id, State.get_text(new_state)}, new_state}
@@ -1207,6 +1255,57 @@ defmodule ScenicWidgets.TextField.Reducer do
     new_state = %{state | cursor: State.word_motion_target(state, direction)}
     State.ensure_cursor_visible(new_state)
   end
+
+  # Document motions (Cmd+Up / Cmd+Down): jump to the very start or end of the buffer.
+  defp move_cursor(%State{} = state, :document_start) do
+    State.ensure_cursor_visible(%{state | cursor: {1, 1}})
+  end
+
+  defp move_cursor(%State{lines: lines} = state, :document_end) do
+    last_line = length(lines)
+    last_col = String.length(Enum.at(lines, last_line - 1, "")) + 1
+    State.ensure_cursor_visible(%{state | cursor: {last_line, last_col}})
+  end
+
+  @doc """
+  Map a horizontal arrow's modifier set to a `{verb, direction}` action.
+
+  Pure — never touches the font/render stack — so the whole modifier table is
+  unit-testable directly. Shift picks the verb (`:select` extends a selection, `:move`
+  collapses it); Option (`:alt`) selects word granularity, Cmd (`:meta`) the line
+  boundary. `base` is the unmodified direction (`:left` / `:right`).
+  """
+  def horizontal_action(mods, base) when base in [:left, :right] do
+    dir =
+      cond do
+        :alt in mods -> if base == :left, do: :word_left, else: :word_right
+        :meta in mods -> if base == :left, do: :line_start, else: :line_end
+        true -> base
+      end
+
+    {verb(mods), dir}
+  end
+
+  @doc """
+  Map a vertical arrow's modifier set to a `{verb, direction}` action (see
+  `horizontal_action/2`). Cmd (`:meta`) targets the document boundary; Option is not
+  special-cased (paragraph motion is out of scope), so it falls through to line up/down.
+  """
+  def vertical_action(mods, base) when base in [:up, :down] do
+    dir =
+      if :meta in mods do
+        if base == :up, do: :document_start, else: :document_end
+      else
+        base
+      end
+
+    {verb(mods), dir}
+  end
+
+  defp verb(mods), do: if(:shift in mods, do: :select, else: :move)
+
+  defp apply_action(state, {:select, direction}), do: move_cursor_with_selection(state, direction)
+  defp apply_action(state, {:move, direction}), do: move_cursor(state, direction) |> clear_selection()
 
   # ===== SELECTION HELPERS =====
 
