@@ -409,14 +409,16 @@ defmodule ScenicWidgets.TextField do
   end
 
   def handle_put(text, scene) when is_bitstring(text) do
-    # Text replacement - also move cursor to end of text
+    # Text replacement - move cursor to end and clear any selection, whose
+    # coordinates point into the old content and are meaningless now.
     lines = String.split(text, "\n")
     last_line = length(lines)
     last_col = String.length(List.last(lines) || "") + 1
 
     state = %{scene.assigns.state |
       lines: lines,
-      cursor: {last_line, last_col}  # Move cursor to end
+      cursor: {last_line, last_col},  # Move cursor to end
+      selection: nil
     }
     send_parent_event(scene, {:text_changed, scene.assigns.state.id, text})
     update_scene(scene, scene.assigns.state, state)
