@@ -13,6 +13,7 @@ defmodule ScenicWidgets.TextField.Reducer do
   """
 
   alias ScenicWidgets.TextField.State
+  alias ScenicWidgets.TextField.DisplayLines
   use ScenicWidgets.ScenicEventsDefinitions
   use Widgex.Scrollable
 
@@ -1214,30 +1215,41 @@ defmodule ScenicWidgets.TextField.Reducer do
     State.ensure_cursor_visible(new_state)
   end
 
-  defp move_cursor(%State{cursor: {line, col}, lines: lines} = state, :up) do
-    new_state = if line > 1 do
-      prev_line = Enum.at(lines, line - 2)
-      new_col = min(col, String.length(prev_line) + 1)
-      %{state | cursor: {line - 1, new_col}}
-    else
-      # Already on the first line: jump to the start of the line (macOS behavior).
-      %{state | cursor: {line, 1}}
-    end
+  # Up/Down move by DISPLAY row (visual, post-wrap), not source line, so the
+  # cursor steps through a wrapped line's continuation rows. A sticky goal x is
+  # preserved across consecutive vertical moves so passing through a shorter row
+  # doesn't permanently pull the cursor left.
+  defp move_cursor(%State{lines: lines} = state, direction) when direction in [:up, :down] do
+    dl = State.display_lines(state)
+    {row, col} = DisplayLines.source_to_display(dl, state.cursor)
 
-    State.ensure_cursor_visible(new_state)
-  end
+    goal_x =
+      if state.goal_x != nil and state.goal_cursor == state.cursor do
+        state.goal_x
+      else
+        DisplayLines.x_of(dl, {row, col})
+      end
 
-  defp move_cursor(%State{cursor: {line, col}, lines: lines} = state, :down) do
-    new_state = if line < length(lines) do
-      next_line = Enum.at(lines, line)
-      new_col = min(col, String.length(next_line) + 1)
-      %{state | cursor: {line + 1, new_col}}
-    else
-      # Already on the last line: jump to the end of the line (macOS behavior).
-      current_line = Enum.at(lines, line - 1, "")
-      %{state | cursor: {line, String.length(current_line) + 1}}
-    end
+    target_row = if direction == :up, do: row - 1, else: row + 1
 
+    new_state =
+      cond do
+        target_row < 1 ->
+          # Above the first row: jump to the very start (macOS behavior).
+          %{state | cursor: {1, 1}}
+
+        target_row > DisplayLines.row_count(dl) ->
+          # Below the last row: jump to end of the last line (macOS behavior).
+          last_line = length(lines)
+          last_col = String.length(Enum.at(lines, last_line - 1, "")) + 1
+          %{state | cursor: {last_line, last_col}}
+
+        true ->
+          target_col = DisplayLines.col_at_x(dl, target_row, goal_x)
+          %{state | cursor: DisplayLines.display_to_source(dl, {target_row, target_col})}
+      end
+
+    new_state = %{new_state | goal_x: goal_x, goal_cursor: new_state.cursor}
     State.ensure_cursor_visible(new_state)
   end
 
@@ -1555,12 +1567,10 @@ defmodule ScenicWidgets.TextField.Reducer do
         {content_w, length(lines)}
 
       _wrap ->
-        # Word/char wrapping: content fits viewport width, but height depends on wrapped lines
-        # Use the same wrapping logic as the renderer for accurate line count
-        max_width = scroll.viewport_width - 40  # Account for padding and scrollbar
-        wrapped_count = lines
-          |> Enum.map(fn line -> count_wrapped_lines(state, line, max_width) end)
-          |> Enum.sum()
+        # Word/char wrapping: content fits viewport width, but height depends on
+        # the wrapped display-line count. DisplayLines is the single source of
+        # truth for wrapping, shared with the renderer and cursor logic.
+        wrapped_count = DisplayLines.row_count(State.display_lines(state))
         {scroll.viewport_width, wrapped_count}
     end
 
@@ -1575,29 +1585,4 @@ defmodule ScenicWidgets.TextField.Reducer do
     |> State.maybe_update_gutter_width()
   end
 
-  # Count how many display lines a single source line will wrap into
-  defp count_wrapped_lines(state, line, max_width) do
-    line_width = State.string_width(state, line)
-
-    if line_width <= max_width do
-      1
-    else
-      # Word wrap: split by words and count lines
-      words = String.split(line, " ")
-      {line_count, _current_width} = Enum.reduce(words, {1, 0}, fn word, {lines, current_w} ->
-        word_width = State.string_width(state, word)
-        space_width = State.string_width(state, " ")
-
-        test_width = if current_w == 0, do: word_width, else: current_w + space_width + word_width
-
-        if test_width <= max_width do
-          {lines, test_width}
-        else
-          # Word doesn't fit, start new line
-          {lines + 1, word_width}
-        end
-      end)
-      line_count
-    end
-  end
 end

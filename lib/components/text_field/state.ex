@@ -8,6 +8,8 @@ defmodule ScenicWidgets.TextField.State do
 
   use Widgex.Scrollable
 
+  alias ScenicWidgets.TextField.DisplayLines
+
   defstruct [
     # Core
     :frame,                    # Widgex.Frame for positioning/sizing
@@ -92,7 +94,15 @@ defmodule ScenicWidgets.TextField.State do
     # Undo/Redo state
     :undo_stack,               # List of {lines, cursor} snapshots (most recent first)
     :redo_stack,               # List of {lines, cursor} snapshots (most recent first)
-    :undo_max_size             # Maximum undo stack size (default 100)
+    :undo_max_size,            # Maximum undo stack size (default 100)
+
+    # Vertical-movement goal column: the target visual x (pixels) that Up/Down
+    # try to preserve across rows. `goal_cursor` is the cursor position the goal
+    # belongs to; a vertical move reuses `goal_x` only while the cursor still
+    # equals `goal_cursor`, so any other action (edit, horizontal move, click)
+    # that moves the cursor implicitly invalidates the goal and it reseeds.
+    :goal_x,
+    :goal_cursor
   ]
 
   @type t :: %__MODULE__{}
@@ -591,7 +601,7 @@ defmodule ScenicWidgets.TextField.State do
   Accounts for scroll offset, gutter, and text padding.
   Returns {line, col} tuple (1-indexed).
   """
-  def click_to_cursor(%__MODULE__{scroll: scroll, lines: lines} = state, {click_x, click_y}) do
+  def click_to_cursor(%__MODULE__{scroll: scroll} = state, {click_x, click_y}) do
     line_height = line_height(state)
     text_padding = 10  # Same as in renderer
     gutter_width = if state.show_line_numbers, do: state.line_number_width, else: 0
@@ -600,40 +610,15 @@ defmodule ScenicWidgets.TextField.State do
     content_x = click_x - gutter_width - text_padding + scroll.offset_x
     content_y = click_y + scroll.offset_y
 
-    # Calculate line number from Y coordinate
-    line = max(1, min(length(lines), div(trunc(content_y), line_height) + 1))
+    # The Y coordinate selects a DISPLAY row (visual, post-wrap), not a source
+    # line — the two diverge once anything wraps. Map through DisplayLines so the
+    # click lands on the correct source line/column.
+    dl = display_lines(state)
+    row_count = max(1, DisplayLines.row_count(dl))
+    display_row = max(1, min(row_count, div(trunc(content_y), line_height) + 1))
+    display_col = DisplayLines.col_at_x(dl, display_row, content_x)
 
-    # Get the text of the clicked line
-    line_text = Enum.at(lines, line - 1, "")
-
-    # Calculate column from X coordinate using FontMetrics
-    col = x_to_column(state, line_text, content_x)
-
-    {line, col}
-  end
-
-  # Convert an X coordinate to a column position within a line of text
-  # Uses binary search-like approach for efficiency with FontMetrics
-  defp x_to_column(state, line_text, x) when x <= 0, do: 1
-  defp x_to_column(state, "", _x), do: 1
-  defp x_to_column(state, line_text, x) do
-    # Walk through characters and find where the click falls
-    chars = String.graphemes(line_text)
-    find_column(state, chars, x, 0, 1)
-  end
-
-  defp find_column(_state, [], _x, _current_x, col), do: col
-  defp find_column(state, [char | rest], x, current_x, col) do
-    char_w = string_width(state, char)
-    next_x = current_x + char_w
-
-    # Click is within this character - check if closer to left or right edge
-    if x < next_x do
-      mid = current_x + char_w / 2
-      if x < mid, do: col, else: col + 1
-    else
-      find_column(state, rest, x, next_x, col + 1)
-    end
+    DisplayLines.display_to_source(dl, {display_row, display_col})
   end
 
   @doc """
@@ -867,26 +852,47 @@ defmodule ScenicWidgets.TextField.State do
   end
 
   @doc """
+  Text content width used for wrapping (viewport minus gutter, padding, and
+  scrollbar). Single source of truth so navigation and rendering wrap at the same
+  boundary. `scroll.viewport_width` already excludes the gutter; the 40 covers
+  text padding + scrollbar + buffer (matches the renderer's original constant).
+  """
+  def text_content_width(%__MODULE__{scroll: scroll}), do: scroll.viewport_width - 40
+
+  @doc """
+  Build the `DisplayLines` model for the current state, computed on demand.
+
+  Injects `string_width/2` as the measure function so wrapping accounts for tab
+  expansion and font metrics.
+  """
+  def display_lines(%__MODULE__{lines: lines, wrap_mode: wrap_mode} = state) do
+    DisplayLines.compute(lines, &string_width(state, &1), text_content_width(state), wrap_mode)
+  end
+
+  @doc """
   Ensure the cursor is visible within the viewport.
   Automatically adjusts scroll offsets if the cursor is outside the visible area.
   Returns updated state with adjusted scroll offsets.
+
+  Works in display-line coordinates: vertical scroll follows the cursor's visual
+  row (so content below a wrapped line is positioned correctly), and in wrap
+  modes there is no horizontal scroll — every display row already fits the width.
   """
   def ensure_cursor_visible(%__MODULE__{
-    cursor: {line, col},
+    cursor: cursor,
     frame: frame,
-    scroll: scroll
+    scroll: scroll,
+    wrap_mode: wrap_mode
   } = state) do
     line_height = line_height(state)
     viewport_height = frame.size.height
     viewport_width = frame.size.width
 
-    # Calculate cursor pixel position
-    cursor_y = (line - 1) * line_height
+    dl = display_lines(state)
+    {display_row, display_col} = DisplayLines.source_to_display(dl, cursor)
 
-    # Get text before cursor for horizontal position
-    current_line = get_line(state, line)
-    text_before_cursor = String.slice(current_line, 0, col - 1)
-    cursor_x = string_width(state, text_before_cursor)
+    # Cursor pixel position in display coordinates
+    cursor_y = (display_row - 1) * line_height
 
     # Use the scroll struct's offsets (these are positive values representing content offset)
     scroll_y = scroll.offset_y
@@ -908,21 +914,24 @@ defmodule ScenicWidgets.TextField.State do
         scroll_y
     end
 
-    # Check horizontal scrolling
-    text_offset = text_x_offset(state)
-    new_scroll_x = cond do
-      # Cursor is left of viewport - scroll left
-      cursor_x < scroll_x ->
-        cursor_x
+    # Check horizontal scrolling. In wrap modes every display row fits the
+    # viewport, so there is no horizontal scroll — pin the offset to 0. Only
+    # :none (no wrapping) follows the cursor horizontally.
+    new_scroll_x =
+      case wrap_mode do
+        mode when mode in [:word, :char] ->
+          0
 
-      # Cursor is right of viewport - scroll right
-      cursor_x + text_offset > scroll_x + viewport_width - 10 ->
-        cursor_x + text_offset - viewport_width + 10
+        _ ->
+          cursor_x = DisplayLines.x_of(dl, {display_row, display_col})
+          text_offset = text_x_offset(state)
 
-      # Cursor is visible horizontally
-      true ->
-        scroll_x
-    end
+          cond do
+            cursor_x < scroll_x -> cursor_x
+            cursor_x + text_offset > scroll_x + viewport_width - 10 -> cursor_x + text_offset - viewport_width + 10
+            true -> scroll_x
+          end
+      end
 
     # Update both the scroll struct AND legacy fields for backward compatibility
     updated_scroll = %{scroll | offset_x: new_scroll_x, offset_y: new_scroll_y}

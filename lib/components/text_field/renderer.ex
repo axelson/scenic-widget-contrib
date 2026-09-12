@@ -31,6 +31,7 @@ defmodule ScenicWidgets.TextField.Renderer do
   alias Scenic.Graph
   alias Scenic.Primitives
   alias ScenicWidgets.TextField.State
+  alias ScenicWidgets.TextField.DisplayLines
 
   @doc """
   Initial render of the TextField component.
@@ -406,31 +407,34 @@ defmodule ScenicWidgets.TextField.Renderer do
     render_selection(graph, %{state | selection: {start_pos, end_pos}})
   end
 
-  defp render_selection_rectangles(graph, state, {sel_start_line, sel_start_col}, {sel_end_line, sel_end_col}) do
+  # Draw the selection in DISPLAY coordinates: a selection that spans a wrapped
+  # source line covers several visual rows, so we map the source endpoints to
+  # display rows and draw one rectangle per row (partial on the first/last,
+  # full-width in between).
+  defp render_selection_rectangles(graph, state, sel_start, sel_end) do
     x_offset = 10
     line_height = State.line_height(state)
-    display_lines = wrap_lines(state)
+    dl = State.display_lines(state)
     # Selection highlight - steel blue with good visibility on dark backgrounds
     selection_color = {:color_rgba, {70, 130, 180, 180}}
 
-    Enum.reduce(sel_start_line..sel_end_line, graph, fn line_num, acc_graph ->
-      y_position = (line_num - 1) * line_height
-      line_text = Enum.at(display_lines, line_num - 1, "")
+    {start_row, start_col} = DisplayLines.source_to_display(dl, sel_start)
+    {end_row, end_col} = DisplayLines.source_to_display(dl, sel_end)
 
-      {start_col_on_line, end_col_on_line} =
+    Enum.reduce(start_row..end_row, graph, fn row, acc_graph ->
+      y_position = (row - 1) * line_height
+      row_text = DisplayLines.row_text(dl, row)
+
+      {start_col_on_row, end_col_on_row} =
         cond do
-          line_num == sel_start_line and line_num == sel_end_line ->
-            {sel_start_col, sel_end_col}
-          line_num == sel_start_line ->
-            {sel_start_col, String.length(line_text) + 1}
-          line_num == sel_end_line ->
-            {1, sel_end_col}
-          true ->
-            {1, String.length(line_text) + 1}
+          row == start_row and row == end_row -> {start_col, end_col}
+          row == start_row -> {start_col, String.length(row_text) + 1}
+          row == end_row -> {1, end_col}
+          true -> {1, String.length(row_text) + 1}
         end
 
-      text_before_selection = String.slice(line_text, 0, start_col_on_line - 1)
-      selected_text = String.slice(line_text, start_col_on_line - 1, max(0, end_col_on_line - start_col_on_line))
+      text_before_selection = String.slice(row_text, 0, start_col_on_row - 1)
+      selected_text = String.slice(row_text, start_col_on_row - 1, max(0, end_col_on_row - start_col_on_row))
 
       start_x_offset = State.string_width(state, text_before_selection)
       selection_width = max(1, State.string_width(state, selected_text))
@@ -440,7 +444,7 @@ defmodule ScenicWidgets.TextField.Renderer do
         {selection_width, line_height},
         fill: selection_color,
         translate: {x_offset + start_x_offset, y_position},
-        id: {:selection_highlight, line_num}
+        id: {:selection_highlight, row}
       )
     end)
   end
@@ -1064,33 +1068,22 @@ defmodule ScenicWidgets.TextField.Renderer do
 
   # ===== LINE WRAPPING HELPERS =====
 
-  defp wrap_lines(%State{lines: lines, wrap_mode: wrap_mode} = state) do
-    max_width = content_area_width(state)
-
-    case wrap_mode do
-      :word -> Enum.flat_map(lines, &wrap_line(&1, max_width, state))
-      :char -> Enum.flat_map(lines, &wrap_line_by_chars(&1, max_width, state))
-      :none -> lines
-    end
+  defp wrap_lines(%State{} = state) do
+    State.display_lines(state).rows
   end
 
-  defp wrap_lines_from(lines, %State{wrap_mode: wrap_mode} = state) do
-    max_width = content_area_width(state)
-
-    case wrap_mode do
-      :word -> Enum.flat_map(lines, &wrap_line(&1, max_width, state))
-      :char -> Enum.flat_map(lines, &wrap_line_by_chars(&1, max_width, state))
-      :none -> lines
-    end
+  defp wrap_lines_from(lines, %State{} = state) do
+    DisplayLines.compute(
+      lines,
+      &State.string_width(state, &1),
+      content_area_width(state),
+      state.wrap_mode
+    ).rows
   end
 
-  # Calculate the available width for text content
-  # Note: scroll.viewport_width already excludes gutter (set from content_frame in State.new)
-  # Subtract 40 for: text padding (20) + scrollbar (12) + buffer (8)
-  # This must match the calculation in State.new and Reducer for consistent wrapping
-  defp content_area_width(%State{scroll: scroll}) do
-    scroll.viewport_width - 40
-  end
+  # Text content width for wrapping. Single source of truth in State so the
+  # renderer, cursor, and scroll logic all wrap at the same boundary.
+  defp content_area_width(%State{} = state), do: State.text_content_width(state)
 
   # Build mapping from display line number to {source_line_number, is_first_of_source}
   # Returns one entry per DISPLAY line, tracking which source line it came from
@@ -1144,153 +1137,19 @@ defmodule ScenicWidgets.TextField.Renderer do
     end
   end
 
-  # Convert source cursor position to display cursor position
-  # When lines wrap, we need to find which display line the cursor is on
-  # and what column within that display line
-  defp source_to_display_cursor(%State{wrap_mode: :none}, {source_line, source_col}) do
-    # No wrapping - simple 1:1 mapping
-    {source_line, source_col}
+  # Convert source cursor position to display cursor position, via the shared
+  # DisplayLines model so drawing and navigation agree on where wraps fall.
+  defp source_to_display_cursor(%State{} = state, source_cursor) do
+    DisplayLines.source_to_display(State.display_lines(state), source_cursor)
   end
 
-  defp source_to_display_cursor(%State{lines: lines} = state, {source_line, source_col}) do
-    max_width = content_area_width(state)
-
-    # Count how many display lines exist before the source line containing the cursor
-    display_lines_before = Enum.take(lines, source_line - 1)
-                           |> Enum.map(fn line -> wrap_line(line, max_width, state) end)
-                           |> Enum.map(&length/1)
-                           |> Enum.sum()
-
-    # Get the source line containing the cursor and wrap it
-    source_line_text = Enum.at(lines, source_line - 1, "")
-    wrapped_lines = wrap_line(source_line_text, max_width, state)
-
-    # Find which wrapped segment contains the cursor
-    {display_line_offset, display_col} = find_cursor_in_wrapped_lines(wrapped_lines, source_col)
-
-    display_line = display_lines_before + display_line_offset
-    {display_line, display_col}
-  end
-
-  # Find which wrapped line segment contains the cursor and what column within it
-  # Note: Word wrap consumes spaces at wrap boundaries, so we need to track that
-  defp find_cursor_in_wrapped_lines(wrapped_lines, source_col) do
-    # Walk through wrapped lines, tracking cumulative SOURCE character position
-    # When word wrapping, a space is consumed between wrapped lines
-    find_cursor_in_wrapped_lines(wrapped_lines, source_col, 1, 0, false)
-  end
-
-  defp find_cursor_in_wrapped_lines([], source_col, line_num, chars_consumed, _) do
-    # Cursor is past all content - place at end of last line
-    {max(1, line_num - 1), max(1, source_col - chars_consumed)}
-  end
-
-  defp find_cursor_in_wrapped_lines([line | rest], source_col, line_num, chars_consumed, had_previous_line) do
-    line_length = String.length(line)
-
-    # Account for the space that was consumed at wrap boundary
-    # (when transitioning from a previous line to this one via word wrap)
-    space_adjustment = if had_previous_line, do: 1, else: 0
-
-    # Total source characters consumed after this wrapped line
-    source_chars_after = chars_consumed + space_adjustment + line_length
-
-    # Source position where this display line starts
-    source_start = chars_consumed + space_adjustment
-
-    cond do
-      # Cursor is within this line
-      source_col >= source_start + 1 and source_col <= source_chars_after + 1 ->
-        display_col = source_col - source_start
-        {line_num, display_col}
-
-      # Cursor is after this line - continue to next
-      source_col > source_chars_after ->
-        find_cursor_in_wrapped_lines(rest, source_col, line_num + 1, source_chars_after, true)
-
-      # Cursor is before this line (shouldn't happen normally)
-      true ->
-        {line_num, 1}
-    end
-  end
-
-  # Word-based line wrapping using FontMetrics when available
+  # Wrap one source line into its display segments, routed through DisplayLines
+  # so there is a single wrapping implementation. Returns the list of row strings.
   defp wrap_line(line, max_width, %State{} = state) do
-    line_width = State.string_width(state, line)
-
-    if line_width <= max_width do
-      [line]
-    else
-      wrap_line_by_words(line, max_width, state)
-    end
+    DisplayLines.compute([line], &State.string_width(state, &1), max_width, :word).rows
   end
 
-  defp wrap_line_by_words(line, max_width, %State{} = state) do
-    words = String.split(line, " ")
-
-    words
-    |> Enum.reduce({[], ""}, fn word, {wrapped_lines, current_line} ->
-      test_line = if current_line == "", do: word, else: current_line <> " " <> word
-      test_width = State.string_width(state, test_line)
-
-      if test_width <= max_width do
-        {wrapped_lines, test_line}
-      else
-        if current_line == "" do
-          # Word is too long, must include it anyway (could split further if needed)
-          {wrapped_lines ++ [word], ""}
-        else
-          {wrapped_lines ++ [current_line], word}
-        end
-      end
-    end)
-    |> then(fn {wrapped_lines, current_line} ->
-      if current_line == "", do: wrapped_lines, else: wrapped_lines ++ [current_line]
-    end)
-  end
-
-  # Character-based line wrapping using FontMetrics when available
   defp wrap_line_by_chars(line, max_width, %State{} = state) do
-    line_width = State.string_width(state, line)
-
-    if line_width <= max_width do
-      [line]
-    else
-      # Use character width to estimate chunk size, then verify with actual measurement
-      char_width = State.char_width(state)
-      estimated_chars = max(1, trunc(max_width / char_width))
-
-      wrap_line_by_chars_measured(line, max_width, estimated_chars, state)
-    end
-  end
-
-  # Wrap line by characters, using actual string width measurement
-  defp wrap_line_by_chars_measured(line, max_width, estimated_chars, state) do
-    graphemes = String.graphemes(line)
-
-    if length(graphemes) <= estimated_chars do
-      [line]
-    else
-      # Build chunks that actually fit within max_width
-      {chunks, current_chunk} = Enum.reduce(graphemes, {[], ""}, fn char, {chunks, current} ->
-        test = current <> char
-        if State.string_width(state, test) <= max_width do
-          {chunks, test}
-        else
-          if current == "" do
-            # Single char exceeds width, include it anyway
-            {chunks ++ [char], ""}
-          else
-            {chunks ++ [current], char}
-          end
-        end
-      end)
-
-      if current_chunk == "" do
-        chunks
-      else
-        chunks ++ [current_chunk]
-      end
-    end
+    DisplayLines.compute([line], &State.string_width(state, &1), max_width, :char).rows
   end
 end
