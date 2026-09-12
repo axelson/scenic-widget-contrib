@@ -1223,12 +1223,10 @@ defmodule ScenicWidgets.TextField.Reducer do
     dl = State.display_lines(state)
     {row, col} = DisplayLines.source_to_display(dl, state.cursor)
 
-    goal_x =
-      if state.goal_x != nil and state.goal_cursor == state.cursor do
-        state.goal_x
-      else
-        DisplayLines.x_of(dl, {row, col})
-      end
+    # Reuse the sticky goal x across consecutive vertical moves. `ensure_cursor_visible`
+    # nils `goal_x` after any other cursor operation, so a non-nil value here always
+    # means the previous action was also a vertical move.
+    goal_x = state.goal_x || DisplayLines.x_of(dl, {row, col})
 
     target_row = if direction == :up, do: row - 1, else: row + 1
 
@@ -1249,8 +1247,9 @@ defmodule ScenicWidgets.TextField.Reducer do
           %{state | cursor: DisplayLines.display_to_source(dl, {target_row, target_col})}
       end
 
-    new_state = %{new_state | goal_x: goal_x, goal_cursor: new_state.cursor}
-    State.ensure_cursor_visible(new_state)
+    # ensure_cursor_visible clears goal_x; re-establish it so the next vertical move
+    # keeps the same target column.
+    %{State.ensure_cursor_visible(new_state) | goal_x: goal_x}
   end
 
   defp move_cursor(%State{cursor: {line, _col}} = state, :line_start) do

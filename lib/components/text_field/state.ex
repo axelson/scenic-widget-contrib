@@ -97,12 +97,11 @@ defmodule ScenicWidgets.TextField.State do
     :undo_max_size,            # Maximum undo stack size (default 100)
 
     # Vertical-movement goal column: the target visual x (pixels) that Up/Down
-    # try to preserve across rows. `goal_cursor` is the cursor position the goal
-    # belongs to; a vertical move reuses `goal_x` only while the cursor still
-    # equals `goal_cursor`, so any other action (edit, horizontal move, click)
-    # that moves the cursor implicitly invalidates the goal and it reseeds.
-    :goal_x,
-    :goal_cursor
+    # preserve across rows. `ensure_cursor_visible/1` clears it on every cursor
+    # operation, and the vertical-move clause re-establishes it immediately after;
+    # so it is non-nil only across consecutive Up/Downs, and any other action
+    # (edit, horizontal move, click, even a no-op Home) resets the sticky column.
+    :goal_x
   ]
 
   @type t :: %__MODULE__{}
@@ -936,10 +935,15 @@ defmodule ScenicWidgets.TextField.State do
     # Update both the scroll struct AND legacy fields for backward compatibility
     updated_scroll = %{scroll | offset_x: new_scroll_x, offset_y: new_scroll_y}
 
+    # Clear the vertical-movement goal column. This runs after every cursor
+    # operation, so any edit/click/horizontal move resets the sticky column; the
+    # vertical-move clause re-sets `goal_x` right after calling this, keeping it
+    # alive only across consecutive Up/Downs.
     %{state |
       scroll: updated_scroll,
       vertical_scroll_offset: -new_scroll_y,
-      horizontal_scroll_offset: -new_scroll_x
+      horizontal_scroll_offset: -new_scroll_x,
+      goal_x: nil
     }
   end
 
