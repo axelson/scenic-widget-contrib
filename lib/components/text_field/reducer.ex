@@ -1220,7 +1220,8 @@ defmodule ScenicWidgets.TextField.Reducer do
       new_col = min(col, String.length(prev_line) + 1)
       %{state | cursor: {line - 1, new_col}}
     else
-      state
+      # Already on the first line: jump to the start of the line (macOS behavior).
+      %{state | cursor: {line, 1}}
     end
 
     State.ensure_cursor_visible(new_state)
@@ -1232,7 +1233,9 @@ defmodule ScenicWidgets.TextField.Reducer do
       new_col = min(col, String.length(next_line) + 1)
       %{state | cursor: {line + 1, new_col}}
     else
-      state
+      # Already on the last line: jump to the end of the line (macOS behavior).
+      current_line = Enum.at(lines, line - 1, "")
+      %{state | cursor: {line, String.length(current_line) + 1}}
     end
 
     State.ensure_cursor_visible(new_state)
